@@ -1,5 +1,5 @@
 # Runs when the module's Action button is pressed in the Magisk app (Magisk 28+):
-# makes the phone match the profile now, and shows what it did.
+# builds the phone config and applies it, like the app's Build button.
 MODDIR=${0%/*}
 
-sh "$MODDIR/apply.sh" action
+sh "$MODDIR/build.sh" action

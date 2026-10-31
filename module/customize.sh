@@ -1,8 +1,20 @@
-# Runs once while Magisk installs the module (sourced by Magisk's installer):
-# makes the profile packed in the module the one the phone follows.
-[ "$API" -ge 29 ] || abort "! Needs Android 10 or newer (this phone has API $API)."
+# Runs once while Magisk installs the module (sourced by Magisk's installer): makes
+# Nix runnable, installs the app, and starts the phone off with the default config.
+[ "$API" -ge 30 ] || abort "! Needs Android 11 or newer (this phone has API $API)."
+[ "$ARCH" = arm64 ] || abort "! Needs a 64-bit ARM phone (this one is $ARCH): Nix is built for it."
 
-ui_print "- Profile: $(cat "$MODPATH/profile.json")"
-mkdir -p /data/adb/andronix
-cp -f "$MODPATH/profile.json" /data/adb/andronix/profile.json
-ui_print "- Applied at every boot, and by the module's Action button."
+set_perm "$MODPATH/bin/nix" 0 0 0755
+ln -sf nix "$MODPATH/bin/nix-instantiate"
+
+# Streamed in, so the installer does not need to read the module's folder.
+ui_print "- Installing the app"
+pm install -r -S "$(stat -c %s "$MODPATH/app.apk")" < "$MODPATH/app.apk" > /dev/null \
+  || ui_print "! The app did not install: install app.apk from the module's folder by hand."
+
+# A config built on the phone stays; only the first time does the default one go in.
+MODDIR=$MODPATH
+BY=install
+. "$MODPATH/common.sh"
+[ -f "$PROFILE" ] || cp -f "$MODPATH/profile.json" "$PROFILE"
+seed_config || ui_print "! Could not create $CONFIG: the app's Build button makes it."
+ui_print "- Config: $CONFIG (open it with the app; Build applies it)"

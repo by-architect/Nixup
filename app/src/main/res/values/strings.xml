@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Andronix</string>
+    <string name="config_path">Config: /sdcard/Andronix/phone.nix</string>
+    <string name="build">Build</string>
+    <string name="open_folder">Open config folder</string>
+    <string name="open_folder_with">Open the config folder with</string>
+    <string name="building">Building…</string>
+    <string name="done">✔ Done</string>
+    <string name="failed">✘ Failed (exit %1$d)</string>
+    <string name="no_root">✘ No root: the phone has no su (is Magisk installed?)</string>
+    <string name="no_folder_app">No app here opens folders: install a file manager.</string>
+</resources>

@@ -1,33 +1,14 @@
 # Makes the phone match the profile (/data/adb/andronix/profile.json): reads each
-# setting, changes only what differs, reads it back, and logs what it did.
-# Runs as root; the first argument says who started it (boot, action, adb).
+# setting, changes only what differs, reads it back, and logs what it did. An
+# option that left the config gets its value from before the module back.
+# Runs as root; the first argument says who started it (boot, action, app, adb).
 MODDIR=${0%/*}
-DATA=/data/adb/andronix
-PROFILE=$DATA/profile.json
-LOG=$DATA/apply.log
 BY=${1:-manual}
+. "$MODDIR/common.sh"
+. "$MODDIR/restore.sh"
 
-mkdir -p "$DATA"
-# The profile the module was built with, until another one is put in its place.
+# The profile the module was built with, until one is built on the phone.
 [ -f "$PROFILE" ] || cp "$MODDIR/profile.json" "$PROFILE"
-# Keep the log small: past 64 KB the old one is set aside.
-[ -f "$LOG" ] && [ "$(stat -c %s "$LOG")" -gt 65536 ] && mv -f "$LOG" "$LOG.old"
-
-log() {
-  echo "$*"
-  echo "$(date '+%F %T') [$BY] $*" >> "$LOG"
-}
-
-# Shown under the module's name in the Magisk app.
-set_status() {
-  sed -i "s|^description=.*|description=$1|" "$MODDIR/module.prop"
-}
-
-fail() {
-  log "FAILED: $*"
-  set_status "✘ $* (log: $LOG)"
-  exit 1
-}
 
 # The profile is compact JSON from nix-instantiate, so a value can be picked out
 # by its key until the module has a real JSON reader.
@@ -37,20 +18,26 @@ dark=$(grep -o '"darkMode":[a-z]*' "$PROFILE" | cut -d: -f2)
 case "$dark" in
   true) want=yes ;;
   false) want=no ;;
-  null | "")
-    log "Dark mode: not managed"
-    set_status "Dark mode: not managed ($(date '+%F %H:%M'), $BY)"
-    exit 0 ;;
+  null | "") want= ;;
   *) fail "darkMode is '$dark', not true, false or null" ;;
 esac
 
-night() { cmd uimode night | sed -n 's/^Night mode: //p'; }
+night() { cmd uimode night < /dev/null | sed -n 's/^Night mode: //p'; }
+
+if [ -z "$want" ]; then
+  # Not in the config (any more): back to what it was before the module.
+  restore_dark_mode | while read -r line; do log "$line"; done
+  log "Dark mode: not managed"
+  set_status "Dark mode: not managed ($(date '+%F %H:%M'), $BY)"
+  exit 0
+fi
 
 now=$(night)
+remember darkMode "$now"
 if [ "$now" = "$want" ]; then
   log "Dark mode: $want (already)"
 else
-  cmd uimode night "$want" > /dev/null
+  cmd uimode night "$want" < /dev/null > /dev/null
   [ "$(night)" = "$want" ] || fail "dark mode stayed '$(night)', wanted '$want'"
   log "Dark mode: $now -> $want"
 fi

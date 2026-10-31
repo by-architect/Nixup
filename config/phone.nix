@@ -1,6 +1,16 @@
-# The phone's settings. scripts/build-magisk-debug.sh turns this file into the
-# profile the Magisk module applies; the options are listed in nix/options.nix.
-{ ... }:
+# This phone's config. Edit it, then press Build in the Andronix app (or the
+# module's Action button in Magisk): Nix on the phone checks it and applies it.
+#
+# Options:
+#   android.darkMode         true (on), false (off), or null (left as you set it)
+#   android.packages.fdroid  apps from F-Droid, by package name:
+#                              with pkgs.fdroid; [ org.example.app ]
+#                            a name with a Nix keyword in it (in, if, ...) goes in quotes:
+#                              [ "in.example.app" ]
+{ pkgs, ... }:
 {
-  android.darkMode = true;
+  android.darkMode = false;
+
+  android.packages.fdroid = with pkgs.fdroid; [
+  ];
 }
