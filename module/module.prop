@@ -1,0 +1,6 @@
+id=andronix
+name=Andronix
+version=0.1.0
+versionCode=1
+author=neo
+description=Makes the phone match its Nix config. Step 1: dark mode.
