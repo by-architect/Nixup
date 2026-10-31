@@ -13,7 +13,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * as soon as it is downloaded and checked while the next one downloads.
  *
  * The apps it installed (not the ones that were on the phone before) are listed in fdroid/owned: those it removes
- * again, keeping their data, when they leave the config or the module is removed (restore.sh).
+ * again, keeping their data, when they leave the config or the module is removed (restore). The settings of apps
+ * (android.apps) are applied after the apps are installed: see AppSettings.
  */
 class Apply(private val repo: FDroid, private val data: File) {
     private val ownedFile = File(data, "fdroid/owned")
@@ -39,8 +40,9 @@ class Apply(private val repo: FDroid, private val data: File) {
     }
 
     private fun apply(profile: File, dryRun: Boolean): Int {
-        val wanted = JSONObject(profile.readText()).getJSONObject("android")
-            .optJSONObject("packages")?.optJSONArray("fdroid")?.strings() ?: emptyList()
+        val android = JSONObject(profile.readText()).getJSONObject("android")
+        val wanted = android.optJSONObject("packages")?.optJSONArray("fdroid")?.strings() ?: emptyList()
+        val apps = android.optJSONObject("apps") ?: JSONObject()
         // The ones removed by hand since the last build are no longer the module's.
         val owned = readOwned().filter { Device.versionCode(it) != null }
 
@@ -81,12 +83,14 @@ class Apply(private val repo: FDroid, private val data: File) {
             removals.forEach { Out.line("  $it") }
         }
         if (upToDate.isNotEmpty()) Out.line("Up to date (${upToDate.size}): ${upToDate.joinToString(", ")}")
+        val settings = AppSettings(data)
+        settings.plan(apps, toInstall.map { it.app.id }.toSet(), removals.toSet(), problems)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
             return 2
         }
-        if (steps.isEmpty() && removals.isEmpty()) {
+        if (steps.isEmpty() && removals.isEmpty() && !settings.changes) {
             Out.line("Apps: nothing to change")
             if (!dryRun) writeResolved(wanted)
             return 0
@@ -107,6 +111,7 @@ class Apply(private val repo: FDroid, private val data: File) {
 
         val status = fetchAndInstall(steps)
         if (status != 0) return status
+        val failed = settings.apply(apps, removals.toSet())
         for (id in removals) {
             if (Device.uninstallKeepingData(id)) {
                 writeOwned(readOwned() - id)
@@ -116,8 +121,23 @@ class Apply(private val repo: FDroid, private val data: File) {
                 return 1
             }
         }
+        settings.forgetRemoved(removals)
         writeResolved(wanted)
+        if (failed > 0) {
+            Out.line("$failed app settings did not take (see above); building again tries them again.")
+            return 1
+        }
         return 0
+    }
+
+    /** Gives back every app setting the module changed and removes the apps it installed, keeping their data: the module is being removed. */
+    fun restore(): Int {
+        val failed = AppSettings(data).restoreAll()
+        for (id in readOwned()) {
+            if (Device.uninstallKeepingData(id)) Out.line("✔ Removed $id (its data is kept)") else Out.line("✘ Could not remove $id")
+        }
+        ownedFile.delete()
+        return if (failed > 0) 1 else 0
     }
 
     private sealed class Choice {

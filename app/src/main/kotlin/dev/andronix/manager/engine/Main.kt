@@ -8,7 +8,8 @@ import kotlin.system.exitProcess
  *   CLASSPATH=app.apk app_process /system/bin dev.andronix.manager.engine.Main <command>
  * Commands:
  *   index [--force]               brings the F-Droid index up to date (once a day, or now with --force)
- *   apply <profile> [--dry-run]   makes the F-Droid apps match the profile (with --dry-run: only plans and checks)
+ *   apply <profile> [--dry-run]   makes the apps and their settings match the profile (with --dry-run: only plans and checks)
+ *   restore                       gives back every app setting the module changed and removes the apps it installed
  * Exit status: 0 done, 2 stopped before changing anything, 1 stopped partway.
  */
 object Main {
@@ -21,6 +22,7 @@ object Main {
             when (args.firstOrNull()) {
                 "index" -> repo.refresh(force = "--force" in args)
                 "apply" -> Apply(repo, data).run(File(args.getOrNull(1) ?: usage()), dryRun = "--dry-run" in args)
+                "restore" -> Apply(repo, data).restore()
                 else -> usage()
             }
         } catch (e: Stop) {
@@ -38,5 +40,5 @@ object Main {
         exitProcess(status)
     }
 
-    private fun usage(): Nothing = throw Stop("usage: index [--force] | apply <profile.json> [--dry-run]")
+    private fun usage(): Nothing = throw Stop("usage: index [--force] | apply <profile.json> [--dry-run] | restore")
 }

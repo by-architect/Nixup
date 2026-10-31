@@ -14,6 +14,13 @@ let
   cfg = eval.config;
 
   failed = map (check: check.message) (lib.filter (check: !check.assertion) cfg.assertions);
+
+  # An app's settings without the ones left null (not managed); an app with none is left out.
+  managed = value:
+    if builtins.isAttrs value then
+      lib.filterAttrs (_: v: v != null && v != { } && v != [ ]) (lib.mapAttrs (_: managed) value)
+    else
+      value;
 in
 if failed != [ ] then
   throw "\nFailed assertions:\n${lib.concatMapStrings (message: "- ${message}\n") failed}"
@@ -24,5 +31,6 @@ else
     android = {
       inherit (cfg.android) darkMode;
       packages.fdroid = map (app: if builtins.isString app then app else app._id) cfg.android.packages.fdroid;
+      apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: managed) cfg.android.apps);
     };
   }

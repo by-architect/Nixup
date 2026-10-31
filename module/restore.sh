@@ -28,6 +28,10 @@ restore_apps() {
 if [ "${0##*/}" = andronix-restore.sh ]; then
   until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
   restore_dark_mode
+  # The engine gives back every app setting and removes the apps it installed;
+  # restore_apps is there for a module from before the engine.
+  engine=/data/adb/andronix/engine.apk
+  [ -f "$engine" ] && CLASSPATH="$engine" /system/bin/app_process /system/bin dev.andronix.manager.engine.Main restore < /dev/null
   restore_apps
   pm uninstall dev.andronix.manager < /dev/null > /dev/null 2>&1
   rm -rf /data/adb/andronix
