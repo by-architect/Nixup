@@ -101,7 +101,7 @@ object Device {
 
     class Permission(val granted: Boolean, val userSet: Boolean, val userFixed: Boolean)
 
-    /** What dumpsys knows of an installed app: the permissions it asks for, and for the main user its runtime permissions, enabled state and whether it is suspended. */
+    /** What dumpsys knows of an installed app: the permissions it asks for, and for the main user its runtime permissions, enabled state and whether it is suspended. Null when it is not installed for the main user. */
     class Dump(val requested: Set<String>, val runtime: Map<String, Permission>, val enabled: Int, val suspended: Boolean)
 
     private val permissionLine = Regex("""([\w.]+): granted=(true|false)(?:, flags=\[ ?(.*?) ?])?.*""")
@@ -113,6 +113,7 @@ object Device {
         val runtime = HashMap<String, Permission>()
         var enabled = 0
         var suspended = false
+        var installed = false
         var user = -1
         var section: String? = null
         var sectionIndent = 0
@@ -139,6 +140,7 @@ object Device {
                     text.startsWith("User ") -> {
                         user = text.removePrefix("User ").substringBefore(':').toIntOrNull() ?: -1
                         if (user == 0) {
+                            installed = Regex("""\binstalled=(true|false)""").find(text)?.groupValues?.get(1) == "true"
                             enabled = Regex("""\benabled=(\d+)""").find(text)?.groupValues?.get(1)?.toInt() ?: 0
                             suspended = Regex("""\bsuspended=(true|false)""").find(text)?.groupValues?.get(1) == "true"
                         }
@@ -146,7 +148,8 @@ object Device {
                 }
             }
         }
-        return Dump(requested, runtime, enabled, suspended)
+        // Uninstalled with its data kept, an app is still listed: not installed for the main user.
+        return if (installed) Dump(requested, runtime, enabled, suspended) else null
     }
 
     /** Grants or revokes a runtime permission, with the user-set and user-fixed flags of the state wanted. */
