@@ -12,5 +12,6 @@
   android.darkMode = false;
 
   android.packages.fdroid = with pkgs.fdroid; [
+  app.pagedrop
   ];
 }
