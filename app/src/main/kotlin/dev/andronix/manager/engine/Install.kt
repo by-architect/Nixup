@@ -8,17 +8,17 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Installing apps from F-Droid, for builds and updates alike: the space check, then the APKs downloaded one by one,
- * each installed as soon as it is downloaded and checked while the next one downloads, with notifications.
+ * Installing apps from F-Droid repositories, for builds and updates alike: the space check, then the APKs downloaded
+ * one by one, each installed as soon as it is downloaded and checked while the next one downloads, with notifications.
  *
- * The apps it installed (not the ones that were on the phone before) are listed in fdroid/owned: a build removes
- * them again, keeping their data, when they leave the config, and so does the module's removal (restore).
+ * The apps it installed (not the ones that were on the phone before), from any repository, are listed in owned: a
+ * build removes them again, keeping their data, when they leave the config, and so does the module's removal (restore).
  */
-class Installer(private val repo: FDroid, private val data: File) {
-    private val ownedFile = File(data, "fdroid/owned")
+class Installer(private val data: File) {
+    private val ownedFile = File(data, "owned")
     private val cache = File(data, "cache")
 
-    class Step(val app: FDroid.App, val version: FDroid.Version, val installed: Device.Installed?)
+    class Step(val repo: FDroid, val app: FDroid.App, val version: FDroid.Version, val installed: Device.Installed?)
 
     private sealed class Ready {
         class Apk(val number: Int, val step: Step, val file: File) : Ready()
@@ -62,7 +62,7 @@ class Installer(private val repo: FDroid, private val data: File) {
                     if (!file.isFile) {
                         Out.line("$label Downloading ${step.app.id} ${step.version.name} (${Out.size(step.version.size)})")
                         Notify.progress(title, "Downloading ${step.app.name} ${step.version.name} (${Out.size(step.version.size)})", i, total)
-                        Net.fetch(repo.address + step.version.file, file, step.version.size, step.version.sha256, Out.progress(label, step.version.size))
+                        Net.fetch(step.repo.address + step.version.file, file, step.version.size, step.version.sha256, Out.progress(label, step.version.size))
                     }
                     Out.line("$label ✔ Downloaded ${step.app.id}; its checksum matches the signed index")
                     ready.put(Ready.Apk(i + 1, step, file))
@@ -134,13 +134,13 @@ class Installer(private val repo: FDroid, private val data: File) {
     fun forgetOwned() = ownedFile.delete()
 
     /** The versions the config's apps are at now, for the generation the scripts keep. */
-    fun writeResolved(wanted: List<String>) {
+    fun writeResolved(wanted: Collection<String>) {
         val apps = JSONArray()
         for (id in wanted) {
             val installed = Device.installed(id) ?: continue
             apps.put(JSONObject().put("id", id).put("versionCode", installed.versionCode).put("versionName", installed.versionName))
         }
-        File(data, "fdroid/resolved.json").writeText(apps.toString())
+        File(data, "resolved.json").writeText(apps.toString())
     }
 
     private fun apps(n: Int) = if (n == 1) "1 app" else "$n apps"

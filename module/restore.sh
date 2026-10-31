@@ -17,7 +17,8 @@ restore_dark_mode() {
 # again; their data stays, so installing one again brings it back. pm gets no
 # input: it would hand the list file to Android, which may not read /data/adb.
 restore_apps() {
-  owned=/data/adb/andronix/fdroid/owned
+  owned=/data/adb/andronix/owned
+  [ -f "$owned" ] || owned=/data/adb/andronix/fdroid/owned
   [ -f "$owned" ] || return 0
   while read -r app; do
     [ -n "$app" ] && pm uninstall -k --user current "$app" < /dev/null > /dev/null 2>&1 && echo "Removed $app (its data is kept)"

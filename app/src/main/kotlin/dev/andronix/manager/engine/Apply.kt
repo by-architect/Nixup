@@ -5,53 +5,60 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Makes the apps on the phone match the profile's android.packages.fdroid, in nixos-rebuild's order: first the
- * plan and every check, and when one fails nothing changes; then the apps (see Installer), the settings of apps
- * (android.apps, see AppSettings), and the apps that left the config removed, their data kept.
+ * Makes the apps on the phone match the profile's android.packages (one list per repository), in nixos-rebuild's
+ * order: first the plan and every check, and when one fails nothing changes; then the apps (see Installer), the
+ * settings of apps (android.apps, see AppSettings), and the apps that left the config removed, their data kept.
  */
-class Apply(private val repo: FDroid, private val data: File) {
-    private val installer = Installer(repo, data)
+class Apply(private val repos: Map<String, FDroid>, private val data: File) {
+    private val installer = Installer(data)
 
     fun run(profile: File, dryRun: Boolean): Int = Installer.locked(data) { apply(profile, dryRun) }
 
     private fun apply(profile: File, dryRun: Boolean): Int {
         val android = JSONObject(profile.readText()).getJSONObject("android")
-        val wanted = android.optJSONObject("packages")?.optJSONArray("fdroid")?.strings() ?: emptyList()
+        val packages = android.optJSONObject("packages") ?: JSONObject()
         val apps = android.optJSONObject("apps") ?: JSONObject()
+        val wanted = packages.keys().asSequence().flatMap { repo -> packages.getJSONArray(repo).strings().map { it to repo } }.toList()
         // The ones removed by hand since the last build are no longer the module's.
         val owned = installer.readOwned().filter { Device.versionCode(it) != null }
 
         val steps = ArrayList<Installer.Step>()
         val upToDate = ArrayList<String>()
         val problems = ArrayList<String>()
-        for (id in wanted) {
+        for ((id, name) in wanted) {
+            val repo = repos[name]
+            if (repo == null) {
+                problems += "android.packages.$name: there is no repository named $name"
+                continue
+            }
             val app = repo.find(id)
             if (app == null) {
-                problems += "$id is not in F-Droid (its index from ${repo.date}; if the app is new there, build with an update of the index)"
+                problems += "$id is not in $name (its index from ${repo.date}; if the app is new there, build with an update of the index)"
                 continue
             }
             val installed = Device.installed(id)
             when (val choice = repo.suggested(app, installed)) {
                 is FDroid.Choice.Problem -> problems += choice.text
                 is FDroid.Choice.Pick -> when {
-                    installed == null -> steps += Installer.Step(app, choice.version, null)
-                    installed.versionCode < choice.version.code -> steps += Installer.Step(app, choice.version, installed)
+                    installed == null -> steps += Installer.Step(repo, app, choice.version, null)
+                    installed.versionCode < choice.version.code -> steps += Installer.Step(repo, app, choice.version, installed)
                     else -> upToDate += "$id ${installed.versionName}"
                 }
             }
         }
-        val removals = owned.filter { it !in wanted }
+        val ids = wanted.map { it.first }
+        val removals = owned.filter { it !in ids }
         val toInstall = steps.filter { it.installed == null }
         val toUpdate = steps.filter { it.installed != null }
 
-        Out.line("F-Droid apps in the config: ${wanted.size}")
+        Out.line("Apps in the config: ${wanted.size}" + if (repos.size > 1) " (from ${packages.keys().asSequence().joinToString(", ")})" else "")
         if (toInstall.isNotEmpty()) {
             Out.line("To install (${toInstall.size}, ${Out.size(toInstall.sumOf { it.version.size })} to download):")
-            toInstall.forEach { Out.line("  ${it.app.id}  ${it.version.name}  ${Out.size(it.version.size)}  (${it.app.name})") }
+            toInstall.forEach { Out.line("  ${it.app.id}  ${it.version.name}  ${Out.size(it.version.size)}  (${it.app.name}, from ${it.repo.name})") }
         }
         if (toUpdate.isNotEmpty()) {
             Out.line("To update (${toUpdate.size}, ${Out.size(toUpdate.sumOf { it.version.size })} to download):")
-            toUpdate.forEach { Out.line("  ${it.app.id}  ${it.installed!!.versionName} -> ${it.version.name}  ${Out.size(it.version.size)}") }
+            toUpdate.forEach { Out.line("  ${it.app.id}  ${it.installed!!.versionName} -> ${it.version.name}  ${Out.size(it.version.size)}  (from ${it.repo.name})") }
         }
         if (removals.isNotEmpty()) {
             Out.line("To remove (${removals.size}, they left the config; their data is kept):")
@@ -67,7 +74,7 @@ class Apply(private val repo: FDroid, private val data: File) {
         }
         if (steps.isEmpty() && removals.isEmpty() && !settings.changes) {
             Out.line("Apps: nothing to change")
-            if (!dryRun) finish(wanted)
+            if (!dryRun) finish(profile, ids)
             return 0
         }
         if (!installer.roomFor(steps)) return 2
@@ -86,7 +93,7 @@ class Apply(private val repo: FDroid, private val data: File) {
             }
         }
         settings.forgetRemoved(removals)
-        finish(wanted)
+        finish(profile, ids)
         if (failed > 0) {
             Out.line("$failed app settings did not take (see above); building again tries them again.")
             return 1
@@ -95,9 +102,9 @@ class Apply(private val repo: FDroid, private val data: File) {
     }
 
     /** The versions for the generation, and the updates list (the build may have installed some of them). */
-    private fun finish(wanted: List<String>) {
-        installer.writeResolved(wanted)
-        Updates(repo, data).list(wanted, quiet = true)
+    private fun finish(profile: File, ids: List<String>) {
+        installer.writeResolved(ids)
+        Updates(data, profile).list(quiet = true)
     }
 
     /** Gives back every app setting the module changed and removes the apps it installed, keeping their data: the module is being removed. */

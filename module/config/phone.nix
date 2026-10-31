@@ -13,6 +13,11 @@
 #   android.settings.fdroid.autoupdatePackages = true;   those apps update by themselves
 #                                                    (every 6 hours on Wi-Fi; false: only a notification)
 #
+#   android.repos.mine.url = "https://example.org/fdroid/repo?fingerprint=…";
+#                                                    another F-Droid repository, named mine
+#   android.packages.mine = with pkgs.mine; [ org.example.other ];   its apps
+#   android.settings.mine.autoupdatePackages = true;
+#
 #   android.apps."org.example.app" = {               an installed app's settings
 #     permissions.camera = false;                    true, false (denied), "ask"
 #     permissions.location = "whileUsing";           "always", "whileUsing", false, "ask"

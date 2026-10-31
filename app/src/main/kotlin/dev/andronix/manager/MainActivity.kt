@@ -155,8 +155,11 @@ class MainActivity : Activity() {
             return
         }
         val checked = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT).format(Date(json.optLong("checked")))
-        val auto = json.optJSONObject("autoUpdate")?.optBoolean("fdroid") ?: false
-        updatesStatus.text = getString(R.string.updates_status, json.optString("index"), checked, getString(if (auto) R.string.auto_on else R.string.auto_off))
+        val auto = json.optJSONObject("autoUpdate")
+        val repos = auto?.keys()?.asSequence()?.joinToString(", ") { repo ->
+            getString(R.string.auto_repo, repo, getString(if (auto.optBoolean(repo)) R.string.auto_on else R.string.auto_off))
+        } ?: ""
+        updatesStatus.text = getString(R.string.updates_status, checked, repos)
         val updates = json.optJSONArray("updates")
         if (updates == null || updates.length() == 0) {
             updatesList.addView(TextView(this).apply { setText(R.string.up_to_date) })
@@ -172,7 +175,10 @@ class MainActivity : Activity() {
             }
             row.addView(
                 TextView(this).apply {
-                    text = getString(R.string.update_line, update.getString("name"), update.getString("from"), update.getString("to"), size(update.getLong("size")))
+                    text = getString(
+                        R.string.update_line, update.getString("name"), update.getString("from"), update.getString("to"),
+                        size(update.getLong("size")), update.optString("repo"),
+                    )
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 },
             )

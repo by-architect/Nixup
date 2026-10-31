@@ -3,10 +3,13 @@
 #
 # Options:
 #   android.darkMode         true (on), false (off), or null (left as you set it)
-#   android.packages.fdroid  apps from F-Droid, by package name:
+#   android.repos.<name>     an F-Droid repository besides f-droid.org (fdroid):
+#                              android.repos.mine.url = "https://…/repo?fingerprint=…";
+#   android.packages.<repo>  its apps, by package name (an app comes from one repo only):
 #                              with pkgs.fdroid; [ org.example.app ]
 #                            a name with a Nix keyword in it (in, if, ...) goes in quotes:
 #                              [ "in.example.app" ]
+#   android.settings.<repo>.autoupdatePackages   its apps update by themselves
 #   android.apps."<package>" an app's settings (every one: nix/app.nix)
 { pkgs, ... }:
 {
@@ -14,6 +17,13 @@
 
   android.packages.fdroid = with pkgs.fdroid; [
     com.zorinos.zorin_connect
+  ];
+
+  # My own repository: the test versions of Dejavu.
+  android.repos.byarchitect.url =
+    "https://fdroid.byarchitect.org/fdroid/repo?fingerprint=50941BDAC56B056A520ABFA3FC7DAAB789DEE5B83B295DA54A1961C7BC8A91C9";
+  android.packages.byarchitect = with pkgs.byarchitect; [
+    com.byarchitect.dejavu.test
   ];
 
   # Every app setting, on one app, to see what each one does.

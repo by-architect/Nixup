@@ -57,7 +57,7 @@ new_generation() {
   last=$(cat "$generations/last" 2> /dev/null || echo 0)
   mkdir -p "$generations/new"
   cp "$PROFILE" "$generations/new/profile.json"
-  [ -f "$DATA/fdroid/resolved.json" ] && cp "$DATA/fdroid/resolved.json" "$generations/new/apps.json"
+  [ -f "$DATA/resolved.json" ] && cp "$DATA/resolved.json" "$generations/new/apps.json"
   if [ "$last" -gt 0 ] && diff -r "$generations/new" "$generations/$last" > /dev/null 2>&1; then
     rm -rf "$generations/new"
     log "Generation $last (nothing changed)"
