@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">Andronix</string>
+    <string name="tab_build">Build</string>
+    <string name="tab_updates">Updates</string>
     <string name="config_path">Config: /sdcard/Andronix/phone.nix</string>
     <string name="build">Build</string>
     <string name="open_folder">Open config folder</string>
@@ -9,4 +11,18 @@
     <string name="failed">✘ Failed (exit %1$d)</string>
     <string name="no_root">✘ No root: the phone has no su (is Magisk installed?)</string>
     <string name="no_folder_app">No app here opens folders: install a file manager.</string>
+    <string name="check_updates">Check for updates</string>
+    <string name="update_all">Update all</string>
+    <string name="update">Update</string>
+    <string name="checking">Looking for updates…</string>
+    <string name="updating">Updating…</string>
+    <string name="updates_not_checked">Not checked yet: Check for updates looks at F-Droid for newer versions of the config\'s apps.</string>
+    <string name="updates_status">F-Droid index from %1$s, checked %2$s\nAuto-update: %3$s (android.settings.fdroid.autoupdatePackages)</string>
+    <string name="auto_on">on, every 6 hours on Wi-Fi</string>
+    <string name="auto_off">off, only a notification when there are updates</string>
+    <string name="up_to_date">Everything is up to date.</string>
+    <string name="update_line">%1$s  %2$s → %3$s  (%4$s)</string>
+    <string name="channel_progress">Installing and updating</string>
+    <string name="channel_results">Updates</string>
+    <string name="progress_count">%1$d of %2$d</string>
 </resources>

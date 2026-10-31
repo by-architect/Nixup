@@ -32,5 +32,6 @@ else
       inherit (cfg.android) darkMode;
       packages.fdroid = map (app: if builtins.isString app then app else app._id) cfg.android.packages.fdroid;
       apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: managed) cfg.android.apps);
+      inherit (cfg.android) settings;
     };
   }

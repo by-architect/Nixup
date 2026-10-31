@@ -60,6 +60,17 @@ in
       '';
     };
 
+    android.settings.fdroid.autoupdatePackages = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Update the apps from F-Droid (android.packages.fdroid) by themselves: the phone
+        looks for updates every 6 hours on Wi-Fi and installs them, with notifications.
+        When false it only tells, in a notification, that there are updates; the app's
+        Updates tab installs them.
+      '';
+    };
+
     android.apps = mkOption {
       type = types.attrsOf (types.submodule ./app.nix);
       default = { };

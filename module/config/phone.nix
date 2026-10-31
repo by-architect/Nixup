@@ -10,6 +10,9 @@
 #     "in.example.app"                               a name with a Nix keyword (in, if, ...) in quotes
 #   ];
 #
+#   android.settings.fdroid.autoupdatePackages = true;   those apps update by themselves
+#                                                    (every 6 hours on Wi-Fi; false: only a notification)
+#
 #   android.apps."org.example.app" = {               an installed app's settings
 #     permissions.camera = false;                    true, false (denied), "ask"
 #     permissions.location = "whileUsing";           "always", "whileUsing", false, "ask"

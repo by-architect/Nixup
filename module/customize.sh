@@ -10,6 +10,8 @@ ln -sf nix "$MODPATH/bin/nix-instantiate"
 ui_print "- Installing the app"
 pm install -r -S "$(stat -c %s "$MODPATH/app.apk")" < "$MODPATH/app.apk" > /dev/null \
   || ui_print "! The app did not install: install app.apk from the module's folder by hand."
+# Its notifications say how installs and updates go.
+pm grant dev.andronix.manager android.permission.POST_NOTIFICATIONS > /dev/null 2>&1
 
 # A config built on the phone stays; only the first time does the default one go in.
 MODDIR=$MODPATH

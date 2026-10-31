@@ -12,14 +12,7 @@ BY=${1:-manual}
 MODE=${2:-switch}
 . "$MODDIR/common.sh"
 
-mkdir -p "$DATA/home" "$DATA/tmp"
-
-# The engine, from the app's APK, run as root; what it says is shown and logged.
-engine() {
-  { CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.andronix.manager.engine.Main "$@" 2>&1
-    echo $? > "$DATA/tmp/engine.status"; } | tee -a "$LOG"
-  return "$(cat "$DATA/tmp/engine.status")"
-}
+mkdir -p "$DATA/home"
 
 seed_config || fail "cannot create $CONFIG"
 
@@ -56,19 +49,6 @@ log "== Activating"
 mv -f "$PROFILE.new" "$PROFILE"
 sh "$MODDIR/apply.sh" "$BY" || exit 1
 
-# A new generation, as nixos-rebuild makes one when the system changed: the
-# profile, and the versions the config's apps are at.
-GENERATIONS=$DATA/generations
-last=$(cat "$GENERATIONS/last" 2> /dev/null || echo 0)
-mkdir -p "$GENERATIONS/new"
-cp "$PROFILE" "$GENERATIONS/new/profile.json"
-[ -f "$DATA/fdroid/resolved.json" ] && cp "$DATA/fdroid/resolved.json" "$GENERATIONS/new/apps.json"
-if [ "$last" -gt 0 ] && diff -r "$GENERATIONS/new" "$GENERATIONS/$last" > /dev/null 2>&1; then
-  rm -rf "$GENERATIONS/new"
-  log "Generation $last (nothing changed)"
-else
-  generation=$((last + 1))
-  mv "$GENERATIONS/new" "$GENERATIONS/$generation"
-  echo "$generation" > "$GENERATIONS/last"
-  log "Generation $generation"
-fi
+new_generation
+# The app schedules its update check, now that the config may have changed.
+tell_app schedule &

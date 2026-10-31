@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Notifications about installs and updates; the module also grants it when it installs the app. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The periodic update check stays scheduled across restarts, and waits for Wi-Fi. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- The apps that open a folder (the Files app, file managers), for Open config folder. -->
     <queries>
         <intent>
@@ -14,11 +20,22 @@
         android:theme="@android:style/Theme.DeviceDefault.DayNight">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- What the module's engine (as root) tells: not exported, so no other app can. -->
+        <receiver
+            android:name=".UpdatesReceiver"
+            android:exported="false" />
+
+        <service
+            android:name=".UpdateJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 </manifest>

@@ -100,6 +100,37 @@ class FDroid(private val dir: File) {
 
     private fun strings(json: JSONObject, key: String) = json.getJSONArray(key).let { a -> (0 until a.length()).map { a.getString(it) } }
 
+    sealed class Choice {
+        class Pick(val version: Version) : Choice()
+        class Problem(val text: String) : Choice()
+    }
+
+    /**
+     * The version F-Droid itself would suggest: the newest stable one this phone can run (Android version, ABIs),
+     * signed with the key of the app already installed, else with the app's preferred key.
+     */
+    fun suggested(app: App, installed: Device.Installed?): Choice {
+        val runs = app.versions.filter { v ->
+            !v.beta && v.minSdk <= Device.sdk && (v.maxSdk == 0 || Device.sdk <= v.maxSdk) &&
+                (v.abis.isEmpty() || v.abis.any { it in Device.abis })
+        }
+        if (runs.isEmpty()) {
+            return Choice.Problem("no version of ${app.id} runs on this phone (Android API ${Device.sdk}, ${Device.abis.joinToString("/")})")
+        }
+        val signed = when {
+            installed != null && installed.signers.isNotEmpty() -> runs.filter { v -> v.signers.any { it in installed.signers } }
+            app.preferredSigner != null -> runs.filter { app.preferredSigner in it.signers }.ifEmpty { runs }
+            else -> runs
+        }
+        if (signed.isEmpty()) {
+            return Choice.Problem(
+                "${app.id} is installed with another signing key than F-Droid's builds, so they cannot update it: " +
+                    "uninstall it first (its data goes with it), or take it out of the config",
+            )
+        }
+        return Choice.Pick(signed.maxBy { it.code })
+    }
+
     /** entry.json, from entry.jar once its signature is checked against f-droid.org's pinned key. */
     private fun entry(): JSONObject {
         val jar = File(dir, "entry.jar")
