@@ -9,7 +9,7 @@
 #                              [ "in.example.app" ]
 { pkgs, ... }:
 {
-  android.darkMode = false;
+  android.darkMode = true;
 
   android.packages.fdroid = with pkgs.fdroid; [
   app.pagedrop
