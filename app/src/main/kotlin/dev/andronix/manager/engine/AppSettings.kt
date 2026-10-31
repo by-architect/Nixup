@@ -125,7 +125,7 @@ class AppSettings(data: File) {
         if (want.holds(now)) return 0
         remember(app, want.key, now)
         write(app, want.key, want.state)
-        val after = read(app, want.key)
+        val after = settled(app, want.key) { it != null && want.holds(it) }
         if (after != null && want.holds(after)) {
             Out.line("✔ $app: ${want.label}")
             return 0
@@ -137,7 +137,7 @@ class AppSettings(data: File) {
     private fun giveBack(app: String, key: String): Int {
         val original = journal.optJSONObject(app)?.optString(key) ?: return 0
         write(app, key, original)
-        val after = read(app, key)
+        val after = settled(app, key) { it == original || (key.startsWith("op:") && sameOp(it, original)) }
         forgetKey(app, key)
         if (after == original || (key.startsWith("op:") && sameOp(after, original))) {
             Out.line("✔ $app: ${describe(key)} back as before")
@@ -145,6 +145,18 @@ class AppSettings(data: File) {
         }
         Out.line("✘ $app: ${describe(key)} could not go back to $original (it reads $after)")
         return 1
+    }
+
+    /** The setting read back after a change; some (notification access) take a moment, so it is read again for up to 3 seconds. */
+    private fun settled(app: String, key: String, done: (String?) -> Boolean): String? {
+        var state = read(app, key)
+        repeat(6) {
+            if (done(state)) return state
+            Thread.sleep(500)
+            dumps.remove(app)
+            state = read(app, key)
+        }
+        return state
     }
 
     private fun holds(app: String, want: Want) = read(app, want.key)?.let(want.holds) ?: false

@@ -139,7 +139,8 @@ object Device {
                     text == "runtime permissions:" && user == 0 -> { section = "runtime"; sectionIndent = indent }
                     text.startsWith("User ") -> {
                         user = text.removePrefix("User ").substringBefore(':').toIntOrNull() ?: -1
-                        if (user == 0) {
+                        // Later sections (app links, ...) have "User 0:" lines too, without the package state.
+                        if (user == 0 && text.contains(" installed=")) {
                             installed = Regex("""\binstalled=(true|false)""").find(text)?.groupValues?.get(1) == "true"
                             enabled = Regex("""\benabled=(\d+)""").find(text)?.groupValues?.get(1)?.toInt() ?: 0
                             suspended = Regex("""\bsuspended=(true|false)""").find(text)?.groupValues?.get(1) == "true"
