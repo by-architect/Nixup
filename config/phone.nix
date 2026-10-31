@@ -13,7 +13,6 @@
   android.darkMode = true;
 
   android.packages.fdroid = with pkgs.fdroid; [
-    com.zorinos.zorin_connect
   ];
 
   # Every app setting, on one app, to see what each one does.
