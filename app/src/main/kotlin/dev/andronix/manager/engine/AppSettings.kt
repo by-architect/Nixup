@@ -21,6 +21,9 @@ class AppSettings(data: File) {
 
     private var planned: List<Planned> = emptyList()
 
+    /** Apps with settings in the config that are not installed: what was kept for them is dropped when the build runs. */
+    private val gone = HashSet<String>()
+
     /** Whether the plan changes anything: a setting that differs, one given back, or an app to set up once installed. */
     val changes: Boolean get() = planned.any { p -> p.giveBack.isNotEmpty() || p.wants == null || p.wants.any { !holds(p.app, it) } }
 
@@ -33,13 +36,17 @@ class AppSettings(data: File) {
         val warnings = ArrayList<String>()
         for (app in apps.keys()) {
             when {
-                app in removing -> problems += "android.apps.\"$app\": it leaves android.packages.fdroid, so it would not be installed any more"
+                app in removing -> warnings += "android.apps.\"$app\": $app leaves android.packages.fdroid, so its settings are not applied"
                 dump(app) != null -> {
                     val wants = wants(app, apps.getJSONObject(app), problems, warnings)
                     plans += Planned(app, wants, journalKeys(app) - wants.map { it.key }.toSet())
                 }
                 app in installing -> plans += Planned(app, null, emptyList())
-                else -> problems += "android.apps.\"$app\": $app is not installed (add it to android.packages.fdroid, or install it)"
+                // What was kept for it went with it: there is nothing to give back.
+                else -> {
+                    warnings += "android.apps.\"$app\": $app is not installed, so its settings are not applied"
+                    gone += app
+                }
             }
         }
         for (app in journal.keys()) {
@@ -69,6 +76,7 @@ class AppSettings(data: File) {
     fun apply(apps: JSONObject, removing: Set<String>): Int {
         // Apps were installed and updated since the plan.
         dumps.clear()
+        gone.forEach { forget(it) }
         var failed = 0
         for (p in planned) {
             if (p.app in removing) continue
