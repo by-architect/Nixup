@@ -15,6 +15,7 @@ import kotlin.system.exitProcess
  *                                 makes the apps, their settings, the debloat and the system settings match the
  *                                 profile (with --dry-run: only plans and checks; with --force, the releases are asked
  *                                 for again even when new enough)
+ *   dns                           prints the DNS servers of the network in use, as resolv.conf lines (for Nix's own /etc)
  *   support                       says which settings that need something of the phone (a feature, a newer Android,
  *                                 LineageOS) this phone can have
  *   restore                       brings back the apps it removed, gives back every app and system setting the module
@@ -40,6 +41,8 @@ object Main {
                 }
                 "restore" -> Apply(emptyMap(), data).restore()
                 "support" -> SystemSettings(data).report().let { 0 }
+                "dns" -> Device.dnsServers().ifEmpty { throw Stop("no network with DNS servers: is the phone online?") }
+                    .forEach { println("nameserver $it") }.let { 0 }
                 "updates" -> Updates(data).list().let { 0 }
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
                 else -> usage()
@@ -108,5 +111,5 @@ object Main {
     }
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] | restore | support | updates | update [--auto] [apps...]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] | restore | support | dns | updates | update [--auto] [apps...]")
 }

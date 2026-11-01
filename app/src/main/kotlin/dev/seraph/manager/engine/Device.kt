@@ -9,6 +9,8 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import android.hardware.SensorManager
 import android.hardware.display.DisplayManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.LocaleList
 import android.os.Looper
@@ -463,6 +465,30 @@ object Device {
     }
 
     private val LINEAGE_ROW = Regex("""Row: \d+ name=(.*?), value=(.*)""")
+
+    // --- The network.
+
+    /**
+     * The DNS servers of the networks Android uses for the internet, the default one first. Not a VPN's: Seraph runs as
+     * root, and root's traffic does not go through a VPN app (its DNS server would not answer).
+     */
+    @Suppress("DEPRECATION")
+    fun dnsServers(): List<String> = try {
+        val connectivity = context?.getSystemService(ConnectivityManager::class.java) ?: return emptyList()
+        val default = connectivity.activeNetwork
+        connectivity.allNetworks
+            .filter { network ->
+                connectivity.getNetworkCapabilities(network)?.let {
+                    it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                } == true
+            }
+            .sortedBy { if (it == default) 0 else 1 }
+            .flatMap { connectivity.getLinkProperties(it)?.dnsServers ?: emptyList() }
+            .mapNotNull { it.hostAddress }
+            .distinct()
+    } catch (e: Throwable) {
+        emptyList()
+    }
 
     // --- The keyboard.
 
