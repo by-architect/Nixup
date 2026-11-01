@@ -18,6 +18,10 @@
   android.packages.fdroid = with pkgs.fdroid; [
     com.zorinos.zorin_connect
   ];
+android.packages.obtainium = [
+  { id = "dev.imranr.obtainium"; url = "https://github.com/ImranR98/Obtainium"; apkFilter = "^(?!.*fdroid)"; }
+];
+android.settings.obtainium.autoupdatePackages = true;
 
   # My own repository: the test versions of Dejavu.
   android.repos.byarchitect.url =
