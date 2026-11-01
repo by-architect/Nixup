@@ -1,11 +1,11 @@
 # What the module's scripts share: where things are, the log, and the status shown
 # in the Magisk app. Sourced with MODDIR set to the module's folder.
-DATA=/data/adb/andronix
+DATA=/data/adb/seraph
 PROFILE=$DATA/profile.json
 LOG=$DATA/apply.log
 # Where the user edits the phone config (the app's Open config folder opens it).
-CONFIG_DIR=/sdcard/Andronix
-CONFIG=$CONFIG_DIR/phone.nix
+CONFIG_DIR=/sdcard/Seraph
+CONFIG=$CONFIG_DIR/configuration.nix
 BY=${BY:-manual}
 
 mkdir -p "$DATA/tmp"
@@ -39,13 +39,13 @@ remember() {
 # The config folder with the default config in it, unless the user has one already.
 seed_config() {
   [ -f "$CONFIG" ] && return 0
-  mkdir -p "$CONFIG_DIR" && cp "$MODDIR/config/phone.nix" "$CONFIG" || return 1
+  mkdir -p "$CONFIG_DIR" && cp "$MODDIR/config/configuration.nix" "$CONFIG" || return 1
   log "Created $CONFIG with the default config"
 }
 
 # The engine, from the app's APK, run as root; what it says is shown and logged.
 engine() {
-  { CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.andronix.manager.engine.Main "$@" 2>&1
+  { CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.seraph.manager.engine.Main "$@" 2>&1
     echo $? > "$DATA/tmp/engine.status"; } | tee -a "$LOG"
   return "$(cat "$DATA/tmp/engine.status")"
 }
@@ -71,6 +71,6 @@ new_generation() {
 # Tells the app something through its receiver (as the engine does for its
 # notifications): "schedule" makes sure its 6-hourly update check is scheduled.
 tell_app() {
-  am broadcast --user current -f 0x20 -n dev.andronix.manager/.UpdatesReceiver \
-    -a dev.andronix.manager.action.UPDATES --es event "$1" < /dev/null > /dev/null 2>&1
+  am broadcast --user current -f 0x20 -n dev.seraph.manager/.UpdatesReceiver \
+    -a dev.seraph.manager.action.UPDATES --es event "$1" < /dev/null > /dev/null 2>&1
 }

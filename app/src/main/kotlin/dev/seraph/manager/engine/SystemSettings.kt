@@ -1,4 +1,4 @@
-package dev.andronix.manager.engine
+package dev.seraph.manager.engine
 
 import org.json.JSONObject
 import java.io.File

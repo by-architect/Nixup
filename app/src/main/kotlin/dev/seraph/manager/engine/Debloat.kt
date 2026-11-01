@@ -1,4 +1,4 @@
-package dev.andronix.manager.engine
+package dev.seraph.manager.engine
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -130,7 +130,7 @@ class Debloat(data: File) {
             "com.android.documentsui", "com.google.android.documentsui", "com.android.externalstorage",
             "com.android.intentresolver", "com.android.webview", "com.google.android.webview",
             "com.android.providers.", "com.google.android.providers.", "com.android.networkstack", "com.google.android.networkstack",
-            "com.android.networkstack.", "com.google.android.networkstack.", "dev.andronix.manager",
+            "com.android.networkstack.", "com.google.android.networkstack.", "dev.seraph.manager",
         )
 
         /** The names of a ROM's resource overlays (they change how another app or Android looks or works). */

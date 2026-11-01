@@ -148,7 +148,7 @@ let
   check = assertion: message: { inherit assertion message; };
 in
 {
-  imports = [ ./system.nix ./lineage.nix ];
+  imports = [ ./system.nix ./lineage.nix ./build.nix ];
 
   options = {
     assertions = mkOption {

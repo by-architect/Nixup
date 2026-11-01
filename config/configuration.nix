@@ -1,4 +1,4 @@
-# This phone's config. Edit it, then press Build in the Andronix app (or the
+# This phone's config. Edit it, then press Build in the Seraph app (or the
 # module's Action button in Magisk): Nix on the phone checks it and applies it.
 #
 # Options:
@@ -15,7 +15,7 @@
 #   android.settings.lineage.*   LineageOS's own settings, on ROMs based on it (nix/lineage.nix)
 #   android.settings.raw     any other of Android's settings, by its name
 #   android.apps."<package>" an app's settings (every one: nix/app.nix)
-{ pkgs, ... }:
+{ config, lib, pkgs, ... }:
 {
   # The phone's own settings, as they were on it on 2026-11-01. null: not set on the phone, so
   # Android takes its own default (a value there would set it). A setting this phone does not

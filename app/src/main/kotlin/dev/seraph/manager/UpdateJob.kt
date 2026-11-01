@@ -1,4 +1,4 @@
-package dev.andronix.manager
+package dev.seraph.manager
 
 import android.app.job.JobInfo
 import android.app.job.JobParameters
@@ -34,7 +34,7 @@ class UpdateJob : JobService() {
             val scheduler = context.getSystemService(JobScheduler::class.java)
             if (scheduler.getPendingJob(ID) != null) return
             // Android may refuse a job (a missing permission, a limit): the app and its notifications go on without it.
-            runCatching { scheduler.schedule(job(context)) }.onFailure { Log.w("Andronix", "the update check could not be scheduled", it) }
+            runCatching { scheduler.schedule(job(context)) }.onFailure { Log.w("Seraph", "the update check could not be scheduled", it) }
         }
 
         private fun job(context: Context): JobInfo =

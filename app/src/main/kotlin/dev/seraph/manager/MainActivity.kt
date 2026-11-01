@@ -1,4 +1,4 @@
-package dev.andronix.manager
+package dev.seraph.manager
 
 import android.Manifest
 import android.app.Activity
@@ -140,7 +140,7 @@ class MainActivity : Activity() {
     private fun loadUpdates() {
         worker.execute {
             val text = StringBuilder()
-            Root.run("cat /data/adb/andronix/updates.json 2>/dev/null") { text.append(it) }
+            Root.run("cat /data/adb/seraph/updates.json 2>/dev/null") { text.append(it) }
             runOnUiThread { showUpdates(text.toString()) }
         }
     }
@@ -203,9 +203,9 @@ class MainActivity : Activity() {
 
     // --- The config folder.
 
-    /** Opens /sdcard/Andronix in the app the user picks: the Files app or another file manager. */
+    /** Opens /sdcard/Seraph in the app the user picks: the Files app or another file manager. */
     private fun openFolder() {
-        val folder = DocumentsContract.buildDocumentUri(STORAGE_DOCUMENTS, "primary:Andronix")
+        val folder = DocumentsContract.buildDocumentUri(STORAGE_DOCUMENTS, "primary:Seraph")
         val view = Intent(Intent.ACTION_VIEW).setDataAndType(folder, DocumentsContract.Document.MIME_TYPE_DIR)
         if (view.resolveActivity(packageManager) == null) {
             Toast.makeText(this, R.string.no_folder_app, Toast.LENGTH_LONG).show()

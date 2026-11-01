@@ -1,4 +1,4 @@
-package dev.andronix.manager.engine
+package dev.seraph.manager.engine
 
 import org.json.JSONObject
 import java.io.File
@@ -6,7 +6,7 @@ import kotlin.system.exitProcess
 
 /**
  * The module's engine, run as root by its scripts through app_process, from the app's APK:
- *   CLASSPATH=app.apk app_process /system/bin dev.andronix.manager.engine.Main <command>
+ *   CLASSPATH=app.apk app_process /system/bin dev.seraph.manager.engine.Main <command>
  * Commands:
  *   index [--force] <file>        brings the indexes of the repositories in <file> (android.repos) up to date
  *                                 (once a day, or now with --force), and when it is a profile, the releases of its
@@ -25,7 +25,7 @@ import kotlin.system.exitProcess
  * Exit status: 0 done, 2 stopped before changing anything, 1 stopped partway.
  */
 object Main {
-    private val data = File("/data/adb/andronix")
+    private val data = File("/data/adb/seraph")
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -93,6 +93,9 @@ object Main {
      * versions are kept for all repositories, next to it.
      */
     private fun moveOldFiles() {
+        // Seraph was called Andronix; its module's install takes its data over, and so does this, should that not have run.
+        val andronix = File("/data/adb/andronix")
+        if (!data.exists() && andronix.isDirectory) andronix.renameTo(data)
         val old = File(data, "fdroid")
         if (!old.isDirectory) return
         File(old, "owned").takeIf { it.isFile }?.renameTo(File(data, "owned"))

@@ -1,4 +1,4 @@
-package dev.andronix.manager.engine
+package dev.seraph.manager.engine
 
 import android.content.Context
 import android.content.pm.ApplicationInfo

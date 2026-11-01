@@ -1,4 +1,4 @@
-package dev.andronix.manager.engine
+package dev.seraph.manager.engine
 
 import java.util.concurrent.LinkedBlockingQueue
 
@@ -9,7 +9,7 @@ import java.util.concurrent.LinkedBlockingQueue
  * does not wait for am; a progress that a newer one replaces before it went out is dropped.
  */
 object Notify {
-    private const val APP = "dev.andronix.manager"
+    private const val APP = "dev.seraph.manager"
     private const val RECEIVER = "$APP/.UpdatesReceiver"
     const val ACTION = "$APP.action.UPDATES"
 

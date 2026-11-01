@@ -1,4 +1,4 @@
-package dev.andronix.manager
+package dev.seraph.manager
 
 import android.content.BroadcastReceiver
 import android.content.Context

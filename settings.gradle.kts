@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Andronix"
+rootProject.name = "Seraph"
 include(":app")

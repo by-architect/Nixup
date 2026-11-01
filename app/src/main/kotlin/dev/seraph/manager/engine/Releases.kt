@@ -1,4 +1,4 @@
-package dev.andronix.manager.engine
+package dev.seraph.manager.engine
 
 import org.json.JSONArray
 import org.json.JSONException
@@ -437,7 +437,7 @@ class Releases(data: File) {
         private const val GITHUB = "github"
         private const val GITLAB = "gitlab"
         private const val GITEA = "gitea"
-        private const val TEMP = ".andronix"
+        private const val TEMP = ".seraph"
 
         /** The servers Obtainium knows by themselves (others it needs told which kind they are). */
         private val OBTAINIUM_HOSTS = listOf("github.com", "gitlab.com", "codeberg.org")

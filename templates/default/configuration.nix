@@ -1,7 +1,8 @@
-# This phone's config. Edit it, then press Build in the Andronix app (or the
-# module's Action button in Magisk): Nix on the phone checks it and applies it.
-# A setting left out is not managed, and one taken out again gets back the value
-# it had before.
+# Edit this configuration file to define what should be on your phone, its apps and
+# its settings, as /etc/nixos/configuration.nix does for NixOS. Then press Build in the
+# Seraph app (or the module's Action button in Magisk): Nix on the phone checks it and
+# applies it. A setting left out is not managed, and one taken out again gets back the
+# value it had before.
 #
 #   android.packages.fdroid = with pkgs.fdroid; [    apps from F-Droid
 #     org.example.app
@@ -60,7 +61,7 @@
 #
 # Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix and
 # nix/app.nix in the project.
-{ pkgs, ... }:
+{ config, lib, pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [
   ];

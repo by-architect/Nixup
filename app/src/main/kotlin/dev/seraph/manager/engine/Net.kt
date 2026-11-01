@@ -1,4 +1,4 @@
-package dev.andronix.manager.engine
+package dev.seraph.manager.engine
 
 import java.io.File
 import java.io.FileOutputStream
@@ -109,7 +109,7 @@ object Net {
     private fun open(url: String) = (URL(url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 20_000
         readTimeout = 60_000
-        setRequestProperty("User-Agent", "Andronix")
+        setRequestProperty("User-Agent", "Seraph")
     }
 
     private fun InputStream.readNBytesUpTo(limit: Int): ByteArray {

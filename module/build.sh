@@ -1,4 +1,4 @@
-# Builds the phone config (/sdcard/Andronix/phone.nix) and makes the phone match
+# Builds the phone config (/sdcard/Seraph/configuration.nix) and makes the phone match
 # it, in nixos-rebuild's steps: the indexes of its repositories brought up to date
 # (as channels are), the config evaluated by Nix on the phone (types, assertions),
 # the apps planned and checked, then downloaded and installed, the settings

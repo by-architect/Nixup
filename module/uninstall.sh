@@ -2,9 +2,9 @@
 # before Android is up: so the settings are given back after boot, by restore.sh
 # from Magisk's service.d (with the engine for the app settings and the apps it
 # installed), which then removes the app, the module's data and itself.
-# /sdcard/Andronix (the user's config) stays.
+# /sdcard/Seraph (the user's config) stays.
 mkdir -p /data/adb/service.d
-cp -f "${0%/*}/restore.sh" /data/adb/service.d/andronix-restore.sh
+cp -f "${0%/*}/restore.sh" /data/adb/service.d/seraph-restore.sh
 # The engine gives back the app settings, from a copy, as the module's folder goes.
-cp -f "${0%/*}/app.apk" /data/adb/andronix/engine.apk
-chmod 755 /data/adb/service.d/andronix-restore.sh
+cp -f "${0%/*}/app.apk" /data/adb/seraph/engine.apk
+chmod 755 /data/adb/service.d/seraph-restore.sh

@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.andronix.manager"
+    namespace = "dev.seraph.manager"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.andronix.manager"
+        applicationId = "dev.seraph.manager"
         minSdk = 30
         targetSdk = 36
         versionCode = 1
