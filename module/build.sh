@@ -36,8 +36,10 @@ nix_eval() {
 # nixpkgs' lib) as flake.lock pins them, into a store of its own ($DATA/nix), in a
 # namespace with its own /etc (nix_run). The repositories' package names come from
 # the indexes here (SERAPH_REPOS, so --impure): always the latest, not pinned.
+# The flake is named by its real folder: Nix takes no path through a symlink, and
+# /sdcard is one (to /storage/emulated/0).
 FLAKE=
-[ -f "$CONFIG_DIR/flake.nix" ] && FLAKE="path:$CONFIG_DIR"
+[ -f "$CONFIG_DIR/flake.nix" ] && FLAKE="path:$(readlink -f "$CONFIG_DIR")"
 nix_flake() { nix_run "$MODDIR/bin/nix" --store "$DATA/nix" "$@"; }
 
 # The configuration to build: the flake's only seraphConfigurations, or the one
