@@ -37,6 +37,18 @@ remember() {
   mkdir -p "$ORIGINAL" && echo "$2" > "$ORIGINAL/$1"
 }
 
+# What a build reads, as the app's "Build from" (or a script) chose it, kept in
+# $DATA/build-from: flake (flake.nix), configuration (configuration.nix alone), or,
+# when nothing was chosen, flake.nix when there is one, as nixos-rebuild does.
+BUILD_FROM=$DATA/build-from
+build_from() {
+  case "$(cat "$BUILD_FROM" 2> /dev/null)" in
+    flake) echo flake ;;
+    configuration) echo configuration ;;
+    *) if [ -f "$CONFIG_DIR/flake.nix" ]; then echo flake; else echo configuration; fi ;;
+  esac
+}
+
 # The config folder with the default config in it, unless the user has one already
 # (a configuration.nix, or a flake.nix).
 seed_config() {
@@ -61,7 +73,7 @@ new_generation() {
   cp "$PROFILE" "$generations/new/profile.json"
   [ -f "$DATA/resolved.json" ] && cp "$DATA/resolved.json" "$generations/new/apps.json"
   # A flake's lock, the exact versions of its inputs: going back to it builds them again.
-  [ -f "$CONFIG_DIR/flake.nix" ] && [ -f "$CONFIG_DIR/flake.lock" ] && cp "$CONFIG_DIR/flake.lock" "$generations/new/flake.lock"
+  [ "$(build_from)" = flake ] && [ -f "$CONFIG_DIR/flake.lock" ] && cp "$CONFIG_DIR/flake.lock" "$generations/new/flake.lock"
   if [ "$last" -gt 0 ] && diff -r "$generations/new" "$generations/$last" > /dev/null 2>&1; then
     rm -rf "$generations/new"
     log "Generation $last (nothing changed)"
@@ -73,7 +85,7 @@ new_generation() {
 }
 
 # Nix is a Linux program: it looks for DNS servers, trusted certificates and users
-# in /etc, where Android has none. To download (a flake's inputs), it runs in a mount
+# in /etc ($DATA/etc), where Android has none. To download (a flake's inputs), it runs in a mount
 # namespace of its own whose /etc is Seraph's: the DNS servers of the network in use,
 # Android's trusted certificates and a root user. The namespace's mounts are private,
 # so the rest of the phone never sees it (its / is shared: a mount without that would
@@ -83,14 +95,9 @@ for b in /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/bus
   [ -x "$b" ] && BUSYBOX=$b && break
 done
 
+# The engine writes it (tailscaled runs with it too); it fails without a network.
 nix_etc() {
-  etc=$DATA/etc
-  mkdir -p "$etc/ssl/certs" || return 1
-  cat /apex/com.android.conscrypt/cacerts/* /system/etc/security/cacerts/* > "$etc/ssl/certs/ca-certificates.crt" 2> /dev/null
-  echo "root:x:0:0:root:$DATA/home:/system/bin/sh" > "$etc/passwd"
-  echo "root:x:0:" > "$etc/group"
-  CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.seraph.manager.engine.Main dns < /dev/null > "$etc/resolv.conf.new" \
-    && mv -f "$etc/resolv.conf.new" "$etc/resolv.conf"
+  CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.seraph.manager.engine.Main etc < /dev/null
 }
 
 # Runs a command with Seraph's /etc (nix_etc makes it), in that namespace.

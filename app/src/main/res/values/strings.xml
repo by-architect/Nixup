@@ -2,7 +2,11 @@
     <string name="app_name">Seraph</string>
     <string name="tab_build">Build</string>
     <string name="tab_updates">Updates</string>
-    <string name="config_path">Config: /sdcard/Seraph/configuration.nix</string>
+    <string name="config_path">Config folder: /sdcard/Seraph</string>
+    <string name="build_from">Build from (auto: flake.nix when there is one, as nixos-rebuild does)</string>
+    <string name="from_auto">Auto</string>
+    <string name="from_flake">flake.nix</string>
+    <string name="from_configuration">configuration.nix</string>
     <string name="build">Build</string>
     <string name="open_folder">Open config folder</string>
     <string name="open_folder_with">Open the config folder with</string>

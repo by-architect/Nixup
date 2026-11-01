@@ -51,6 +51,15 @@ restore_obtainium() {
   rm -f "$told"
 }
 
+# The services stop (the engine does this, logging out of Tailscale first; this is
+# for when it could not run): their loops, then the programs they ran.
+restore_services() {
+  for pidfile in /data/adb/seraph/services/*/supervisor.pid; do
+    [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2> /dev/null
+  done
+  pkill -f /data/adb/seraph/services/ 2> /dev/null
+}
+
 if [ "${0##*/}" = seraph-restore.sh ]; then
   until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
   restore_dark_mode
@@ -61,6 +70,7 @@ if [ "${0##*/}" = seraph-restore.sh ]; then
   restore_apps
   restore_debloat
   restore_obtainium
+  restore_services
   pm uninstall dev.seraph.manager < /dev/null > /dev/null 2>&1
   rm -rf /data/adb/seraph
   rm -f "$0"

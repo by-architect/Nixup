@@ -12,14 +12,17 @@ import kotlin.system.exitProcess
  *                                 (once a day, or now with --force), and when it is a profile, the releases of its
  *                                 apps from releases (android.packages.obtainium) too
  *   apply <profile> [--dry-run] [--force]
- *                                 makes the apps, their settings, the debloat and the system settings match the
+ *                                 makes the apps, their settings, the debloat, the system settings and the services match the
  *                                 profile (with --dry-run: only plans and checks; with --force, the releases are asked
  *                                 for again even when new enough)
- *   dns                           prints the DNS servers of the network in use, as resolv.conf lines (for Nix's own /etc)
+ *   dns                           prints the DNS servers of the network in use, as resolv.conf lines
+ *   etc                           writes Seraph's /etc for the Linux programs it runs (Nix, tailscaled): DNS servers,
+ *                                 trusted certificates, a root user (see Etc)
+ *   services                      at boot: starts the services the last build left running (android.services)
  *   support                       says which settings that need something of the phone (a feature, a newer Android,
  *                                 LineageOS) this phone can have
  *   restore                       brings back the apps it removed, gives back every app and system setting the module
- *                                 changed, and removes the apps it installed
+ *                                 changed, stops the services, and removes the apps it installed
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
  *                                 android.settings.repo.<repo>.autoupdatePackages is true)
@@ -43,6 +46,11 @@ object Main {
                 "support" -> SystemSettings(data).report().let { 0 }
                 "dns" -> Device.dnsServers().ifEmpty { throw Stop("no network with DNS servers: is the phone online?") }
                     .forEach { println("nameserver $it") }.let { 0 }
+                "etc" -> Etc.write(data).let { etc ->
+                    if (!File(etc, "resolv.conf").isFile) throw Stop("no network with DNS servers: is the phone online?")
+                    0
+                }
+                "services" -> Services(data).start()
                 "updates" -> Updates(data).list().let { 0 }
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
                 else -> usage()
@@ -111,5 +119,5 @@ object Main {
     }
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] | restore | support | dns | updates | update [--auto] [apps...]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] | restore | support | dns | etc | services | updates | update [--auto] [apps...]")
 }

@@ -58,8 +58,12 @@
 #   android.apps."org.lineageos.jelly".debloat = true;   removes an app that came with the phone
 #                                                    (its data kept: taken out again, it comes back)
 #
-# Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix and
-# nix/app.nix in the project.
+#   android.services.tailscale.enable = true;        Tailscale, run by root, as NixOS's
+#                                                    services.tailscale (the build shows a link to
+#                                                    log in with; it takes no VPN slot)
+#
+# Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix,
+# nix/app.nix and nix/services.nix in the project.
 { config, lib, pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [

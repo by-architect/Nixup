@@ -12,6 +12,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -22,13 +23,15 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
- * Two tabs. Build: builds the phone config with the module's build.sh (as root), and opens the config folder.
+ * Two tabs. Build: builds the phone config with the module's build.sh (as root), from flake.nix or configuration.nix
+ * as Build from says, and opens the config folder.
  * Updates: the config's apps that have a newer version, checked and installed with the module's update.sh.
  */
 class MainActivity : Activity() {
     private val worker = Executors.newSingleThreadExecutor()
     private lateinit var tabs: List<Pair<Button, View>>
     private lateinit var build: Button
+    private lateinit var buildFrom: RadioGroup
     private lateinit var output: TextView
     private lateinit var scroll: ScrollView
     private lateinit var updatesStatus: TextView
@@ -58,6 +61,8 @@ class MainActivity : Activity() {
         tabs.forEachIndexed { i, (button, _) -> button.setOnClickListener { select(i) } }
         build.setOnClickListener { runRoot(Root.MODULE + "sh \$d/build.sh app 2>&1", R.string.building, output, scroll) }
         findViewById<Button>(R.id.open_folder).setOnClickListener { openFolder() }
+        buildFrom = findViewById(R.id.build_from)
+        loadBuildFrom()
         checkUpdates.setOnClickListener {
             runRoot(Root.MODULE + "sh \$d/update.sh app check 2>&1", R.string.checking, updatesOutput, updatesScroll) { loadUpdates() }
         }
@@ -118,6 +123,7 @@ class MainActivity : Activity() {
     private fun setRunning(on: Boolean) {
         running = on
         build.isEnabled = !on
+        for (i in 0 until buildFrom.childCount) buildFrom.getChildAt(i).isEnabled = !on
         checkUpdates.isEnabled = !on
         updateAll.isEnabled = !on
         for (i in 0 until updatesList.childCount) updatesList.getChildAt(i).findViewWithTag<Button>(UPDATE_BUTTON)?.isEnabled = !on
@@ -126,6 +132,36 @@ class MainActivity : Activity() {
     private fun show(out: TextView, scroller: ScrollView, line: String) {
         out.append(line + "\n")
         scroller.post { scroller.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    // --- Build from: kept by the module in /data/adb/seraph/build-from (none: auto).
+
+    private fun loadBuildFrom() {
+        worker.execute {
+            val text = StringBuilder()
+            Root.run("cat $BUILD_FROM 2>/dev/null") { text.append(it) }
+            val id = when (text.toString().trim()) {
+                "flake" -> R.id.from_flake
+                "configuration" -> R.id.from_configuration
+                else -> R.id.from_auto
+            }
+            runOnUiThread {
+                buildFrom.check(id)
+                buildFrom.setOnCheckedChangeListener { _, checked -> saveBuildFrom(checked) }
+            }
+        }
+    }
+
+    private fun saveBuildFrom(checked: Int) {
+        val command = when (checked) {
+            R.id.from_flake -> "echo flake > $BUILD_FROM"
+            R.id.from_configuration -> "echo configuration > $BUILD_FROM"
+            else -> "rm -f $BUILD_FROM"
+        }
+        worker.execute {
+            val exit = Root.run("mkdir -p /data/adb/seraph && $command")
+            if (exit != 0) runOnUiThread { Toast.makeText(this, R.string.no_root, Toast.LENGTH_LONG).show() }
+        }
     }
 
     // --- Updates.
@@ -228,6 +264,7 @@ class MainActivity : Activity() {
         const val EXTRA_TAB = "tab"
         const val TAB_UPDATES = "updates"
         private const val UPDATE_BUTTON = "update"
+        private const val BUILD_FROM = "/data/adb/seraph/build-from"
         private const val STORAGE_DOCUMENTS = "com.android.externalstorage.documents"
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
     }

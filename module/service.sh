@@ -4,6 +4,9 @@ MODDIR=${0%/*}
 
 until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
 sh "$MODDIR/apply.sh" boot
-# The app schedules its update check (it keeps it, but a new install has none yet).
+BY=boot
 . "$MODDIR/common.sh"
+# The services the last build left running (android.services) start again.
+engine services < /dev/null
+# The app schedules its update check (it keeps it, but a new install has none yet).
 tell_app schedule

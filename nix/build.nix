@@ -75,6 +75,14 @@ in
               managed (app // { debloat = if app.debloat == true then true else null; })
             ) config.android.apps);
             inherit system;
+            # The services that run, with what each needs; one that left the config is stopped.
+            services = lib.optionalAttrs config.android.services.tailscale.enable {
+              tailscale = let ts = config.android.services.tailscale; in {
+                inherit (ts) package hostname port authKeyFile;
+                upFlags = ts.extraUpFlags;
+                daemonFlags = ts.extraDaemonFlags;
+              };
+            };
           };
         };
   };

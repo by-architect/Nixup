@@ -15,8 +15,21 @@
 #   android.settings.raw     any other of Android's settings, by its name
 #   android.apps."<package>" an app's settings (every one: nix/app.nix); debloat = true removes
 #                            one that came with the phone (its data kept)
+#   android.services.<name>  programs root keeps running, as NixOS's services (nix/services.nix)
+#
+# With flake.nix next to it, this folder is a flake (as /etc/nixos can be): the app's Build
+# from picks which one a build reads.
 { config, lib, pkgs, ... }:
 {
+  # Tailscale, run by root (tailscaled), next to the Tailscale app: userspace mode takes no VPN
+  # slot. The first build shows a link to log in with; authKeyFile would log in without one.
+  android.services.tailscale = {
+    enable = true;
+    # hostname = "logos";             # null: the phone's name
+    # authKeyFile = "/data/adb/seraph/secrets/tailscale.key";
+    # extraUpFlags = [ "--ssh" ];
+  };
+
   # The phone's own settings, as they were on it on 2026-11-01. null: not set on the phone, so
   # Android takes its own default (a value there would set it). A setting this phone does not
   # have is told at build time, and left as it is. Every option: nix/system.nix.

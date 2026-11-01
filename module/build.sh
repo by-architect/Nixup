@@ -11,7 +11,7 @@
 #            fetched again even when they are new enough, and a flake's
 #            flake.lock updated (its inputs' newest versions)
 # The config is /sdcard/Seraph/flake.nix when there is one (as nixos-rebuild --flake),
-# else /sdcard/Seraph/configuration.nix.
+# else /sdcard/Seraph/configuration.nix; the app's Build from can choose either.
 MODDIR=${0%/*}
 BY=${1:-manual}
 MODE=${2:-switch}
@@ -39,7 +39,12 @@ nix_eval() {
 # The flake is named by its real folder: Nix takes no path through a symlink, and
 # /sdcard is one (to /storage/emulated/0).
 FLAKE=
-[ -f "$CONFIG_DIR/flake.nix" ] && FLAKE="path:$(readlink -f "$CONFIG_DIR")"
+if [ "$(build_from)" = flake ]; then
+  [ -f "$CONFIG_DIR/flake.nix" ] || fail "Build from is flake, and $CONFIG_DIR has no flake.nix (the app's Build from: configuration.nix builds that alone)"
+  FLAKE="path:$(readlink -f "$CONFIG_DIR")"
+else
+  [ -f "$CONFIG" ] || fail "Build from is configuration.nix, and $CONFIG_DIR has none"
+fi
 nix_flake() { nix_run "$MODDIR/bin/nix" --store "$DATA/nix" "$@"; }
 
 # The configuration to build: the flake's only seraphConfigurations, or the one
