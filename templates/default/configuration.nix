@@ -28,9 +28,6 @@
 #   ];
 #   android.settings.repo.obtainium.autoupdatePackages = true;
 #
-#   android.packages.debloat = [ "org.lineageos.jelly" ];   apps that came with the phone, removed
-#                                                    (their data kept: out of the list, they come back)
-#
 #   android.settings.display = {                     the phone's own settings (nix/system.nix has all;
 #     darkMode = true;                               one this phone cannot have is told when building)
 #     fontScale = 1.15;
@@ -58,6 +55,8 @@
 #     language = "tr-TR";
 #     defaultFor = [ "browser" ];
 #   };
+#   android.apps."org.lineageos.jelly".debloat = true;   removes an app that came with the phone
+#                                                    (its data kept: taken out again, it comes back)
 #
 # Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix and
 # nix/app.nix in the project.

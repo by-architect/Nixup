@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * Makes the phone match the profile: its apps (android.packages: a list for each repository, and the apps from
- * releases), their settings (android.apps), the apps that came with the phone to remove (android.packages.debloat) and the
+ * releases), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
  * phone's own settings (android.system), in nixos-rebuild's order: first the plan and every check, and when one fails
  * nothing changes; then the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
  * the system settings (see SystemSettings), and the apps that left the config removed, their data kept.
@@ -22,9 +22,12 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         val android = JSONObject(profile.readText()).getJSONObject("android")
         val packages = android.optJSONObject("packages") ?: JSONObject()
         val apps = android.optJSONObject("apps") ?: JSONObject()
+        // The apps that came with the phone to remove (debloat), and the settings of the others.
+        val debloated = apps.keys().asSequence().filter { apps.getJSONObject(it).optBoolean("debloat") }.toList()
+        val appSettings = JSONObject(apps.toString()).apply { debloated.forEach { remove(it) } }
         val fromReleases = Releases.apps(android)
-        // Each app of the config with where it comes from: a repository, or its releases (obtainium); not the debloat list.
-        val wanted = packages.keys().asSequence().filter { it != Releases.NAME && it != DEBLOAT }
+        // Each app of the config with where it comes from: a repository, or its releases (obtainium).
+        val wanted = packages.keys().asSequence().filter { it != Releases.NAME }
             .flatMap { repo -> packages.getJSONArray(repo).strings().map { it to repo } }.toList() +
             fromReleases.map { it.id to Releases.NAME }
         // The ones removed by hand since the last build are no longer the module's.
@@ -94,11 +97,11 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         }
         if (upToDate.isNotEmpty()) Out.line("Up to date (${upToDate.size}): ${upToDate.joinToString(", ")}")
         val debloat = Debloat(data)
-        debloat.plan(packages.optJSONArray(DEBLOAT), homeApp(apps), problems)
+        debloat.plan(debloated, homeApp(apps), problems)
         // An app being removed (left the config, or debloated) gets no settings.
         val leaving = removals.toSet() + debloat.removing
         val settings = AppSettings(data)
-        settings.plan(apps, toInstall.map { it.id }.toSet(), leaving, problems)
+        settings.plan(appSettings, toInstall.map { it.id }.toSet(), leaving, problems)
         val system = SystemSettings(data)
         system.plan(android.optJSONObject("system"), toInstall.map { it.id }.toSet(), problems)
         if (problems.isNotEmpty()) {
@@ -116,7 +119,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
 
         val status = installer.fetchAndInstall(steps)
         if (status != 0) return status
-        var failed = settings.apply(apps, leaving)
+        var failed = settings.apply(appSettings, leaving)
         // An app that came with the phone keeps its data while removed: it gets its settings from before back first.
         for (id in debloat.removing) failed += settings.restoreApp(id)
         failed += debloat.apply()
@@ -172,9 +175,4 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
     }
 
     private fun JSONArray.strings() = (0 until length()).map { getString(it) }
-
-    companion object {
-        /** The list of android.packages with the apps that came with the phone, to remove. */
-        const val DEBLOAT = "debloat"
-    }
 }

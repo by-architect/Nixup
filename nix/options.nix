@@ -103,8 +103,8 @@ let
   idOf = app: if builtins.isString app then app else if app ? _id then app._id else app.id;
 
   # Lists of android.packages that are not F-Droid repositories, always there: apps from their
-  # releases, and apps that came with the phone to remove.
-  builtinSources = [ "obtainium" "debloat" ];
+  # releases, and Nix packages (pkgs, a later step).
+  builtinSources = [ "obtainium" "pkgs" ];
 
   repos = config.android.repos;
   packages = config.android.packages;
@@ -124,13 +124,19 @@ let
     map (id: { inherit repo id; }) (lib.unique (lib.filter (id: lib.count (other: other == id) list > 1) list))
   ) ids);
   inSeveral = lib.filter (id: lib.length (lib.filter (list: lib.elem id list) (lib.attrValues ids)) > 1) (lib.unique allIds);
-  debloat = packages.debloat or [ ];
-  debloatNotStrings = lib.filter (app: !builtins.isString app) debloat;
+  # The apps that came with the phone to remove (android.apps.<app>.debloat = true).
+  debloat = lib.attrNames (lib.filterAttrs (_: app: app.debloat == true) config.android.apps);
+  debloatInstalled = lib.filter (id: lib.elem id allIds) debloat;
+  # Whether an app sets anything besides debloat.
+  anySet = value:
+    if builtins.isAttrs value then lib.any anySet (lib.attrValues value)
+    else if builtins.isList value then value != [ ]
+    else value != null;
   notNames = lib.filter (id: !isPackageName id) allIds;
   wrongRepo = lib.concatLists (lib.mapAttrsToList (repo: list:
     map (app: { inherit repo; id = app._id; from = app._repo; })
       (lib.filter (app: !builtins.isString app && app ? _repo && app._repo != repo) list)
-  ) (removeAttrs packages [ "debloat" ]));
+  ) packages);
   badRepoNames = lib.filter (name: builtins.match "[a-z][a-zA-Z0-9]*" name == null) (lib.attrNames repos);
   notHttps = lib.filter (name: !lib.hasPrefix "https://" repos.${name}.address) (lib.attrNames repos);
   badKeys = lib.filter (name: builtins.match "[0-9a-f]{64}" repos.${name}.signingKey == null) (lib.attrNames repos);
@@ -189,7 +195,6 @@ in
         {
           fdroid = with pkgs.fdroid; [ com.byarchitect.dejavu ];
           obtainium = [ { id = "dev.imranr.obtainium"; url = "https://github.com/ImranR98/Obtainium"; apkFilter = "^(?!.*fdroid)"; } ];
-          debloat = [ "org.lineageos.jelly" ];
         }
       '';
       description = ''
@@ -197,15 +202,9 @@ in
         pkgs.<repo>, or package names as strings (a name with a Nix keyword in it,
         like "in.example.app", needs one). android.packages.obtainium takes apps from
         their own releases instead, as Obtainium does: { id = …; url = …; }. An app can
-        come from one source only.
-
-        android.packages.debloat lists apps that came with the phone (the ROM's own) to
-        remove, by package name in quotes: each is uninstalled for the user, its data kept,
-        so taking it out of the list (or removing the module) brings it back as it was. A
-        name this phone does not have is passed over, so one list fits several phones.
-        Parts Android needs (System UI, Settings, the phone app, the package installer,
-        the launcher and keyboard in use, ...) are refused. android.apps.<app>.enabled =
-        false disables an app instead.
+        come from one source only. An app that came with the phone is removed with
+        android.apps.<app>.debloat = true. android.packages.pkgs is kept for Nix packages
+        (from nixpkgs), a later step.
       '';
     };
 
@@ -273,13 +272,16 @@ in
     (check (badReleaseUrls == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " badReleaseUrls} needs an https:// url of its repository, like https://github.com/<owner>/<repo>.")
     (check (badSigners == [ ]) "android.packages.obtainium: the signer of ${lib.concatStringsSep ", " badSigners} is not a SHA-256 (64 hex digits).")
     (check (lib.elem "obtainium" (lib.attrNames repos) == false) "android.repos.obtainium: that name is taken by android.packages.obtainium (apps from their own releases); name the repository otherwise.")
-    (check (lib.elem "debloat" (lib.attrNames repos) == false) "android.repos.debloat: that name is taken by android.packages.debloat (apps that came with the phone, to remove); name the repository otherwise.")
+    (check (lib.elem "pkgs" (lib.attrNames repos) == false) "android.repos.pkgs: that name is taken by android.packages.pkgs (Nix packages); name the repository otherwise.")
+    (check (!(packages ? pkgs)) "android.packages.pkgs: Nix packages (from nixpkgs) are not here yet; they come in a later step.")
     (check (badRepoNames == [ ]) "android.repos: ${lib.concatStringsSep ", " badRepoNames} is not a name like byarchitect (a letter, then letters and digits).")
     (check (notHttps == [ ]) "android.repos: ${lib.concatStringsSep ", " notHttps} needs an https:// address.")
     (check (badKeys == [ ]) (lib.concatMapStringsSep "\n" (name:
       "android.repos.${name}: its fingerprint (the SHA-256 of its signing key: 64 hex digits, in ?fingerprint= or in fingerprint) is missing or not right."
     ) badKeys))
-    (check (debloatNotStrings == [ ]) "android.packages.debloat takes the package names of apps that came with the phone, in quotes, like \"org.lineageos.jelly\".")
+    (check (debloatInstalled == [ ]) (lib.concatMapStringsSep "\n" (id:
+      "android.apps.\"${id}\".debloat: ${id} is also in android.packages, to install; pick one."
+    ) debloatInstalled))
     (check (appsNotNames == [ ]) "android.apps: ${lib.concatStringsSep ", " appsNotNames} is not a package name (like \"org.example.app\").")
     (check (roleClash == [ ]) (lib.concatMapStringsSep "\n" (role:
       "android.apps: more than one app is the default for ${role} ("
@@ -293,7 +295,7 @@ in
   config.warnings = lib.concatLists (lib.mapAttrsToList (id: app:
     lib.optional (app.permissions.preciseLocation != null && lib.elem app.permissions.location [ null false "ask" ])
       "android.apps.\"${id}\": preciseLocation does nothing while location is ${builtins.toJSON app.permissions.location}."
-    ++ lib.optional (lib.elem id debloat)
-      "android.apps.\"${id}\": ${id} is in android.packages.debloat, so its settings do nothing."
+    ++ lib.optional (app.debloat == true && anySet (removeAttrs app [ "debloat" "_module" ]))
+      "android.apps.\"${id}\": debloat = true removes it, so its other settings do nothing."
   ) apps);
 }

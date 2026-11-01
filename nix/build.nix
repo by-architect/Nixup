@@ -70,7 +70,10 @@ in
             )) config.android.packages;
             settings = lib.mapAttrs (name: _: { autoupdatePackages = settings.repo.${name}.autoupdatePackages or false; })
               (repos // { obtainium = { }; });
-            apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: managed) config.android.apps);
+            # debloat only when true: false is the same as not managed.
+            apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: app:
+              managed (app // { debloat = if app.debloat == true then true else null; })
+            ) config.android.apps);
             inherit system;
           };
         };

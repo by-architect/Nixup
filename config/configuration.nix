@@ -9,12 +9,12 @@
 #                            a name with a Nix keyword in it (in, if, ...) goes in quotes:
 #                              [ "in.example.app" ]
 #   android.settings.repo.<repo>.autoupdatePackages   its apps update by themselves
-#   android.packages.debloat apps that came with the phone, to remove (their data is kept)
 #   android.settings.display, .sound, .time, .language, .network, .lockScreen, ...
 #                            the phone's own settings (every one: nix/system.nix)
 #   android.settings.lineage.*   LineageOS's own settings, on ROMs based on it (nix/lineage.nix)
 #   android.settings.raw     any other of Android's settings, by its name
-#   android.apps."<package>" an app's settings (every one: nix/app.nix)
+#   android.apps."<package>" an app's settings (every one: nix/app.nix); debloat = true removes
+#                            one that came with the phone (its data kept)
 { config, lib, pkgs, ... }:
 {
   # The phone's own settings, as they were on it on 2026-11-01. null: not set on the phone, so
@@ -264,10 +264,6 @@ android.settings.repo.obtainium.autoupdatePackages = true;
   android.packages.byarchitect = with pkgs.byarchitect; [
     com.byarchitect.dejavu
   ];
-
-  # Apps that came with the phone to remove, like "org.lineageos.jelly" (their data is kept:
-  # taken out of the list, they come back). None for now.
-  android.packages.debloat = [ ];
 
   # Every app setting, on one app, to see what each one does.
   android.apps."com.zorinos.zorin_connect" = {

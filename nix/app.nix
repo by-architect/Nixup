@@ -87,6 +87,13 @@ in
     pauseIfUnused = toggle "Pause the app's activity (its permissions, notifications) when it is not used for months.";
     enabled = toggle "The app enabled (true) or disabled (false: it does not run and is hidden).";
     paused = toggle "The app paused (true: it cannot be opened or notify until unpaused).";
+    debloat = toggle ''
+      Remove the app, one that came with the phone (the ROM's own), for the user. Its data is
+      kept, so false, taking this out again, or removing the module brings it back as it was.
+      Parts Android needs (System UI, Settings, the phone app, the package installer, the
+      launcher and keyboard in use, ...) are refused, and an app this phone does not have is
+      passed over, so one config fits several phones. enabled = false disables an app instead.
+    '';
     openLinks = toggle "Open the links the app supports (its web addresses) in it.";
 
     language = mkOption {

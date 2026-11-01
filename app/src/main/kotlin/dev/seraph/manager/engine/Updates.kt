@@ -24,7 +24,7 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
     /** Each repository's apps in the config. */
     private fun configApps(): Map<String, List<String>> {
         val packages = android?.optJSONObject("packages") ?: return emptyMap()
-        return packages.keys().asSequence().filter { it != Releases.NAME && it != Apply.DEBLOAT }.associateWith { repo ->
+        return packages.keys().asSequence().filter { it != Releases.NAME }.associateWith { repo ->
             packages.getJSONArray(repo).let { a -> (0 until a.length()).map { a.getString(it) } }
         }
     }
