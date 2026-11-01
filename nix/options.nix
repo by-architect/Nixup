@@ -111,7 +111,7 @@ let
   ids = lib.mapAttrs (_: map idOf) packages;
   allIds = lib.concatLists (lib.attrValues ids);
   unknownRepos = lib.filter (name: !(repos ? ${name}) && !(lib.elem name builtinSources)) (lib.attrNames packages)
-    ++ lib.filter (name: !(repos ? ${name}) && name != "obtainium") (lib.attrNames config.android.settings);
+    ++ lib.filter (name: !(repos ? ${name}) && name != "obtainium") (lib.attrNames config.android.settings.repo);
   releasesApps = packages.obtainium or [ ];
   notReleasesApps = map idOf (lib.filter (app: !isReleasesApp app) releasesApps);
   misplacedReleasesApps = lib.concatLists (lib.mapAttrsToList (repo: list:
@@ -168,12 +168,6 @@ in
       description = "Messages shown while the config builds.";
     };
 
-    android.darkMode = mkOption {
-      type = types.nullOr types.bool;
-      default = null;
-      description = "Dark mode on (true) or off (false); null leaves it as the user sets it.";
-    };
-
     android.repos = mkOption {
       type = types.attrsOf (types.submodule repoModule);
       default = { };
@@ -215,7 +209,7 @@ in
       '';
     };
 
-    android.settings = mkOption {
+    android.settings.repo = mkOption {
       type = types.attrsOf (types.submodule {
         options.autoupdatePackages = mkOption {
           type = types.bool;
@@ -229,7 +223,12 @@ in
         };
       });
       default = { };
-      description = "Settings of each repository (android.settings.<repo>).";
+      description = ''
+        Settings of each repository's apps, by the repository's name
+        (android.settings.repo.<repo>), and of the apps from their releases
+        (android.settings.repo.obtainium). The phone's own settings are the other groups of
+        android.settings (nix/system.nix, nix/lineage.nix).
+      '';
     };
 
     android.apps = mkOption {
@@ -254,7 +253,7 @@ in
 
   config.assertions = [
     (check (unknownRepos == [ ]) (lib.concatMapStringsSep "\n" (name:
-      "android.packages.${name} / android.settings.${name}: there is no repository named ${name} (android.repos.${name}.url = \"…\";)."
+      "android.packages.${name} / android.settings.repo.${name}: there is no repository named ${name} (android.repos.${name}.url = \"…\";)."
     ) unknownRepos))
     (check (twice == [ ]) (lib.concatMapStringsSep "\n" (t:
       "android.packages.${t.repo} lists ${t.id} more than once: list each app once."

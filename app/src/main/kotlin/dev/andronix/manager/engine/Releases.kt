@@ -428,7 +428,7 @@ class Releases(data: File) {
     }
 
     companion object {
-        /** The name of this source in the config: android.packages.obtainium, android.settings.obtainium. */
+        /** The name of this source in the config: android.packages.obtainium, android.settings.repo.obtainium. */
         const val NAME = "obtainium"
 
         /** How many releases are asked for: the newest with an APK for the phone is usually among the first. */

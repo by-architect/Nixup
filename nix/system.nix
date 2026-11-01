@@ -1,5 +1,6 @@
-# The phone's own settings. The options with plain names (android.display.fontScale, ...) come
-# down to Android's settings tables, android.rawSettings, where any other setting can be set too
+# The phone's own settings, under android.settings. The options with plain names
+# (android.settings.display.fontScale, ...) come down to Android's settings tables,
+# android.settings.raw, where any other setting can be set too
 # (as `settings put` would); a few take a command instead (display density, navigation mode,
 # language, time zone, keyboard, Data Saver, location). An option left null is not managed: it
 # stays as the user sets it, and one taken out of the config gets back the value it had before.
@@ -10,7 +11,7 @@
 { config, lib, ... }:
 let
   inherit (lib) mkOption mkIf mkMerge types;
-  cfg = config.android;
+  cfg = config.android.settings;
 
   # An option that is not managed while null.
   option = type: description: mkOption { type = types.nullOr type; default = null; inherit description; };
@@ -161,7 +162,7 @@ let
 
   # A mapping's stored value: what it says, else true and false as 1 and 0, numbers and strings as they are.
   stored = m: (m.store or (v: if builtins.isBool v then bit v else v)) m.value;
-  set = lib.filter (m: m.value != null) (mappings ++ cfg.settingMappings);
+  set = lib.filter (m: m.value != null) (mappings ++ config.android.settingMappings);
 
   languages = if builtins.isString cfg.language then [ cfg.language ] else if cfg.language == null then [ ] else cfg.language;
   badLanguages = lib.filter (tag: builtins.match "[a-z]{2,3}(-[A-Za-z0-9]{2,8})*" tag == null) languages;
@@ -171,22 +172,11 @@ let
   isComponent = value: value == null || builtins.match "[A-Za-z][A-Za-z0-9_.]*/[A-Za-z0-9_.$]+" value != null;
   badRawKeys = lib.concatLists (lib.mapAttrsToList (table: settings:
     map (key: "${table}.${key}") (lib.filter (key: builtins.match "[A-Za-z0-9_.:-]+" key == null) (lib.attrNames settings))
-  ) (removeAttrs cfg.rawSettings [ "lineage" ] // lib.mapAttrs' (t: v: lib.nameValuePair "lineage.${t}" v) cfg.rawSettings.lineage));
+  ) (removeAttrs cfg.raw [ "lineage" ] // lib.mapAttrs' (t: v: lib.nameValuePair "lineage.${t}" v) cfg.raw.lineage));
   check = assertion: message: { inherit assertion message; };
 in
 {
   options.android = {
-    rawSettings = {
-      system = settingsTable "Android's system";
-      secure = settingsTable "Android's secure";
-      global = settingsTable "Android's global";
-      lineage = {
-        system = settingsTable "LineageOS's system (on ROMs based on LineageOS)";
-        secure = settingsTable "LineageOS's secure (on ROMs based on LineageOS)";
-        global = settingsTable "LineageOS's global (on ROMs based on LineageOS)";
-      };
-    };
-
     settingMappings = mkOption {
       type = types.listOf types.attrs;
       default = [ ];
@@ -200,8 +190,22 @@ in
       internal = true;
       description = "For each setting a plain option sets (\"table/name\"), that option, for the build's messages.";
     };
+  };
+
+  options.android.settings = {
+    raw = {
+      system = settingsTable "Android's system";
+      secure = settingsTable "Android's secure";
+      global = settingsTable "Android's global";
+      lineage = {
+        system = settingsTable "LineageOS's system (on ROMs based on LineageOS)";
+        secure = settingsTable "LineageOS's secure (on ROMs based on LineageOS)";
+        global = settingsTable "LineageOS's global (on ROMs based on LineageOS)";
+      };
+    };
 
     display = {
+      darkMode = option types.bool "Dark mode on (true) or off (false).";
       fontScale = option types.number "Font size: 1.0 is the normal size, 1.15 larger, 0.85 smaller (0.5 to 2).";
       boldText = option types.bool "Bold text everywhere (Android 12 and newer).";
       density = option types.ints.positive ''
@@ -385,35 +389,35 @@ in
   };
 
   config = {
-    android.time.automaticTimeZone = mkIf (cfg.time.timeZone != null) (lib.mkDefault false);
+    android.settings.time.automaticTimeZone = mkIf (cfg.time.timeZone != null) (lib.mkDefault false);
 
-    android.rawSettings = mkMerge (map (m: lib.setAttrByPath (lib.splitString "." m.table ++ [ m.key ]) (stored m)) set);
-    android.settingLabels = lib.listToAttrs (map (m: lib.nameValuePair "${m.table}/${m.key}" "android.${m.option}") set);
+    android.settings.raw = mkMerge (map (m: lib.setAttrByPath (lib.splitString "." m.table ++ [ m.key ]) (stored m)) set);
+    android.settingLabels = lib.listToAttrs (map (m: lib.nameValuePair "${m.table}/${m.key}" "android.settings.${m.option}") set);
 
     assertions = [
-      (check (badRawKeys == [ ]) "android.rawSettings: ${lib.concatStringsSep ", " badRawKeys} is not a setting's name (letters, digits, _ . : -).")
-      (check (inRange 0.5 2 cfg.display.fontScale) "android.display.fontScale: ${toString cfg.display.fontScale} is not between 0.5 and 2.")
-      (check (inRange 72 1000 cfg.display.density) "android.display.density: ${toString cfg.display.density} dpi is not a display size (phones have about 300 to 600).")
-      (check (inRange 5 86400 cfg.display.screenTimeout) "android.display.screenTimeout: give the seconds, 5 or more.")
-      (check (inRange 0 10 cfg.developer.animationScale) "android.developer.animationScale: ${toString cfg.developer.animationScale} is not between 0 and 10.")
-      (check (inRange (-1) 1 cfg.accessibility.audioBalance) "android.accessibility.audioBalance: ${toString cfg.accessibility.audioBalance} is not between -1 (left) and 1 (right).")
+      (check (badRawKeys == [ ]) "android.settings.raw: ${lib.concatStringsSep ", " badRawKeys} is not a setting's name (letters, digits, _ . : -).")
+      (check (inRange 0.5 2 cfg.display.fontScale) "android.settings.display.fontScale: ${toString cfg.display.fontScale} is not between 0.5 and 2.")
+      (check (inRange 72 1000 cfg.display.density) "android.settings.display.density: ${toString cfg.display.density} dpi is not a display size (phones have about 300 to 600).")
+      (check (inRange 5 86400 cfg.display.screenTimeout) "android.settings.display.screenTimeout: give the seconds, 5 or more.")
+      (check (inRange 0 10 cfg.developer.animationScale) "android.settings.developer.animationScale: ${toString cfg.developer.animationScale} is not between 0 and 10.")
+      (check (inRange (-1) 1 cfg.accessibility.audioBalance) "android.settings.accessibility.audioBalance: ${toString cfg.accessibility.audioBalance} is not between -1 (left) and 1 (right).")
       (check (cfg.display.nightLight.schedule == "custom" || (cfg.display.nightLight.from == null && cfg.display.nightLight.to == null))
-        "android.display.nightLight: from and to are the times of schedule = \"custom\".")
+        "android.settings.display.nightLight: from and to are the times of schedule = \"custom\".")
       (check (!(cfg.time.timeZone != null && cfg.time.automaticTimeZone == true))
-        "android.time: timeZone is set by hand, so automaticTimeZone cannot be true; pick one.")
+        "android.settings.time: timeZone is set by hand, so automaticTimeZone cannot be true; pick one.")
       (check (cfg.time.timeZone == null || builtins.match "[A-Za-z_]+(/[A-Za-z0-9_+-]+)*" cfg.time.timeZone != null)
-        "android.time.timeZone: \"${toString cfg.time.timeZone}\" is not a time zone like \"Europe/Istanbul\".")
-      (check (badLanguages == [ ]) "android.language: ${lib.concatStringsSep ", " badLanguages} is not a language like \"tr-TR\".")
-      (check (cfg.language == null || languages != [ ]) "android.language: give at least one language.")
+        "android.settings.time.timeZone: \"${toString cfg.time.timeZone}\" is not a time zone like \"Europe/Istanbul\".")
+      (check (badLanguages == [ ]) "android.settings.language: ${lib.concatStringsSep ", " badLanguages} is not a language like \"tr-TR\".")
+      (check (cfg.language == null || languages != [ ]) "android.settings.language: give at least one language.")
       (check (!dnsHost || builtins.match "([A-Za-z0-9-]+[.])+[A-Za-z]{2,}" dns != null)
-        "android.network.privateDns: \"${toString dns}\" is not \"off\", \"automatic\" or a hostname like \"dns.quad9.net\".")
-      (check (isComponent cfg.keyboard.default) "android.keyboard.default: \"${toString cfg.keyboard.default}\" is not an input method like \"com.android.inputmethod.latin/.LatinIME\".")
-      (check (isComponent cfg.autofill.service) "android.autofill.service: \"${toString cfg.autofill.service}\" is not a component like \"org.example.app/.AutofillService\".")
+        "android.settings.network.privateDns: \"${toString dns}\" is not \"off\", \"automatic\" or a hostname like \"dns.quad9.net\".")
+      (check (isComponent cfg.keyboard.default) "android.settings.keyboard.default: \"${toString cfg.keyboard.default}\" is not an input method like \"com.android.inputmethod.latin/.LatinIME\".")
+      (check (isComponent cfg.autofill.service) "android.settings.autofill.service: \"${toString cfg.autofill.service}\" is not a component like \"org.example.app/.AutofillService\".")
       (check (cfg.quickSettings.tiles == null || lib.all (tile: tile != "" && !lib.hasInfix "," tile) cfg.quickSettings.tiles)
-        "android.quickSettings.tiles: a tile's name cannot be empty or have a comma in it.")
+        "android.settings.quickSettings.tiles: a tile's name cannot be empty or have a comma in it.")
       (check (cfg.statusBar.hiddenIcons == null || lib.all (icon: builtins.match "[A-Za-z0-9_.-]+" icon != null) cfg.statusBar.hiddenIcons)
-        "android.statusBar.hiddenIcons: an icon's name is letters, digits, _ . -, like \"alarm_clock\".")
-      (check (cfg.deviceName == null || cfg.deviceName != "") "android.deviceName: the name cannot be empty.")
+        "android.settings.statusBar.hiddenIcons: an icon's name is letters, digits, _ . -, like \"alarm_clock\".")
+      (check (cfg.deviceName == null || cfg.deviceName != "") "android.settings.deviceName: the name cannot be empty.")
     ];
   };
 }

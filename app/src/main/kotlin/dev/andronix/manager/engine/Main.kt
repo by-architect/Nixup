@@ -21,7 +21,7 @@ import kotlin.system.exitProcess
  *                                 changed, and removes the apps it installed
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
- *                                 android.settings.<repo>.autoupdatePackages is true)
+ *                                 android.settings.repo.<repo>.autoupdatePackages is true)
  * Exit status: 0 done, 2 stopped before changing anything, 1 stopped partway.
  */
 object Main {

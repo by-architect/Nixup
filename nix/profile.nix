@@ -27,22 +27,23 @@ let
   # The phone's own settings: the settings tables (Android's system, secure and global, and
   # LineageOS's as lineage.system, ...; true and false as 1 and 0), with the plain option that set
   # each, and those that take a command; a table or option that is not set is left out.
-  tables = removeAttrs cfg.android.rawSettings [ "lineage" ]
-    // lib.mapAttrs' (name: lib.nameValuePair "lineage.${name}") cfg.android.rawSettings.lineage;
+  settings = cfg.android.settings;
+  tables = removeAttrs settings.raw [ "lineage" ]
+    // lib.mapAttrs' (name: lib.nameValuePair "lineage.${name}") settings.raw.lineage;
   system = lib.filterAttrs (_: value: value != null && value != { }) {
     settings = lib.filterAttrs (_: table: table != { }) (lib.mapAttrs (_: lib.mapAttrs (_: value:
       if builtins.isBool value then (if value then 1 else 0) else value
     )) tables);
     labels = cfg.android.settingLabels;
-    keyboard = cfg.android.keyboard.default;
-    inherit (cfg.android.display) density;
-    navigation = if cfg.android.navigation.mode == null then null
-      else { gestures = "gestural"; threeButton = "threebutton"; twoButton = "twobutton"; }.${cfg.android.navigation.mode};
-    language = if cfg.android.language == null then null
-      else lib.concatStringsSep "," (lib.toList cfg.android.language);
-    inherit (cfg.android.time) timeZone;
-    inherit (cfg.android.network) dataSaver;
-    location = cfg.android.location.enable;
+    keyboard = settings.keyboard.default;
+    inherit (settings.display) density;
+    navigation = if settings.navigation.mode == null then null
+      else { gestures = "gestural"; threeButton = "threebutton"; twoButton = "twobutton"; }.${settings.navigation.mode};
+    language = if settings.language == null then null
+      else lib.concatStringsSep "," (lib.toList settings.language);
+    inherit (settings.time) timeZone;
+    inherit (settings.network) dataSaver;
+    location = settings.location.enable;
   };
 
   # An app's settings without the ones left null (not managed); an app with none is left out.
@@ -61,7 +62,7 @@ else
     # The module refuses a profile whose schemaVersion it does not know.
     schemaVersion = 1;
     android = {
-      inherit (cfg.android) darkMode;
+      inherit (settings.display) darkMode;
       inherit repos;
       # An F-Droid app as its package name; an app from its own releases with where they are.
       packages = lib.mapAttrs (_: map (app:
@@ -72,7 +73,7 @@ else
         }
         else app._id
       )) cfg.android.packages;
-      settings = lib.mapAttrs (name: _: { autoupdatePackages = cfg.android.settings.${name}.autoupdatePackages or false; })
+      settings = lib.mapAttrs (name: _: { autoupdatePackages = settings.repo.${name}.autoupdatePackages or false; })
         (repos // { obtainium = { }; });
       apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: managed) cfg.android.apps);
       inherit system;

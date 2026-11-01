@@ -8,7 +8,7 @@
 { config, lib, ... }:
 let
   inherit (lib) mkOption types;
-  cfg = config.android.lineage;
+  cfg = config.android.settings.lineage;
 
   option = type: description: mkOption { type = types.nullOr type; default = null; inherit description; };
   enum = values: value: values.${value};
@@ -24,7 +24,7 @@ let
   global = "lineage.global";
 in
 {
-  options.android.lineage = {
+  options.android.settings.lineage = {
     statusBar = {
       clockPosition = option (types.enum [ "right" "center" "left" ]) "Where the status bar's clock is.";
       clockAutoHide = option types.bool "Hide the clock while the home screen is shown.";

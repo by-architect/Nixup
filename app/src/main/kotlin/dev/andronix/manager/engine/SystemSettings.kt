@@ -6,8 +6,8 @@ import java.util.TimeZone
 
 /**
  * The phone's own settings, from the profile's android.system: the settings tables (Android's system, secure and
- * global, and on ROMs based on LineageOS its own: what the plain options, like android.display.fontScale, come down
- * to, and android.rawSettings), and the ones that take a command: display density, navigation mode, languages, time
+ * global, and on ROMs based on LineageOS its own: what the plain options of android.settings, like
+ * android.settings.display.fontScale, come down to, and android.settings.raw), and the ones that take a command: display density, navigation mode, languages, time
  * zone, keyboard, Data Saver and location. Each has a key ("system/font_scale", "lineage.system/status_bar_clock",
  * "density", ...) and a value read as a string, null when it is not set.
  *
@@ -312,9 +312,10 @@ class SystemSettings(data: File) {
         private val COMPANION_KEYS = COMPANIONS.values.flatten().toSet()
 
         private val LABELS = mapOf(
-            "density" to "android.display.density", "navigation" to "android.navigation.mode", "language" to "android.language",
-            "timeZone" to "android.time.timeZone", "keyboard" to "android.keyboard.default", "dataSaver" to "android.network.dataSaver",
-            "location" to "android.location.enable",
+            "density" to "android.settings.display.density", "navigation" to "android.settings.navigation.mode",
+            "language" to "android.settings.language", "timeZone" to "android.settings.time.timeZone",
+            "keyboard" to "android.settings.keyboard.default", "dataSaver" to "android.settings.network.dataSaver",
+            "location" to "android.settings.location.enable",
         )
 
         private fun release(sdk: Int) = mapOf(30 to "11", 31 to "12", 32 to "12L", 33 to "13", 34 to "14", 35 to "15", 36 to "16")[sdk] ?: "API $sdk"

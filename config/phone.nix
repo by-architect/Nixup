@@ -2,29 +2,27 @@
 # module's Action button in Magisk): Nix on the phone checks it and applies it.
 #
 # Options:
-#   android.darkMode         true (on), false (off), or null (left as you set it)
 #   android.repos.<name>     an F-Droid repository besides f-droid.org (fdroid):
 #                              android.repos.mine.url = "https://…/repo?fingerprint=…";
 #   android.packages.<repo>  its apps, by package name (an app comes from one repo only):
 #                              with pkgs.fdroid; [ org.example.app ]
 #                            a name with a Nix keyword in it (in, if, ...) goes in quotes:
 #                              [ "in.example.app" ]
-#   android.settings.<repo>.autoupdatePackages   its apps update by themselves
+#   android.settings.repo.<repo>.autoupdatePackages   its apps update by themselves
 #   android.packages.debloat apps that came with the phone, to remove (their data is kept)
-#   android.display, .sound, .time, .language, .network, .location, .lockScreen, ...
+#   android.settings.display, .sound, .time, .language, .network, .lockScreen, ...
 #                            the phone's own settings (every one: nix/system.nix)
-#   android.lineage.*        LineageOS's own settings, on ROMs based on it (nix/lineage.nix)
-#   android.rawSettings      any other of Android's settings, by its name
+#   android.settings.lineage.*   LineageOS's own settings, on ROMs based on it (nix/lineage.nix)
+#   android.settings.raw     any other of Android's settings, by its name
 #   android.apps."<package>" an app's settings (every one: nix/app.nix)
 { pkgs, ... }:
 {
-  android.darkMode = true;
-
   # The phone's own settings, as they were on it on 2026-11-01. null: not set on the phone, so
   # Android takes its own default (a value there would set it). A setting this phone does not
   # have is told at build time, and left as it is. Every option: nix/system.nix.
 
-  android.display = {
+  android.settings.display = {
+    darkMode = true;
     fontScale = 1.15;                   # font size: 1.0 is normal
     boldText = true;
     density = 320;                      # display size, in dpi (this phone's own is 400)
@@ -47,9 +45,9 @@
     screenSaver.whileDocked = false;
   };
 
-  android.navigation.mode = "gestures";   # or "threeButton"
+  android.settings.navigation.mode = "gestures";   # or "threeButton"
 
-  android.sound = {
+  android.settings.sound = {
     touchSounds = false;
     touchVibration = true;
     dialpadTones = true;
@@ -61,22 +59,22 @@
     keyboardVibration = true;
   };
 
-  android.time = {
+  android.settings.time = {
     automatic = true;
     automaticTimeZone = true;
     timeZone = null;            # from the network now; a zone like "Europe/Istanbul" sets it by hand
     format24h = true;
   };
 
-  android.language = "en-US";   # or several, in order: [ "tr-TR" "en-US" ]
+  android.settings.language = "en-US";   # or several, in order: [ "tr-TR" "en-US" ]
 
-  android.keyboard = {
+  android.settings.keyboard = {
     default = "com.android.inputmethod.latin/.LatinIME";   # `ime list -a -s` lists the phone's
     showWithPhysicalKeyboard = false;
     spellChecker = null;
   };
 
-  android.network = {
+  android.settings.network = {
     privateDns = null;             # "off", "automatic", or a provider like "dns.quad9.net"
     dataSaver = false;             # on, it also cuts the background data of VPN apps like Tailscale
     wifiScanning = false;
@@ -86,12 +84,12 @@
     wifiWakeup = true;
   };
 
-  android.location = {
+  android.settings.location = {
     enable = false;
     assistedGps = true;
   };
 
-  android.lockScreen = {
+  android.settings.lockScreen = {
     notifications = false;
     sensitiveNotifications = true;
     silentNotifications = false;
@@ -101,7 +99,7 @@
     qrCodeScanner = false;
   };
 
-  android.notifications = {
+  android.settings.notifications = {
     dots = true;
     bubbles = true;
     snooze = null;
@@ -114,7 +112,7 @@
     mediaOnLockScreen = null;
   };
 
-  android.gestures = {
+  android.settings.gestures = {
     oneHandedMode = false;
     swipeDownForNotifications = false;
     holdPower = "assistant";             # or "powerMenu"
@@ -122,12 +120,12 @@
     preventRinging = "vibrate";          # "off", "vibrate" or "mute"
   };
 
-  android.power = {
+  android.settings.power = {
     batterySaverAt = null;    # battery percent; 0: never
     adaptiveBattery = null;
   };
 
-  android.developer = {
+  android.settings.developer = {
     enable = true;
     usbDebugging = true;         # false turns adb off, also for run-config-build.sh
     stayAwake = false;
@@ -141,7 +139,7 @@
     forceResizable = null;
   };
 
-  android.accessibility = {
+  android.settings.accessibility = {
     colorInversion = null;
     highContrastText = false;
     colorCorrection = null;     # "off", "deuteranomaly", "protanomaly", "tritanomaly", "grayscale"
@@ -151,11 +149,11 @@
     audioBalance = null;        # -1 left, 0 middle, 1 right
   };
 
-  android.privacy.showPasswords = null;
+  android.settings.privacy.showPasswords = null;
 
-  android.autofill.service = "com.x8bit.bitwarden/com.x8bit.bitwarden.Autofill.AutofillService";
+  android.settings.autofill.service = "com.x8bit.bitwarden/com.x8bit.bitwarden.Autofill.AutofillService";
 
-  android.quickSettings.tiles = [
+  android.settings.quickSettings.tiles = [
     "internet"
     "bt"
     "hotspot"
@@ -180,12 +178,12 @@
     "custom(dev.theolm.wwc/.quicktile.ChatTile)"
   ];
 
-  android.statusBar.hiddenIcons = [ "rotate" ];
+  android.settings.statusBar.hiddenIcons = [ "rotate" ];
 
-  android.deviceName = "Logos";
+  android.settings.deviceName = "Logos";
 
   # Any other of Android's settings, by its name, as `settings put <table> <name> <value>`.
-  android.rawSettings = {
+  android.settings.raw = {
     system = { };
     secure = { };
     global = { };
@@ -193,7 +191,7 @@
 
   # LineageOS's own settings, on ROMs based on it, like this one (every one: nix/lineage.nix).
 
-  android.lineage.statusBar = {
+  android.settings.lineage.statusBar = {
     clockPosition = "left";      # "right", "center" or "left"
     clockAutoHide = false;
     amPm = "hidden";
@@ -202,12 +200,12 @@
     doubleTapToSleep = true;
   };
 
-  android.lineage.quickSettings = {
+  android.settings.lineage.quickSettings = {
     quickPulldown = "off";         # "off", "right" or "left"
     autoBrightnessButton = true;
   };
 
-  android.lineage.buttons = {
+  android.settings.lineage.buttons = {
     volumeWake = false;
     volumeAnswerCall = false;
     volumeMusicControls = true;     # hold a volume button to skip tracks
@@ -217,30 +215,30 @@
     partialScreenshot = true;
   };
 
-  android.lineage.sound = {
+  android.settings.lineage.sound = {
     increasingRing = false;
     volumePanelOnLeft = true;
   };
 
-  android.lineage.navigation.gestureHint = true;
+  android.settings.lineage.navigation.gestureHint = true;
 
-  android.lineage.display = {
+  android.settings.lineage.display = {
     proximityOnWake = true;       # the phone reports no proximity sensor now
     pureBlackDarkTheme = false;
   };
 
-  android.lineage.lockScreen = {
+  android.settings.lineage.lockScreen = {
     rotation = false;
     scramblePin = null;
     mediaVisualizer = false;
   };
 
-  android.lineage.powerMenu = {
+  android.settings.lineage.powerMenu = {
     actions = [ "emergency" "lockdown" "power" "restart" "screenshot" "bugreport" "logout" ];
     advancedRestart = true;
   };
 
-  android.lineage.chargingControl = {
+  android.settings.lineage.chargingControl = {
     enable = false;
     mode = "auto";      # "auto", "custom" or "limit"
     limit = 80;         # percent, with mode = "limit"
@@ -248,9 +246,9 @@
     target = "06:00";
   };
 
-  android.lineage.wakeOnPlug = false;
+  android.settings.lineage.wakeOnPlug = false;
 
-  android.lineage.statsCollection = false;
+  android.settings.lineage.statsCollection = false;
 
   android.packages.fdroid = with pkgs.fdroid; [
     com.zorinos.zorin_connect
@@ -258,7 +256,7 @@
 android.packages.obtainium = [
   { id = "dev.imranr.obtainium"; url = "https://github.com/ImranR98/Obtainium"; apkFilter = "^(?!.*fdroid)"; }
 ];
-android.settings.obtainium.autoupdatePackages = true;
+android.settings.repo.obtainium.autoupdatePackages = true;
 
   # My own repository.
   android.repos.byarchitect.url =

@@ -7,7 +7,7 @@
 #   check            lists the updates (and keeps them in updates.json for the app)
 #   now [apps...]    updates all of them, or the apps named
 #   auto             what the phone does every 6 hours: updates the apps of the
-#                    repositories whose android.settings.<repo>.autoupdatePackages
+#                    repositories whose android.settings.repo.<repo>.autoupdatePackages
 #                    is true, and only tells about the others in a notification
 MODDIR=${0%/*}
 BY=${1:-manual}

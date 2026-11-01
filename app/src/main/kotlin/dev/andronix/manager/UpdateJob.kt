@@ -10,7 +10,7 @@ import android.util.Log
 
 /**
  * The periodic update check: every 6 hours, on Wi-Fi and with the battery not low, the module's update.sh runs as
- * root in auto mode. It installs the updates when the config's android.settings.fdroid.autoupdatePackages is true,
+ * root in auto mode. It installs the updates when the config's android.settings.repo.fdroid.autoupdatePackages is true,
  * and else only tells; its notifications come through UpdatesReceiver. The job only starts it, so a long update
  * does not hit the time a job may take.
  */

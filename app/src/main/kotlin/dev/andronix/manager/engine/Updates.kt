@@ -9,7 +9,7 @@ import java.io.File
  * build. list finds the ones with a newer version (the one a build would install) and writes them to updates.json
  * for the app's Updates tab; update installs them, all or the ones named, with notifications; update --auto is what
  * the phone runs every 6 hours: it installs those of the repositories (and obtainium) whose
- * android.settings.<repo>.autoupdatePackages is true, and only tells about the others in a notification. The config
+ * android.settings.repo.<repo>.autoupdatePackages is true, and only tells about the others in a notification. The config
  * is the last build's profile; the indexes and releases are those here (update.sh brings them up to date first).
  */
 class Updates(private val data: File, private val profile: File = File(data, "profile.json")) {
