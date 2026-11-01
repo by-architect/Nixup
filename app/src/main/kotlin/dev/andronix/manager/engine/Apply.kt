@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * Makes the phone match the profile: its apps (android.packages: a list for each repository, and the apps from
- * releases), their settings (android.apps), the apps that came with the phone to remove (android.debloat) and the
+ * releases), their settings (android.apps), the apps that came with the phone to remove (android.packages.debloat) and the
  * phone's own settings (android.system), in nixos-rebuild's order: first the plan and every check, and when one fails
  * nothing changes; then the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
  * the system settings (see SystemSettings), and the apps that left the config removed, their data kept.
@@ -23,8 +23,8 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         val packages = android.optJSONObject("packages") ?: JSONObject()
         val apps = android.optJSONObject("apps") ?: JSONObject()
         val fromReleases = Releases.apps(android)
-        // Each app of the config with where it comes from: a repository, or its releases (obtainium).
-        val wanted = packages.keys().asSequence().filter { it != Releases.NAME }
+        // Each app of the config with where it comes from: a repository, or its releases (obtainium); not the debloat list.
+        val wanted = packages.keys().asSequence().filter { it != Releases.NAME && it != DEBLOAT }
             .flatMap { repo -> packages.getJSONArray(repo).strings().map { it to repo } }.toList() +
             fromReleases.map { it.id to Releases.NAME }
         // The ones removed by hand since the last build are no longer the module's.
@@ -94,13 +94,13 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         }
         if (upToDate.isNotEmpty()) Out.line("Up to date (${upToDate.size}): ${upToDate.joinToString(", ")}")
         val debloat = Debloat(data)
-        debloat.plan(android.optJSONArray("debloat"), homeApp(apps), problems)
+        debloat.plan(packages.optJSONArray(DEBLOAT), homeApp(apps), problems)
         // An app being removed (left the config, or debloated) gets no settings.
         val leaving = removals.toSet() + debloat.removing
         val settings = AppSettings(data)
         settings.plan(apps, toInstall.map { it.id }.toSet(), leaving, problems)
         val system = SystemSettings(data)
-        system.plan(android.optJSONObject("system"), problems)
+        system.plan(android.optJSONObject("system"), toInstall.map { it.id }.toSet(), problems)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
@@ -172,4 +172,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
     }
 
     private fun JSONArray.strings() = (0 until length()).map { getString(it) }
+
+    companion object {
+        /** The list of android.packages with the apps that came with the phone, to remove. */
+        const val DEBLOAT = "debloat"
+    }
 }

@@ -10,9 +10,10 @@
 #                            a name with a Nix keyword in it (in, if, ...) goes in quotes:
 #                              [ "in.example.app" ]
 #   android.settings.<repo>.autoupdatePackages   its apps update by themselves
-#   android.debloat          apps that came with the phone, to remove (their data is kept)
+#   android.packages.debloat apps that came with the phone, to remove (their data is kept)
 #   android.display, .sound, .time, .language, .network, .location, .lockScreen, ...
 #                            the phone's own settings (every one: nix/system.nix)
+#   android.lineage.*        LineageOS's own settings, on ROMs based on it (nix/lineage.nix)
 #   android.rawSettings      any other of Android's settings, by its name
 #   android.apps."<package>" an app's settings (every one: nix/app.nix)
 { pkgs, ... }:
@@ -20,26 +21,30 @@
   android.darkMode = true;
 
   # The phone's own settings, as they were on it on 2026-11-01. null: not set on the phone, so
-  # Android takes its own default (a value there would set it).
+  # Android takes its own default (a value there would set it). A setting this phone does not
+  # have is told at build time, and left as it is. Every option: nix/system.nix.
+
   android.display = {
-    fontScale = 1.15;            # font size: 1.0 is normal
+    fontScale = 1.15;                   # font size: 1.0 is normal
     boldText = true;
-    density = 320;               # display size, in dpi (this phone's own is 400)
-    screenTimeout = 30;          # seconds
+    density = 320;                      # display size, in dpi (this phone's own is 400)
+    screenTimeout = 30;                 # seconds
     autoRotate = false;
     autoBrightness = true;
-    peakRefreshRate = null;      # "Infinity" on the phone: the highest the screen has
-    minRefreshRate = 120;        # Hz
-    alwaysOn = null;
+    peakRefreshRate = null;             # "Infinity" on the phone: the highest the screen has
+    minRefreshRate = 120;               # Hz
+    colorMode = "natural";              # "natural", "boosted", "saturated", "adaptive"
+    alwaysOn = null;                    # this phone has none
     wakeForNotifications = false;
     doubleTapToWake = false;
     liftToWake = true;
-    nightLight = {
-      schedule = null;           # "none", "sunsetToSunrise" or "custom"; now switched by hand
-      from = null;               # like "22:00", with schedule = "custom"
-      to = null;                 # like "06:30"
-      temperature = null;        # in kelvin: lower is warmer
-    };
+    nightLight.schedule = null;         # "none", "sunsetToSunrise" or "custom"; now switched by hand
+    nightLight.from = null;             # like "22:00", with schedule = "custom"
+    nightLight.to = null;               # like "06:30"
+    nightLight.temperature = null;      # in kelvin: lower is warmer
+    screenSaver.enable = false;
+    screenSaver.whileCharging = true;
+    screenSaver.whileDocked = false;
   };
 
   android.navigation.mode = "gestures";   # or "threeButton"
@@ -51,31 +56,49 @@
     screenLockSound = true;
     chargingSound = true;
     chargingVibration = true;
+    vibrateForCalls = true;
+    rampingRinger = false;      # vibrate first, then ring louder
+    keyboardVibration = true;
   };
 
   android.time = {
     automatic = true;
     automaticTimeZone = true;
-    timeZone = null;             # from the network now; a zone like "Europe/Istanbul" sets it by hand
+    timeZone = null;            # from the network now; a zone like "Europe/Istanbul" sets it by hand
     format24h = true;
   };
 
-  android.language = "en-US";    # or several, in order: [ "tr-TR" "en-US" ]
+  android.language = "en-US";   # or several, in order: [ "tr-TR" "en-US" ]
+
+  android.keyboard = {
+    default = "com.android.inputmethod.latin/.LatinIME";   # `ime list -a -s` lists the phone's
+    showWithPhysicalKeyboard = false;
+    spellChecker = null;
+  };
 
   android.network = {
-    privateDns = null;           # "off", "automatic", or a provider like "dns.quad9.net"
-    dataSaver = false;           # on, it also cuts the background data of VPN apps like Tailscale
+    privateDns = null;             # "off", "automatic", or a provider like "dns.quad9.net"
+    dataSaver = false;             # on, it also cuts the background data of VPN apps like Tailscale
     wifiScanning = false;
     bluetoothScanning = null;
     captivePortalCheck = null;
+    openWifiNotification = true;
+    wifiWakeup = true;
   };
 
-  android.location.enable = false;
+  android.location = {
+    enable = false;
+    assistedGps = true;
+  };
 
   android.lockScreen = {
     notifications = false;
     sensitiveNotifications = true;
-    lockAfter = null;            # seconds after the screen turns off
+    silentNotifications = false;
+    lockAfter = null;                # seconds after the screen turns off
+    wallet = true;
+    deviceControls = false;
+    qrCodeScanner = false;
   };
 
   android.notifications = {
@@ -83,10 +106,24 @@
     bubbles = true;
     snooze = null;
     history = true;
+    popUp = false;              # heads-up notifications
+    light = false;
+    flash.camera = false;
+    flash.screen = false;
+    mediaResume = null;
+    mediaOnLockScreen = null;
+  };
+
+  android.gestures = {
+    oneHandedMode = false;
+    swipeDownForNotifications = false;
+    holdPower = "assistant";             # or "powerMenu"
+    powerAndVolumeUp = "powerMenu";      # "nothing", "mute" or "powerMenu"
+    preventRinging = "vibrate";          # "off", "vibrate" or "mute"
   };
 
   android.power = {
-    batterySaverAt = null;       # battery percent; 0: never
+    batterySaverAt = null;    # battery percent; 0: never
     adaptiveBattery = null;
   };
 
@@ -95,12 +132,53 @@
     usbDebugging = true;         # false turns adb off, also for run-config-build.sh
     stayAwake = false;
     animationScale = 1;          # 0.5: twice as fast, 0: off
+    showTaps = false;
+    pointerLocation = null;
+    windowBlurs = false;
+    mobileDataAlwaysOn = true;
+    verifyAdbApps = false;
+    freeformWindows = null;
+    forceResizable = null;
   };
 
   android.accessibility = {
     colorInversion = null;
     highContrastText = false;
+    colorCorrection = null;     # "off", "deuteranomaly", "protanomaly", "tritanomaly", "grayscale"
+    magnification = false;      # triple-tap to zoom
+    touchAndHoldDelay = 400;    # milliseconds: 400 short, 1000 medium, 1500 long
+    monoAudio = null;
+    audioBalance = null;        # -1 left, 0 middle, 1 right
   };
+
+  android.privacy.showPasswords = null;
+
+  android.autofill.service = "com.x8bit.bitwarden/com.x8bit.bitwarden.Autofill.AutofillService";
+
+  android.quickSettings.tiles = [
+    "internet"
+    "bt"
+    "hotspot"
+    "location"
+    "airplane"
+    "caffeine"
+    "rotation"
+    "usb_tether"
+    "flashlight"
+    "cast"
+    "screenrecord"
+    "custom(org.lineageos.settings/.display.CabcTileService)"
+    "battery"
+    "saver"
+    "dnd"
+    "dark"
+    "night"
+    "mictoggle"
+    "cameratoggle"
+    "custom(org.lineageos.settings/.fpsinfo.FPSTileService)"
+    "vpn"
+    "custom(dev.theolm.wwc/.quicktile.ChatTile)"
+  ];
 
   android.statusBar.hiddenIcons = [ "rotate" ];
 
@@ -113,6 +191,67 @@
     global = { };
   };
 
+  # LineageOS's own settings, on ROMs based on it, like this one (every one: nix/lineage.nix).
+
+  android.lineage.statusBar = {
+    clockPosition = "left";      # "right", "center" or "left"
+    clockAutoHide = false;
+    amPm = "hidden";
+    batteryStyle = "icon";       # "icon", "circle", "dottedCircle" or "text"
+    batteryPercent = "inside";   # "hidden", "inside" or "nextTo"
+    doubleTapToSleep = true;
+  };
+
+  android.lineage.quickSettings = {
+    quickPulldown = "off";         # "off", "right" or "left"
+    autoBrightnessButton = true;
+  };
+
+  android.lineage.buttons = {
+    volumeWake = false;
+    volumeAnswerCall = false;
+    volumeMusicControls = true;     # hold a volume button to skip tracks
+    swapVolumeOnRotation = false;
+    torchLongPressPower = false;
+    torchTimeout = null;            # seconds; 0: never
+    partialScreenshot = true;
+  };
+
+  android.lineage.sound = {
+    increasingRing = false;
+    volumePanelOnLeft = true;
+  };
+
+  android.lineage.navigation.gestureHint = true;
+
+  android.lineage.display = {
+    proximityOnWake = true;       # the phone reports no proximity sensor now
+    pureBlackDarkTheme = false;
+  };
+
+  android.lineage.lockScreen = {
+    rotation = false;
+    scramblePin = null;
+    mediaVisualizer = false;
+  };
+
+  android.lineage.powerMenu = {
+    actions = [ "emergency" "lockdown" "power" "restart" "screenshot" "bugreport" "logout" ];
+    advancedRestart = true;
+  };
+
+  android.lineage.chargingControl = {
+    enable = false;
+    mode = "auto";      # "auto", "custom" or "limit"
+    limit = 80;         # percent, with mode = "limit"
+    start = "22:00";    # with mode = "custom"
+    target = "06:00";
+  };
+
+  android.lineage.wakeOnPlug = false;
+
+  android.lineage.statsCollection = false;
+
   android.packages.fdroid = with pkgs.fdroid; [
     com.zorinos.zorin_connect
   ];
@@ -121,16 +260,16 @@ android.packages.obtainium = [
 ];
 android.settings.obtainium.autoupdatePackages = true;
 
-  # My own repository: the test versions of Dejavu.
+  # My own repository.
   android.repos.byarchitect.url =
     "https://fdroid.byarchitect.org/fdroid/repo?fingerprint=50941BDAC56B056A520ABFA3FC7DAAB789DEE5B83B295DA54A1961C7BC8A91C9";
   android.packages.byarchitect = with pkgs.byarchitect; [
-    com.byarchitect.dejavu.test
+    com.byarchitect.dejavu
   ];
 
   # Apps that came with the phone to remove, like "org.lineageos.jelly" (their data is kept:
   # taken out of the list, they come back). None for now.
-  android.debloat = [ ];
+  android.packages.debloat = [ ];
 
   # Every app setting, on one app, to see what each one does.
   android.apps."com.zorinos.zorin_connect" = {

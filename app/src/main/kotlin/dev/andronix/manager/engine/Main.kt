@@ -15,6 +15,8 @@ import kotlin.system.exitProcess
  *                                 makes the apps, their settings, the debloat and the system settings match the
  *                                 profile (with --dry-run: only plans and checks; with --force, the releases are asked
  *                                 for again even when new enough)
+ *   support                       says which settings that need something of the phone (a feature, a newer Android,
+ *                                 LineageOS) this phone can have
  *   restore                       brings back the apps it removed, gives back every app and system setting the module
  *                                 changed, and removes the apps it installed
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
@@ -37,6 +39,7 @@ object Main {
                     Apply(FDroid.of(JSONObject(profile.readText()), data), data).run(profile, dryRun = "--dry-run" in args, force = "--force" in args)
                 }
                 "restore" -> Apply(emptyMap(), data).restore()
+                "support" -> SystemSettings(data).report().let { 0 }
                 "updates" -> Updates(data).list().let { 0 }
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
                 else -> usage()
@@ -102,5 +105,5 @@ object Main {
     }
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] | restore | updates | update [--auto] [apps...]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] | restore | support | updates | update [--auto] [apps...]")
 }

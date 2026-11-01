@@ -24,12 +24,17 @@ let
 
   failed = map (check: check.message) (lib.filter (check: !check.assertion) cfg.assertions);
 
-  # The phone's own settings: Android's settings tables (true and false as 1 and 0), and those
-  # that take a command; a table or option that is not set is left out.
+  # The phone's own settings: the settings tables (Android's system, secure and global, and
+  # LineageOS's as lineage.system, ...; true and false as 1 and 0), with the plain option that set
+  # each, and those that take a command; a table or option that is not set is left out.
+  tables = removeAttrs cfg.android.rawSettings [ "lineage" ]
+    // lib.mapAttrs' (name: lib.nameValuePair "lineage.${name}") cfg.android.rawSettings.lineage;
   system = lib.filterAttrs (_: value: value != null && value != { }) {
     settings = lib.filterAttrs (_: table: table != { }) (lib.mapAttrs (_: lib.mapAttrs (_: value:
       if builtins.isBool value then (if value then 1 else 0) else value
-    )) cfg.android.rawSettings);
+    )) tables);
+    labels = cfg.android.settingLabels;
+    keyboard = cfg.android.keyboard.default;
     inherit (cfg.android.display) density;
     navigation = if cfg.android.navigation.mode == null then null
       else { gestures = "gestural"; threeButton = "threebutton"; twoButton = "twobutton"; }.${cfg.android.navigation.mode};
@@ -71,6 +76,5 @@ else
         (repos // { obtainium = { }; });
       apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: managed) cfg.android.apps);
       inherit system;
-      inherit (cfg.android) debloat;
     };
   }

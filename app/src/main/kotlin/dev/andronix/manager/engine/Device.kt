@@ -6,11 +6,16 @@ import android.content.pm.PackageManager
 import android.content.pm.Signature
 import android.content.pm.SigningInfo
 import android.content.res.Configuration
+import android.content.res.Resources
+import android.hardware.SensorManager
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.LocaleList
 import android.os.Looper
 import android.os.StatFs
+import android.os.Vibrator
 import android.system.Os
+import android.view.Display
 import java.io.File
 
 /**
@@ -428,6 +433,89 @@ object Device {
     }
 
     fun setLocation(on: Boolean): Boolean = run("cmd", "location", "set-location-enabled", on.toString(), "--user", "0").first == 0
+
+    // --- LineageOS's own settings (content://lineagesettings), on ROMs based on LineageOS.
+
+    /** Whether this ROM has LineageOS's settings. */
+    val lineage: Boolean by lazy {
+        !run("content", "query", "--uri", "content://lineagesettings/global", "--projection", "name").second.contains("Could not find provider")
+    }
+
+    /** A table of LineageOS's settings (system, secure, global); a setting without a value is left out. */
+    fun lineageSettings(table: String): Map<String, String> {
+        val values = LinkedHashMap<String, String>()
+        for (line in run("content", "query", "--uri", "content://lineagesettings/$table", "--projection", "name:value").second.lineSequence()) {
+            val row = LINEAGE_ROW.matchEntire(line.trim()) ?: continue
+            values[row.groupValues[1]] = row.groupValues[2]
+        }
+        return values.filterValues { it != "NULL" && it != "null" }
+    }
+
+    /**
+     * Sets one of LineageOS's settings through its provider's own call (which checks the value). One is never deleted
+     * ([value] null fails): LineageOS tells of a deletion with its whole table's address, which System UI and the
+     * system server cannot take (on Android 16 both crash, and Android restarts).
+     */
+    fun putLineageSetting(table: String, key: String, value: String?): Boolean {
+        if (value == null) return false
+        val (status, said) = run("content", "call", "--uri", "content://lineagesettings", "--method", "PUT_$table", "--arg", key, "--extra", "value:s:$value")
+        return status == 0 && !said.contains("Error") && !said.contains("Exception")
+    }
+
+    private val LINEAGE_ROW = Regex("""Row: \d+ name=(.*?), value=(.*)""")
+
+    // --- The keyboard.
+
+    /** The input methods (keyboards) the phone has, enabled or not. */
+    fun inputMethods(): List<String> = run("ime", "list", "-a", "-s").second.lineSequence().map { it.trim() }.filter { it.contains('/') }.toList()
+
+    /** Enables an input method and makes it the one to type with. */
+    fun setKeyboard(id: String): Boolean = run("ime", "enable", id).first == 0 && run("ime", "set", id).first == 0
+
+    // --- What the phone has, for the settings that need something.
+
+    /** Android's own resources as this phone has them, with its maker's overlays (as Settings sees them). */
+    private val frameworkResources: Resources? by lazy {
+        try {
+            packageManager?.getResourcesForApplication("android")
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun resource(name: String, type: String): Int? =
+        frameworkResources?.getIdentifier(name, type, "android")?.takeIf { it != 0 }
+
+    /** A config value of Android (config_…), or null when this Android has no such value. */
+    fun configBool(name: String): Boolean? = resource(name, "bool")?.let { frameworkResources?.getBoolean(it) }
+
+    fun configString(name: String): String? = resource(name, "string")?.let { frameworkResources?.getString(it) }
+
+    fun configIntArray(name: String): IntArray? = resource(name, "array")?.let { frameworkResources?.getIntArray(it) }
+
+    fun hasFeature(name: String): Boolean = packageManager?.hasSystemFeature(name) ?: false
+
+    fun hasVibrator(): Boolean = try {
+        context?.getSystemService(Vibrator::class.java)?.hasVibrator() ?: false
+    } catch (e: Throwable) {
+        false
+    }
+
+    fun hasSensor(type: Int): Boolean = try {
+        (context?.getSystemService(Context.SENSOR_SERVICE) as? SensorManager)?.getDefaultSensor(type) != null
+    } catch (e: Throwable) {
+        false
+    }
+
+    /** The refresh rates the screen has. */
+    fun refreshRates(): Set<Float> = try {
+        (context?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.getDisplay(Display.DEFAULT_DISPLAY)
+            ?.supportedModes?.map { it.refreshRate }?.toSet() ?: emptySet()
+    } catch (e: Throwable) {
+        emptySet()
+    }
+
+    fun hasService(name: String): Boolean = run("service", "check", name).second.contains(": found")
 
     // --- Apps that came with the phone.
 
