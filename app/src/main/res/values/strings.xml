@@ -16,12 +16,13 @@
     <string name="update">Update</string>
     <string name="checking">Looking for updates…</string>
     <string name="updating">Updating…</string>
-    <string name="updates_not_checked">Not checked yet: Check for updates looks at F-Droid for newer versions of the config\'s apps.</string>
+    <string name="updates_not_checked">Not checked yet: Check for updates looks for newer versions of the config\'s apps (in their repositories, and their releases).</string>
     <string name="updates_status">Checked %1$s\nAuto-update (android.settings.&lt;repo&gt;.autoupdatePackages): %2$s</string>
     <string name="auto_repo">%1$s %2$s</string>
     <string name="auto_on">on</string>
     <string name="auto_off">off</string>
     <string name="up_to_date">Everything is up to date.</string>
+    <string name="size_unknown">size unknown</string>
     <string name="update_line">%1$s  %2$s → %3$s  (%4$s, from %5$s)</string>
     <string name="channel_progress">Installing and updating</string>
     <string name="channel_results">Updates</string>

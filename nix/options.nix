@@ -52,13 +52,73 @@ let
   repoApp = types.addCheck types.attrs (app: app ? _id) // {
     description = "app from a repository (from pkgs.<repo>)";
   };
-  idOf = app: if builtins.isString app then app else app._id;
+
+  # An app from its own releases, as Obtainium adds one: android.packages.obtainium.
+  releasesApp = types.submodule {
+    options = {
+      id = mkOption {
+        type = types.str;
+        description = "The app's package name, like dev.imranr.obtainium.";
+      };
+      url = mkOption {
+        type = types.str;
+        example = "https://github.com/ImranR98/Obtainium";
+        description = ''
+          Where its releases are: https://github.com/<owner>/<repo>,
+          https://gitlab.com/<group>/<project>, https://codeberg.org/<owner>/<repo>, or
+          another Forgejo or Gitea server.
+        '';
+      };
+      apkFilter = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "^(?!.*fdroid)";
+        description = ''
+          A regular expression the APK's file name must match (Obtainium's apkFilterRegEx).
+          The APK for the phone's ABI (arm64-v8a, …) is picked by itself; this picks
+          between the others a release has, like flavors: "^(?!.*fdroid)" takes the
+          names without "fdroid" in them.
+        '';
+      };
+      signer = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "B3:53:60:1F:6A:1D:5F:D6:60:3A:E2:F5:0B:E8:0C:F3:01:36:7B:86:B6:AB:8B:1F:66:24:3D:A9:6C:D5:73:62";
+        description = ''
+          SHA-256 of the certificate the app is signed with (64 hex digits, with or
+          without colons, as apksigner and Obtainium show it): an APK signed otherwise is
+          refused. Without it, the first install trusts what the release offers (later
+          updates must have the same signer anyway: Android checks that).
+        '';
+      };
+      prerelease = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Take pre-releases too.";
+      };
+    };
+  };
+  # A repository's node always has _id (and may have a child named url); an app from releases has none.
+  isReleasesApp = app: builtins.isAttrs app && !(app ? _id) && app ? url;
+  idOf = app: if builtins.isString app then app else if app ? _id then app._id else app.id;
+
+  # Sources that are not F-Droid repositories, always there.
+  builtinSources = [ "obtainium" ];
 
   repos = config.android.repos;
   packages = config.android.packages;
   ids = lib.mapAttrs (_: map idOf) packages;
   allIds = lib.concatLists (lib.attrValues ids);
-  unknownRepos = lib.filter (name: !(repos ? ${name})) (lib.unique (lib.attrNames packages ++ lib.attrNames config.android.settings));
+  unknownRepos = lib.filter (name: !(repos ? ${name}) && !(lib.elem name builtinSources))
+    (lib.unique (lib.attrNames packages ++ lib.attrNames config.android.settings));
+  releasesApps = packages.obtainium or [ ];
+  notReleasesApps = map idOf (lib.filter (app: !isReleasesApp app) releasesApps);
+  misplacedReleasesApps = lib.concatLists (lib.mapAttrsToList (repo: list:
+    map (app: { inherit repo; inherit (app) id; }) (lib.filter isReleasesApp list)
+  ) (removeAttrs packages [ "obtainium" ]));
+  badReleaseUrls = map (app: app.id) (lib.filter (app: isReleasesApp app && builtins.match "https://[^/]+/[^/]+/[^/]+.*" app.url == null) releasesApps);
+  badSigners = map (app: app.id) (lib.filter (app: isReleasesApp app && app.signer != null
+    && builtins.match "[0-9a-fA-F]{64}|([0-9a-fA-F]{2}:){31}[0-9a-fA-F]{2}" app.signer == null) releasesApps);
   twice = lib.concatLists (lib.mapAttrsToList (repo: list:
     map (id: { inherit repo id; }) (lib.unique (lib.filter (id: lib.count (other: other == id) list > 1) list))
   ) ids);
@@ -123,13 +183,20 @@ in
     };
 
     android.packages = mkOption {
-      type = types.attrsOf (types.listOf (types.either types.str repoApp));
+      type = types.attrsOf (types.listOf (types.oneOf [ types.str repoApp releasesApp ]));
       default = { };
-      example = lib.literalExpression "{ fdroid = with pkgs.fdroid; [ com.byarchitect.dejavu ]; }";
+      example = lib.literalExpression ''
+        {
+          fdroid = with pkgs.fdroid; [ com.byarchitect.dejavu ];
+          obtainium = [ { id = "dev.imranr.obtainium"; url = "https://github.com/ImranR98/Obtainium"; apkFilter = "^(?!.*fdroid)"; } ];
+        }
+      '';
       description = ''
         Apps installed from each repository (android.packages.<repo>): names from
         pkgs.<repo>, or package names as strings (a name with a Nix keyword in it,
-        like "in.example.app", needs one). An app can come from one repository only.
+        like "in.example.app", needs one). android.packages.obtainium takes apps from
+        their own releases instead, as Obtainium does: { id = …; url = …; }. An app can
+        come from one source only.
       '';
     };
 
@@ -185,6 +252,13 @@ in
     (check (wrongRepo == [ ]) (lib.concatMapStringsSep "\n" (w:
       "android.packages.${w.repo}: ${w.id} is from pkgs.${w.from}; list it under android.packages.${w.from}."
     ) wrongRepo))
+    (check (notReleasesApps == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " notReleasesApps} needs its releases: { id = \"…\"; url = \"https://github.com/…\"; }.")
+    (check (misplacedReleasesApps == [ ]) (lib.concatMapStringsSep "\n" (m:
+      "android.packages.${m.repo}: ${m.id} comes with a url; list it under android.packages.obtainium."
+    ) misplacedReleasesApps))
+    (check (badReleaseUrls == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " badReleaseUrls} needs an https:// url of its repository, like https://github.com/<owner>/<repo>.")
+    (check (badSigners == [ ]) "android.packages.obtainium: the signer of ${lib.concatStringsSep ", " badSigners} is not a SHA-256 (64 hex digits).")
+    (check (lib.elem "obtainium" (lib.attrNames repos) == false) "android.repos.obtainium: that name is taken by android.packages.obtainium (apps from their own releases); name the repository otherwise.")
     (check (badRepoNames == [ ]) "android.repos: ${lib.concatStringsSep ", " badRepoNames} is not a name like byarchitect (a letter, then letters and digits).")
     (check (notHttps == [ ]) "android.repos: ${lib.concatStringsSep ", " notHttps} needs an https:// address.")
     (check (badKeys == [ ]) (lib.concatMapStringsSep "\n" (name:

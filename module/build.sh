@@ -7,7 +7,8 @@
 # Runs as root. Arguments: who started it (app, action, adb), then what to do:
 #   switch   all of the above (the default)
 #   dry      up to the plan and its checks: says what would change, changes nothing
-#   update   switch, with the indexes fetched again even when they are new enough
+#   update   switch, with the indexes (and the releases of the apps from releases)
+#            fetched again even when they are new enough
 MODDIR=${0%/*}
 BY=${1:-manual}
 MODE=${2:-switch}
@@ -40,7 +41,11 @@ log "Profile: $profile"
 echo "$profile" > "$PROFILE.new"
 
 log "== Apps"
-if [ "$MODE" = dry ]; then engine apply "$PROFILE.new" --dry-run; else engine apply "$PROFILE.new"; fi
+case "$MODE" in
+  dry) engine apply "$PROFILE.new" --dry-run ;;
+  update) engine apply "$PROFILE.new" --force ;;
+  *) engine apply "$PROFILE.new" ;;
+esac
 case $? in
   0) ;;
   2) rm -f "$PROFILE.new"; fail "a check failed (see above); nothing was changed" ;;

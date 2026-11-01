@@ -72,7 +72,7 @@ class FDroid(private val dir: File, val name: String, val url: String, private v
         }
         Out.line("$name index: downloading the one from ${Out.date(timestamp)} (${Out.size(size)}, ${index.getInt("numPackages")} apps)")
         val file = File(dir, "index-v2.json")
-        Net.fetch(url + index.getString("name"), file, size, index.getString("sha256"), Out.progress("   index", size))
+        Net.fetch(url + index.getString("name"), file, size, index.getString("sha256"), "the signed entry.jar of $name", Out.progress("   index", size))
         Out.line("$name index: checked; reading it")
         val count = unpack(file)
         file.delete()
@@ -134,6 +134,14 @@ class FDroid(private val dir: File, val name: String, val url: String, private v
         }
         return Choice.Pick(signed.maxBy { it.code })
     }
+
+    /** Installing or updating [app] to [version]: its APK's checksum and keys are those in the signed index. */
+    fun step(app: App, version: Version, installed: Device.Installed?) = Installer.Step(
+        repo = name, id = app.id, name = app.name, version = version.name, code = version.code, size = version.size,
+        url = address + version.file, sha256 = version.sha256, listedBy = "the signed index of $name",
+        keys = version.signers.toSet(), keysFrom = "listed for it in the signed index of $name",
+        installed = installed, installers = Device.FDROID,
+    )
 
     /** entry.json, from entry.jar once its signature is checked against the repository's pinned key. */
     private fun entry(): JSONObject {

@@ -11,10 +11,13 @@ import java.security.MessageDigest
 object Net {
     /**
      * Downloads [url] into [to], picking up a download that broke off (from its .part file), and checks its size
-     * and SHA-256 before it takes [to]'s name: a file there has always been checked.
+     * and SHA-256 before it takes [to]'s name: a file there has always been checked. A size below 0 is not known
+     * (the download then starts again rather than carrying on), nor is a null [sha256]; [listedBy] says where the
+     * checksum comes from, for the message when it does not match.
      */
-    fun fetch(url: String, to: File, size: Long, sha256: String, progress: (Long) -> Unit = {}) {
+    fun fetch(url: String, to: File, size: Long, sha256: String?, listedBy: String, progress: (Long) -> Unit = {}) {
         val part = File(to.path + ".part")
+        if (size < 0) part.delete()
         var tries = 0
         while (true) {
             try {
@@ -26,24 +29,24 @@ object Net {
                 Thread.sleep(3000L * tries)
             }
         }
-        if (part.length() != size) {
+        if (size >= 0 && part.length() != size) {
             part.delete()
             throw IOException("$url came with ${part.length()} bytes, not $size")
         }
-        if (sha256(part) != sha256) {
+        if (sha256 != null && sha256(part) != sha256) {
             part.delete()
-            throw SecurityException("$url does not match the checksum in F-Droid's signed index")
+            throw SecurityException("$url does not match the checksum in $listedBy")
         }
         if (!part.renameTo(to)) throw IOException("cannot rename ${part.path}")
     }
 
     private fun download(url: String, part: File, size: Long, progress: (Long) -> Unit) {
         var have = if (part.isFile) part.length() else 0L
-        if (have > size) {
+        if (size >= 0 && have > size) {
             part.delete()
             have = 0
         }
-        if (have == size) return
+        if (size >= 0 && have == size) return
         val connection = open(url)
         if (have > 0) connection.setRequestProperty("Range", "bytes=$have-")
         try {
@@ -77,6 +80,27 @@ object Net {
             val bytes = connection.inputStream.use { it.readNBytesUpTo(limit + 1) }
             if (bytes.size > limit) throw IOException("$url is bigger than $limit bytes")
             return bytes
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /** What a web API answered: its status, what it sent (at most the limit asked for), and its headers. */
+    class Answer(val status: Int, val body: String, private val headers: Map<String?, List<String>>) {
+        fun header(name: String): String? = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.firstOrNull()
+    }
+
+    /** Asks a web API; with an [etag] from before, it may answer 304 (nothing changed), which costs nothing. */
+    fun api(url: String, etag: String? = null, limit: Int = 8 shl 20): Answer {
+        val connection = open(url)
+        connection.setRequestProperty("Accept", "application/json")
+        if (etag != null) connection.setRequestProperty("If-None-Match", etag)
+        try {
+            val status = connection.responseCode
+            val stream = if (status < 400) connection.inputStream else connection.errorStream
+            val bytes = stream?.use { it.readNBytesUpTo(limit + 1) } ?: ByteArray(0)
+            if (bytes.size > limit) throw IOException("$url sent more than ${Out.size(limit.toLong())}")
+            return Answer(status, String(bytes, Charsets.UTF_8), connection.headerFields)
         } finally {
             connection.disconnect()
         }

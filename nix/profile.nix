@@ -42,8 +42,17 @@ else
     android = {
       inherit (cfg.android) darkMode;
       inherit repos;
-      packages = lib.mapAttrs (_: map (app: if builtins.isString app then app else app._id)) cfg.android.packages;
-      settings = lib.mapAttrs (name: _: { autoupdatePackages = cfg.android.settings.${name}.autoupdatePackages or false; }) repos;
+      # An F-Droid app as its package name; an app from its own releases with where they are.
+      packages = lib.mapAttrs (_: map (app:
+        if builtins.isString app then app
+        else if !(app ? _id) then {
+          inherit (app) id url apkFilter prerelease;
+          signer = if app.signer == null then null else lib.toLower (lib.replaceStrings [ ":" ] [ "" ] app.signer);
+        }
+        else app._id
+      )) cfg.android.packages;
+      settings = lib.mapAttrs (name: _: { autoupdatePackages = cfg.android.settings.${name}.autoupdatePackages or false; })
+        (repos // { obtainium = { }; });
       apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: managed) cfg.android.apps);
     };
   }

@@ -13,6 +13,7 @@ object Out {
     }
 
     fun size(bytes: Long): String = when {
+        bytes < 0 -> "size unknown"
         bytes >= 1L shl 30 -> String.format(Locale.ROOT, "%.1f GiB", bytes / 1073741824.0)
         bytes >= 1L shl 20 -> String.format(Locale.ROOT, "%.1f MiB", bytes / 1048576.0)
         else -> "${(bytes + 1023) / 1024} KiB"

@@ -195,8 +195,11 @@ class MainActivity : Activity() {
         updateAll.isEnabled = !running
     }
 
-    private fun size(bytes: Long): String =
-        if (bytes >= 1L shl 20) String.format(Locale.ROOT, "%.1f MiB", bytes / 1048576.0) else "${(bytes + 1023) / 1024} KiB"
+    private fun size(bytes: Long): String = when {
+        bytes < 0 -> getString(R.string.size_unknown)
+        bytes >= 1L shl 20 -> String.format(Locale.ROOT, "%.1f MiB", bytes / 1048576.0)
+        else -> "${(bytes + 1023) / 1024} KiB"
+    }
 
     // --- The config folder.
 

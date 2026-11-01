@@ -26,6 +26,19 @@ restore_apps() {
   rm -f "$owned"
 }
 
+# The apps the module put in Obtainium's list go out of it again (the engine does
+# this; this is for when it could not run). Only the files the module wrote.
+restore_obtainium() {
+  told=/data/adb/andronix/repos/obtainium/told
+  [ -f "$told" ] || return 0
+  while read -r file; do
+    case "$file" in
+      /data/media/0/Android/data/*/files/app_data/*.json) rm -f "$file" && echo "Obtainium: ${file##*/} taken out of its list" ;;
+    esac
+  done < "$told"
+  rm -f "$told"
+}
+
 if [ "${0##*/}" = andronix-restore.sh ]; then
   until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
   restore_dark_mode
@@ -34,6 +47,7 @@ if [ "${0##*/}" = andronix-restore.sh ]; then
   engine=/data/adb/andronix/engine.apk
   [ -f "$engine" ] && CLASSPATH="$engine" /system/bin/app_process /system/bin dev.andronix.manager.engine.Main restore < /dev/null
   restore_apps
+  restore_obtainium
   pm uninstall dev.andronix.manager < /dev/null > /dev/null 2>&1
   rm -rf /data/adb/andronix
   rm -f "$0"

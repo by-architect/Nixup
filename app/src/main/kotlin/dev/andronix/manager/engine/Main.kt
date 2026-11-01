@@ -9,8 +9,11 @@ import kotlin.system.exitProcess
  *   CLASSPATH=app.apk app_process /system/bin dev.andronix.manager.engine.Main <command>
  * Commands:
  *   index [--force] <file>        brings the indexes of the repositories in <file> (android.repos) up to date
- *                                 (once a day, or now with --force)
- *   apply <profile> [--dry-run]   makes the apps and their settings match the profile (with --dry-run: only plans and checks)
+ *                                 (once a day, or now with --force), and when it is a profile, the releases of its
+ *                                 apps from releases (android.packages.obtainium) too
+ *   apply <profile> [--dry-run] [--force]
+ *                                 makes the apps and their settings match the profile (with --dry-run: only plans and
+ *                                 checks; with --force, the releases are asked for again even when new enough)
  *   restore                       gives back every app setting the module changed and removes the apps it installed
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
@@ -29,7 +32,7 @@ object Main {
                 "index" -> index(File(files.firstOrNull() ?: usage()), force = "--force" in args)
                 "apply" -> {
                     val profile = File(files.firstOrNull() ?: usage())
-                    Apply(FDroid.of(JSONObject(profile.readText()), data), data).run(profile, dryRun = "--dry-run" in args)
+                    Apply(FDroid.of(JSONObject(profile.readText()), data), data).run(profile, dryRun = "--dry-run" in args, force = "--force" in args)
                 }
                 "restore" -> Apply(emptyMap(), data).restore()
                 "updates" -> Updates(data).list().let { 0 }
@@ -52,14 +55,27 @@ object Main {
         exitProcess(status)
     }
 
-    /** Each repository's index, one after another; one that cannot be had does not keep the others from coming. */
+    /**
+     * Each repository's index, one after another, then the releases of the apps from releases (a profile has them;
+     * the repositories a build evaluates first do not); one that cannot be had does not keep the others from coming.
+     */
     private fun index(file: File, force: Boolean): Int {
+        val json = JSONObject(file.readText())
         var failed = 0
-        for (repo in FDroid.of(JSONObject(file.readText()), data).values) {
+        for (repo in FDroid.of(json, data).values) {
             try {
                 repo.refresh(force)
             } catch (e: Exception) {
                 Out.line("✘ ${repo.name}: ${e.message}")
+                failed++
+            }
+        }
+        val releases = Releases(data)
+        for (app in json.optJSONObject("android")?.let { Releases.apps(it) } ?: emptyList()) {
+            try {
+                releases.refresh(app, force)
+            } catch (e: Exception) {
+                Out.line("✘ ${Releases.NAME}: ${app.id}: ${e.message}")
                 failed++
             }
         }
@@ -84,5 +100,5 @@ object Main {
     }
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] | restore | updates | update [--auto] [apps...]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] | restore | updates | update [--auto] [apps...]")
 }

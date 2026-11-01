@@ -1,7 +1,8 @@
 # Updates the config's apps outside of a build: the indexes of the last build's
 # repositories are brought up to date (each only downloaded when the repository
-# has a newer one), then its apps that have a newer version are listed, or
-# updated, with notifications; a new generation keeps the versions they are at.
+# has a newer one), and the releases of its apps from releases; then its apps
+# that have a newer version are listed, or updated, with notifications; a new
+# generation keeps the versions they are at.
 # Runs as root. Arguments: who started it (app, job, adb, action), then what to do:
 #   check            lists the updates (and keeps them in updates.json for the app)
 #   now [apps...]    updates all of them, or the apps named

@@ -7,6 +7,7 @@ import android.content.pm.SigningInfo
 import android.os.Build
 import android.os.Looper
 import android.os.StatFs
+import android.system.Os
 import java.io.File
 
 /**
@@ -17,8 +18,9 @@ object Device {
     val sdk = Build.VERSION.SDK_INT
     val abis: List<String> = Build.SUPPORTED_ABIS.toList()
 
-    /** The F-Droid apps that can take over an app's updates once it is installed, the first one on the phone. */
-    private val updaters = listOf("org.fdroid.fdroid", "org.fdroid.basic")
+    /** The apps that can take over the updates of an app from F-Droid, and of one from its releases (Obtainium, as on GitHub and on F-Droid). */
+    val FDROID = listOf("org.fdroid.fdroid", "org.fdroid.basic")
+    val OBTAINIUM = listOf("dev.imranr.obtainium", "dev.imranr.obtainium.fdroid")
 
     /**
      * A system context made in this process, as root tools do: for the signing keys of apps and APKs, and the
@@ -63,11 +65,21 @@ object Device {
         .lineSequence().firstOrNull { it.startsWith("package:$id ") }
         ?.substringAfter("uid:")?.trim()?.substringBefore(',')?.toIntOrNull()
 
-    /** The SHA-256 of the certificates an APK is signed with, or null when they cannot be read here. */
-    fun signers(apk: File): Set<String>? {
+    /** What an APK file is: its package name, version and the SHA-256 of its signing certificates. */
+    class Archive(val id: String, val versionCode: Long, val versionName: String, val signers: Set<String>)
+
+    /** The APK's package, version and keys, or null when it cannot be read here. */
+    fun archive(apk: File): Archive? {
         val pm = packageManager ?: return null
-        val info = pm.getPackageArchiveInfo(apk.path, PackageManager.GET_SIGNING_CERTIFICATES) ?: return emptySet()
-        return signers(info.signingInfo)
+        val info = pm.getPackageArchiveInfo(apk.path, PackageManager.GET_SIGNING_CERTIFICATES) ?: return null
+        return Archive(info.packageName, info.longVersionCode, info.versionName ?: "", signers(info.signingInfo))
+    }
+
+    /** The app's name, as the launcher shows it, or null when it is not installed (or cannot be read here). */
+    fun label(id: String): String? = try {
+        packageManager?.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(id, 0)).toString() }
+    } catch (e: Exception) {
+        null
     }
 
     /** The current signers and, after a key rotation, the earlier ones: F-Droid's index may list either. */
@@ -79,7 +91,7 @@ object Device {
         return all.map { Net.sha256(it.toByteArray()) }.toSet()
     }
 
-    fun updater(): String? = updaters.firstOrNull { versionCode(it) != null }
+    fun firstInstalled(ids: List<String>): String? = ids.firstOrNull { versionCode(it) != null }
 
     fun freeBytes(dir: File): Long = StatFs(dir.path).availableBytes
 
@@ -292,6 +304,37 @@ object Device {
 
     fun setSuspended(id: String, suspended: Boolean): Boolean =
         run("pm", if (suspended) "suspend" else "unsuspend", "--user", "0", id).first == 0
+
+    /**
+     * Makes a file written as root in an app's storage (/data/media/0/Android/data/<id>) the app's own, as if the
+     * app had made it, so it can read and replace it: the app's uid, and the group, rw-rw---- and SELinux label of
+     * [like], a file the app made there; without one, the folder's group and the app's SELinux categories (those
+     * every app of today gets, levelFrom=all).
+     */
+    fun handOver(file: File, id: String, like: File?): Boolean {
+        val uid = uid(id) ?: return false
+        val folder = file.parentFile ?: return false
+        return try {
+            Os.chown(file.path, uid, Os.stat((like ?: folder).path).st_gid)
+            Os.chmod(file.path, "660".toInt(8))
+            val label = like?.let { selinuxLabel(it) }?.takeIf { it.startsWith("u:") } ?: appLabel(folder, uid)
+            run("chcon", label, file.path).first == 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun selinuxLabel(file: File) = run("stat", "-c", "%C", file.path).second.trim()
+
+    private fun appLabel(folder: File, uid: Int): String {
+        val type = selinuxLabel(folder).split(':').take(3).joinToString(":")
+        val app = uid % 100000
+        val user = uid / 100000
+        return "$type:s0:c${app and 0xff},c${256 + (app shr 8 and 0xff)},c${512 + (user and 0xff)},c${768 + (user shr 8 and 0xff)}"
+    }
+
+    /** Ends the app's processes that are in the background (not as force-stop does: its jobs and alarms stay). */
+    fun killInBackground(id: String) = run("am", "kill", id)
 
     /** Runs one of Android's commands with no input (it would hand that to Android, which may not read /data/adb); its exit status and what it said. */
     fun run(vararg command: String): Pair<Int, String> {

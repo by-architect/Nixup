@@ -5,20 +5,27 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Makes the apps on the phone match the profile's android.packages (one list per repository), in nixos-rebuild's
- * order: first the plan and every check, and when one fails nothing changes; then the apps (see Installer), the
- * settings of apps (android.apps, see AppSettings), and the apps that left the config removed, their data kept.
+ * Makes the apps on the phone match the profile's android.packages (a list for each repository, and the apps from
+ * releases), in nixos-rebuild's order: first the plan and every check, and when one fails nothing changes; then the
+ * apps (see Installer), the settings of apps (android.apps, see AppSettings), and the apps that left the config
+ * removed, their data kept.
  */
 class Apply(private val repos: Map<String, FDroid>, private val data: File) {
     private val installer = Installer(data)
+    private val releases = Releases(data)
 
-    fun run(profile: File, dryRun: Boolean): Int = Installer.locked(data) { apply(profile, dryRun) }
+    /** With [force], the releases of the apps from releases are asked for again even when they are new enough. */
+    fun run(profile: File, dryRun: Boolean, force: Boolean): Int = Installer.locked(data) { apply(profile, dryRun, force) }
 
-    private fun apply(profile: File, dryRun: Boolean): Int {
+    private fun apply(profile: File, dryRun: Boolean, force: Boolean): Int {
         val android = JSONObject(profile.readText()).getJSONObject("android")
         val packages = android.optJSONObject("packages") ?: JSONObject()
         val apps = android.optJSONObject("apps") ?: JSONObject()
-        val wanted = packages.keys().asSequence().flatMap { repo -> packages.getJSONArray(repo).strings().map { it to repo } }.toList()
+        val fromReleases = Releases.apps(android)
+        // Each app of the config with where it comes from: a repository, or its releases (obtainium).
+        val wanted = packages.keys().asSequence().filter { it != Releases.NAME }
+            .flatMap { repo -> packages.getJSONArray(repo).strings().map { it to repo } }.toList() +
+            fromReleases.map { it.id to Releases.NAME }
         // The ones removed by hand since the last build are no longer the module's.
         val owned = installer.readOwned().filter { Device.versionCode(it) != null }
 
@@ -26,6 +33,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         val upToDate = ArrayList<String>()
         val problems = ArrayList<String>()
         for ((id, name) in wanted) {
+            if (name == Releases.NAME) continue
             val repo = repos[name]
             if (repo == null) {
                 problems += "android.packages.$name: there is no repository named $name"
@@ -40,25 +48,44 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
             when (val choice = repo.suggested(app, installed)) {
                 is FDroid.Choice.Problem -> problems += choice.text
                 is FDroid.Choice.Pick -> when {
-                    installed == null -> steps += Installer.Step(repo, app, choice.version, null)
-                    installed.versionCode < choice.version.code -> steps += Installer.Step(repo, app, choice.version, installed)
+                    installed == null || installed.versionCode < choice.version.code -> steps += repo.step(app, choice.version, installed)
                     else -> upToDate += "$id ${installed.versionName}"
                 }
             }
         }
+        for (app in fromReleases) {
+            try {
+                releases.refresh(app, force)
+            } catch (e: Exception) {
+                problems += "${app.id}: ${e.message}"
+                continue
+            }
+            when (val plan = releases.plan(app, Device.installed(app.id))) {
+                is Releases.Plan.Install -> steps += plan.step
+                is Releases.Plan.Current -> upToDate += "${app.id} ${plan.version}"
+                is Releases.Plan.Problem -> problems += plan.text
+            }
+        }
+        // The apps that update others go first: those after them get them as their installer of record.
+        steps.sortBy { it.id !in Device.FDROID + Device.OBTAINIUM }
         val ids = wanted.map { it.first }
         val removals = owned.filter { it !in ids }
         val toInstall = steps.filter { it.installed == null }
         val toUpdate = steps.filter { it.installed != null }
 
-        Out.line("Apps in the config: ${wanted.size}" + if (repos.size > 1) " (from ${packages.keys().asSequence().joinToString(", ")})" else "")
+        val sources = wanted.map { it.second }.distinct()
+        Out.line("Apps in the config: ${wanted.size}" + if (sources.size > 1) " (from ${sources.joinToString(", ")})" else "")
         if (toInstall.isNotEmpty()) {
-            Out.line("To install (${toInstall.size}, ${Out.size(toInstall.sumOf { it.version.size })} to download):")
-            toInstall.forEach { Out.line("  ${it.app.id}  ${it.version.name}  ${Out.size(it.version.size)}  (${it.app.name}, from ${it.repo.name})") }
+            Out.line("To install (${toInstall.size}, ${download(toInstall)} to download):")
+            toInstall.forEach { Out.line("  ${it.id}  ${it.version}  ${Out.size(it.size)}  (${it.name}, from ${it.repo})") }
         }
         if (toUpdate.isNotEmpty()) {
-            Out.line("To update (${toUpdate.size}, ${Out.size(toUpdate.sumOf { it.version.size })} to download):")
-            toUpdate.forEach { Out.line("  ${it.app.id}  ${it.installed!!.versionName} -> ${it.version.name}  ${Out.size(it.version.size)}  (from ${it.repo.name})") }
+            Out.line("To update (${toUpdate.size}, ${download(toUpdate)} to download):")
+            toUpdate.forEach {
+                // A release's version code is in its APK: one not newer than the app installed is left once it is here.
+                val check = if (it.code == null) ", if its APK is newer" else ""
+                Out.line("  ${it.id}  ${it.installed!!.versionName} -> ${it.version}  ${Out.size(it.size)}  (from ${it.repo}$check)")
+            }
         }
         if (removals.isNotEmpty()) {
             Out.line("To remove (${removals.size}, they left the config; their data is kept):")
@@ -66,7 +93,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         }
         if (upToDate.isNotEmpty()) Out.line("Up to date (${upToDate.size}): ${upToDate.joinToString(", ")}")
         val settings = AppSettings(data)
-        settings.plan(apps, toInstall.map { it.app.id }.toSet(), removals.toSet(), problems)
+        settings.plan(apps, toInstall.map { it.id }.toSet(), removals.toSet(), problems)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
@@ -74,7 +101,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         }
         if (steps.isEmpty() && removals.isEmpty() && !settings.changes) {
             Out.line("Apps: nothing to change")
-            if (!dryRun) finish(profile, ids)
+            if (!dryRun) finish(profile, ids, fromReleases)
             return 0
         }
         if (!installer.roomFor(steps)) return 2
@@ -93,7 +120,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
             }
         }
         settings.forgetRemoved(removals)
-        finish(profile, ids)
+        finish(profile, ids, fromReleases)
         if (failed > 0) {
             Out.line("$failed app settings did not take (see above); building again tries them again.")
             return 1
@@ -101,15 +128,23 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         return 0
     }
 
-    /** The versions for the generation, and the updates list (the build may have installed some of them). */
-    private fun finish(profile: File, ids: List<String>) {
+    /** The versions for the generation, the updates list (the build may have installed some of them), and Obtainium's list. */
+    private fun finish(profile: File, ids: List<String>, fromReleases: List<Releases.App>) {
         installer.writeResolved(ids)
         Updates(data, profile).list(quiet = true)
+        releases.tellObtainium(fromReleases)
     }
 
-    /** Gives back every app setting the module changed and removes the apps it installed, keeping their data: the module is being removed. */
+    private fun download(steps: List<Installer.Step>) =
+        Out.size(steps.filter { it.size >= 0 }.sumOf { it.size }) + if (steps.any { it.size < 0 }) " and some of unknown size" else ""
+
+    /**
+     * Gives back every app setting the module changed, takes the apps it put in Obtainium's list out again and
+     * removes the apps it installed, keeping their data: the module is being removed.
+     */
     fun restore(): Int {
         val failed = AppSettings(data).restoreAll()
+        releases.tellObtainium(emptyList())
         for (id in installer.readOwned()) {
             if (Device.uninstallKeepingData(id)) Out.line("✔ Removed $id (its data is kept)") else Out.line("✘ Could not remove $id")
         }
