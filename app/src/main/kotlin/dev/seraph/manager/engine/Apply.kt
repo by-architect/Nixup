@@ -7,11 +7,11 @@ import java.io.File
 /**
  * Makes the phone match the profile: its apps (android.packages: a list for each repository, and the apps from
  * releases), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
- * phone's own settings (android.system) and the services (android.services), in nixos-rebuild's order: first the plan and every check, and when one fails
- * nothing changes; then the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
+ * phone's own settings (android.system), the secrets (android.secrets) and the services (android.services, from the config's services.*), in nixos-rebuild's order: first the plan and every check, and when one fails
+ * nothing changes; then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
  * the system settings (see SystemSettings), the services (see Services), and the apps that left the config removed, their data kept.
  */
-class Apply(private val repos: Map<String, FDroid>, private val data: File) {
+class Apply(private val repos: Map<String, FDroid>, private val data: File, private val incoming: File? = null) {
     private val installer = Installer(data)
     private val releases = Releases(data)
 
@@ -104,14 +104,16 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         settings.plan(appSettings, toInstall.map { it.id }.toSet(), leaving, problems)
         val system = SystemSettings(data)
         system.plan(android.optJSONObject("system"), toInstall.map { it.id }.toSet(), problems)
+        val secrets = Secrets(data, incoming)
+        secrets.plan(android.optJSONArray("secrets"), problems)
         val services = Services(data)
-        services.plan(android.optJSONObject("services"), problems)
+        services.plan(android.optJSONObject("services"), problems, secrets::present)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
             return 2
         }
-        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !services.changes) {
+        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !services.changes) {
             Out.line("Nothing to change")
             if (!dryRun) finish(profile, ids, fromReleases)
             return 0
@@ -119,6 +121,8 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         if (!installer.roomFor(steps)) return 2
         if (dryRun) return 0
 
+        // The secrets first: what reads them (a service) may start below.
+        if (secrets.apply() != 0) return 1
         val status = installer.fetchAndInstall(steps)
         if (status != 0) return status
         var failed = settings.apply(appSettings, leaving)

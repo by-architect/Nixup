@@ -7,9 +7,10 @@ import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 
 /**
- * The services of the profile (android.services): programs root keeps running, as NixOS's services. For now
- * Tailscale (see [Tailscale]). Like the settings, they are planned and checked first, and changed after; at boot they
- * start again ([start]), and when the module goes they stop and take what they kept with them ([restoreAll]).
+ * The services of the profile (its android.services, from the config's services.*, with NixOS's names): programs root
+ * keeps running, as NixOS's services. For now Tailscale (see [Tailscale]). Like the settings, they are planned and
+ * checked first, and changed after; at boot they start again ([start]), and when the module goes they stop and take
+ * what they kept with them ([restoreAll]).
  */
 class Services(data: File) {
     private val tailscale = Tailscale(File(data, "services/tailscale"), data)
@@ -18,8 +19,9 @@ class Services(data: File) {
     /** Whether the plan changes anything. */
     val changes get() = action != null
 
-    fun plan(services: JSONObject?, problems: MutableList<String>) {
-        action = tailscale.plan(services?.optJSONObject("tailscale"), problems)
+    /** [present]: whether a file a service needs is there once the build's plan is carried out (a secret sent with it). */
+    fun plan(services: JSONObject?, problems: MutableList<String>, present: (String) -> Boolean = { File(it).isFile }) {
+        action = tailscale.plan(services?.optJSONObject("tailscale"), problems, present)
     }
 
     /** Carries the plan out; the number of services that did not come out as the config says. */
@@ -33,7 +35,7 @@ class Services(data: File) {
 }
 
 /**
- * Tailscale, run by root: Tailscale's own static Linux build (android.services.tailscale.package), downloaded and
+ * Tailscale, run by root: Tailscale's own static Linux build (services.tailscale.package), downloaded and
  * checked against its SHA-256, kept in [dir] with tailscaled's state. tailscaled runs in userspace mode (it takes no
  * VPN slot and changes no routes), in a mount namespace with Seraph's /etc (the network's DNS servers and Android's
  * trusted certificates, see [Etc]), under a shell loop that starts it again when it stops. `tailscale up --reset`
@@ -46,7 +48,7 @@ class Tailscale(private val dir: File, private val data: File) {
     private val log = File(dir, "tailscaled.log")
     private val supervisor = File(dir, "supervisor.pid")
 
-    fun plan(wanted: JSONObject?, problems: MutableList<String>): (() -> Int)? {
+    fun plan(wanted: JSONObject?, problems: MutableList<String>, present: (String) -> Boolean): (() -> Int)? {
         val had = readSpec()
         if (wanted == null) {
             if (had == null && !dir.exists()) return null
@@ -58,11 +60,11 @@ class Tailscale(private val dir: File, private val data: File) {
         val tarballs = pkg.getJSONObject("tarballs")
         val arch = Device.abis.mapNotNull { ARCHES[it] }.firstOrNull { tarballs.has(it) }
         if (arch == null) {
-            problems += "android.services.tailscale: its package has no build for this phone's processor (${Device.abis.joinToString(", ")})"
+            problems += "services.tailscale: its package has no build for this phone's processor (${Device.abis.joinToString(", ")})"
             return null
         }
         wanted.string("authKeyFile")?.let { key ->
-            if (!File(key).isFile) problems += "android.services.tailscale.authKeyFile: there is no $key on the phone"
+            if (!present(key)) problems += "services.tailscale.authKeyFile: there is no $key on the phone"
         }
         val running = running()
         if (had != null && had.toString() == wanted.toString() && running) {
@@ -245,7 +247,7 @@ class Tailscale(private val dir: File, private val data: File) {
         val tarball = pkg.getJSONObject("tarballs").getJSONObject(arch)
         val tgz = File(data, "tmp/tailscale-$version-$arch.tgz")
         Out.line("Downloading Tailscale $version ($arch)")
-        Net.fetch(tarball.getString("url"), tgz, -1, tarball.getString("sha256"), "android.services.tailscale.package")
+        Net.fetch(tarball.getString("url"), tgz, -1, tarball.getString("sha256"), "services.tailscale.package")
         val unpacking = File(dir, "$version.new").apply { deleteRecursively(); mkdirs() }
         GZIPInputStream(tgz.inputStream().buffered()).use { untar(it, unpacking, setOf("tailscale", "tailscaled")) }
         tgz.delete()

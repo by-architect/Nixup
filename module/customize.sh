@@ -1,5 +1,7 @@
 # Runs once while Magisk installs the module (sourced by Magisk's installer): makes
-# Nix runnable, installs the app, and starts the phone off with the default config.
+# Nix runnable, installs the app, and starts the phone off with the default profile
+# (which manages nothing). The config is the user's, wherever they keep it: the app's
+# Config picks it, and Seraph makes no folder for it.
 [ "$API" -ge 30 ] || abort "! Needs Android 11 or newer (this phone has API $API)."
 [ "$ARCH" = arm64 ] || abort "! Needs a 64-bit ARM phone (this one is $ARCH): Nix is built for it."
 
@@ -34,12 +36,16 @@ pm install -r -S "$(stat -c %s "$MODPATH/app.apk")" < "$MODPATH/app.apk" > /dev/
 # Its notifications say how installs and updates go.
 pm grant dev.seraph.manager android.permission.POST_NOTIFICATIONS > /dev/null 2>&1
 
-# A config built on the phone stays; only the first time does the default one go in.
+# A profile built on the phone stays; only the first time does the default one go in.
 MODDIR=$MODPATH
 BY=install
 . "$MODPATH/common.sh"
 [ -f "$PROFILE" ] || cp -f "$MODPATH/profile.json" "$PROFILE"
-seed_config || ui_print "! Could not create $CONFIG: the app's Build button makes it."
-ui_print "- Config: $CONFIG (open it with the app; Build applies it)"
+source=$(config_source)
+if [ -n "$source" ]; then
+  ui_print "- Config: $source (the app's Build applies it)"
+else
+  ui_print "- No config yet: in the Seraph app, Config picks your configuration.nix or flake.nix (New makes one)"
+fi
 # The app schedules its update check (a new app has none yet).
 tell_app schedule

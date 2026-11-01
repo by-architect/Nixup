@@ -258,13 +258,17 @@ in
     time = {
       automatic = option types.bool "Take the time from the network.";
       automaticTimeZone = option types.bool "Take the time zone from the network or location (false when timeZone is set).";
-      timeZone = option types.str "The time zone, like \"Europe/Istanbul\" (it needs automaticTimeZone off, which it then is by default).";
+      timeZone = option types.str ''
+        The time zone, like "Europe/Istanbul" (it needs automaticTimeZone off, which it then is by
+        default). time.timeZone, NixOS's name, sets it too.
+      '';
       format24h = option types.bool "24-hour time (false: 12-hour).";
     };
 
     language = option (types.either types.str (types.listOf types.str)) ''
       The phone's language, like "tr-TR", or its languages in order of preference, like
-      [ "tr-TR" "en-US" ] (apps take the first one they have).
+      [ "tr-TR" "en-US" ] (apps take the first one they have). i18n.defaultLocale, NixOS's name,
+      sets one too ("tr_TR.UTF-8" is "tr-TR").
     '';
 
     keyboard = {
@@ -385,7 +389,10 @@ in
       "alarm_clock" "headset" ] (the names a phone has differ).
     '';
 
-    deviceName = option types.str "The phone's name, shown in About phone and to other devices.";
+    deviceName = option types.str ''
+      The phone's name, shown in About phone and to other devices. networking.hostName, NixOS's
+      name, sets it too; this one can also have spaces and other letters, like "Neo's phone".
+    '';
   };
 
   config = {
@@ -404,9 +411,9 @@ in
       (check (cfg.display.nightLight.schedule == "custom" || (cfg.display.nightLight.from == null && cfg.display.nightLight.to == null))
         "android.settings.display.nightLight: from and to are the times of schedule = \"custom\".")
       (check (!(cfg.time.timeZone != null && cfg.time.automaticTimeZone == true))
-        "android.settings.time: timeZone is set by hand, so automaticTimeZone cannot be true; pick one.")
+        "android.settings.time: the time zone is set by hand (timeZone, or time.timeZone), so automaticTimeZone cannot be true; pick one.")
       (check (cfg.time.timeZone == null || builtins.match "[A-Za-z_]+(/[A-Za-z0-9_+-]+)*" cfg.time.timeZone != null)
-        "android.settings.time.timeZone: \"${toString cfg.time.timeZone}\" is not a time zone like \"Europe/Istanbul\".")
+        "android.settings.time.timeZone (or time.timeZone): \"${toString cfg.time.timeZone}\" is not a time zone like \"Europe/Istanbul\".")
       (check (badLanguages == [ ]) "android.settings.language: ${lib.concatStringsSep ", " badLanguages} is not a language like \"tr-TR\".")
       (check (cfg.language == null || languages != [ ]) "android.settings.language: give at least one language.")
       (check (!dnsHost || builtins.match "([A-Za-z0-9-]+[.])+[A-Za-z]{2,}" dns != null)

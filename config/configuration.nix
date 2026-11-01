@@ -15,17 +15,30 @@
 #   android.settings.raw     any other of Android's settings, by its name
 #   android.apps."<package>" an app's settings (every one: nix/app.nix); debloat = true removes
 #                            one that came with the phone (its data kept)
-#   android.services.<name>  programs root keeps running, as NixOS's services (nix/services.nix)
+#   services.<name>          programs root keeps running, with NixOS's names and options
+#                            (every one: nix/services.nix): services.tailscale.enable = true;
+#   networking.hostName, time.timeZone, i18n.defaultLocale
+#                            the phone's name, time zone and language, with NixOS's names
+#                            (nix/global.nix); an android.settings one set too wins
+#   android.secrets.<name>   a file programs read on the phone (a login key), which seraph-rebuild
+#                            sends from the PC that builds the config; root alone reads it there,
+#                            at android.secrets.<name>.path (nix/secrets.nix)
 #
-# With flake.nix next to it, this folder is a flake (as /etc/nixos can be): the app's Build
-# from picks which one a build reads.
+# Built on the phone (the app's Build), or on a PC and applied on the phone over adb or ssh:
+#   nix run github:by-architect/Seraph -- switch --flake .#Logos
+#
+# With flake.nix next to it, this folder is a flake (as /etc/nixos can be): the app's Config
+# picks which one a build reads, this file alone or the flake.
 { config, lib, pkgs, ... }:
 {
+  # The phone's name, as NixOS's: its device name, and its name on the tailnet.
+  networking.hostName = "Logos";
+
   # Tailscale, run by root (tailscaled), next to the Tailscale app: userspace mode takes no VPN
   # slot. The first build shows a link to log in with; authKeyFile would log in without one.
-  android.services.tailscale = {
+  # NixOS's own options for it (nix/services.nix), so a NixOS module can set them too.
+  services.tailscale = {
     enable = true;
-    # hostname = "logos";             # null: the phone's name
     # authKeyFile = "/data/adb/seraph/secrets/tailscale.key";
     # extraUpFlags = [ "--ssh" ];
   };
@@ -192,8 +205,6 @@
   ];
 
   android.settings.statusBar.hiddenIcons = [ "rotate" ];
-
-  android.settings.deviceName = "Logos";
 
   # Any other of Android's settings, by its name, as `settings put <table> <name> <value>`.
   android.settings.raw = {

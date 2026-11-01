@@ -35,8 +35,7 @@
 #     screenTimeout = 60;                            seconds
 #   };
 #   android.settings.navigation.mode = "gestures";   "gestures", "threeButton"
-#   android.settings.language = [ "tr-TR" "en-US" ];
-#   android.settings.time.timeZone = "Europe/Istanbul";
+#   android.settings.language = [ "tr-TR" "en-US" ];   several languages, in order
 #   android.settings.network.privateDns = "dns.quad9.net";   "off", "automatic", or a provider
 #   android.settings.lockScreen.sensitiveNotifications = false;
 #   android.settings.raw.global.stay_on_while_plugged_in = 7;   any of Android's settings
@@ -58,12 +57,24 @@
 #   android.apps."org.lineageos.jelly".debloat = true;   removes an app that came with the phone
 #                                                    (its data kept: taken out again, it comes back)
 #
-#   android.services.tailscale.enable = true;        Tailscale, run by root, as NixOS's
-#                                                    services.tailscale (the build shows a link to
-#                                                    log in with; it takes no VPN slot)
+#   networking.hostName = "phone";                   the phone's name (its device name, and its
+#   time.timeZone = "Europe/Istanbul";               name on the tailnet), time zone and language,
+#   i18n.defaultLocale = "tr_TR.UTF-8";              with NixOS's names: a module shared with a
+#                                                    NixOS machine sets them on both
+#
+#   services.tailscale.enable = true;                Tailscale, run by root, with NixOS's
+#                                                    services.tailscale options (the build shows a
+#                                                    link to log in with; it takes no VPN slot)
+#
+#   android.secrets.tailscale.file = ./tailscale.key;    a secret: a file seraph-rebuild sends
+#   services.tailscale.authKeyFile =                     from the PC that builds the config; root
+#     config.android.secrets.tailscale.path;             alone reads it on the phone
+#
+# Built on the phone (the app's Build), or on a PC and applied on the phone over adb or ssh, as
+# nixos-rebuild --target-host: nix run github:by-architect/Seraph -- switch --flake .#phone
 #
 # Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix,
-# nix/app.nix and nix/services.nix in the project.
+# nix/app.nix, nix/global.nix, nix/services.nix and nix/secrets.nix in the project.
 { config, lib, pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [

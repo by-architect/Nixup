@@ -3,6 +3,8 @@
 #                                 needs no package names, so it evaluates with pkgs empty
 #   config.system.build.profile   the profile, the JSON the module applies; evaluating it checks
 #                                 the assertions and shows the warnings, as nixos-rebuild does
+#   config.system.build.secrets   each secret's file where the config is built (or null), which
+#                                 seraph-rebuild sends to the phone; never in the profile
 { config, lib, ... }:
 let
   repos = lib.mapAttrs (_: repo: { url = repo.address; fingerprint = repo.signingKey; }) config.android.repos;
@@ -49,6 +51,9 @@ in
   config.system.build = {
     repos = { android = { inherit repos; }; };
 
+    # toString: a path stays where it is, where interpolating it would copy it into the store.
+    secrets = lib.mapAttrs (_: secret: if secret.file == null then null else toString secret.file) config.android.secrets;
+
     profile =
       if failed != [ ] then
         throw "\nFailed assertions:\n${lib.concatMapStrings (message: "- ${message}\n") failed}"
@@ -75,12 +80,17 @@ in
               managed (app // { debloat = if app.debloat == true then true else null; })
             ) config.android.apps);
             inherit system;
+            # The secrets' names: the phone checks each is there, and removes one that left.
+            secrets = lib.attrNames config.android.secrets;
             # The services that run, with what each needs; one that left the config is stopped.
-            services = lib.optionalAttrs config.android.services.tailscale.enable {
-              tailscale = let ts = config.android.services.tailscale; in {
-                inherit (ts) package hostname port authKeyFile;
+            services = lib.optionalAttrs config.services.tailscale.enable {
+              tailscale = let ts = config.services.tailscale; in {
+                inherit (ts) package port authKeyFile;
+                # Its name on the tailnet; null: the phone's device name.
+                hostname = if config.networking.hostName == "" then null else config.networking.hostName;
                 upFlags = ts.extraUpFlags;
-                daemonFlags = ts.extraDaemonFlags;
+                daemonFlags = ts.extraDaemonFlags
+                  ++ lib.optional (ts.disableUpstreamLogging && !lib.elem "--no-logs-no-support" ts.extraDaemonFlags) "--no-logs-no-support";
               };
             };
           };

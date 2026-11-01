@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+# seraph-rebuild: builds a phone's Seraph config on this machine and makes the phone match it, as
+# nixos-rebuild --target-host does for NixOS. Nix runs here, not on the phone, so the config can be
+# a flake with private inputs and secrets the phone never fetches. The phone brings the indexes of
+# the config's repositories up to date first (the package names come from them), then applies the
+# profile built here, with the config's secrets (android.secrets) sent along.
+#
+#   seraph-rebuild switch        [options]   build it here, then apply it on the phone
+#   seraph-rebuild dry-activate  [options]   build it here, and show what the phone would change
+#   seraph-rebuild build         [options]   build it here into ./result.json; the phone only lends its
+#                                            indexes
+# Options:
+#   --flake <flake>[#<name>]   the config as a flake (default: the flake in this folder, when there is one),
+#                              its seraphConfigurations.<name>; without #<name>, the one named after the
+#                              phone (its device name), or the only one
+#   --file <configuration.nix> a configuration.nix built alone (default: ./configuration.nix, when there is
+#                              no flake.nix); its nixpkgs' lib comes from NIX_PATH
+#   --target-host <phone>      adb (the phone adb sees, the default), adb:<serial>, or [user@]host for ssh
+#                              (whose user can run su on the phone, as Termux's sshd can)
+#   --upgrade                  a flake's inputs at their newest first (nix flake update, for a flake in a
+#                              folder here), and the indexes and releases fetched again
+#   --show-trace               Nix's whole trace when the config has an error
+# Needs nix (with flakes), adb or ssh, and the Seraph module on the phone.
+set -euo pipefail
+
+usage() { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; }
+die() { echo "seraph-rebuild: $*" >&2; exit 1; }
+say() { echo "$*" >&2; }
+
+# Seraph's own files (nix/), next to this script's folder: in its repository, its flake's copy, or the
+# package (pkgs.seraph-rebuild).
+seraph_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+action="${1:-}"
+[[ $# -gt 0 ]] && shift
+case $action in
+  switch | dry-activate | build) ;;
+  "" | -h | --help | help) usage; exit 0 ;;
+  *) die "no such action: $action (switch, dry-activate or build; --help says more)" ;;
+esac
+flake="" file="" target="adb" upgrade=0 trace=()
+while (($#)); do
+  case $1 in
+    --flake) [[ $# -ge 2 ]] || die "--flake needs a flake"; flake=$2; shift 2 ;;
+    --flake=*) flake=${1#--flake=}; shift ;;
+    --file) [[ $# -ge 2 ]] || die "--file needs a configuration.nix"; file=$2; shift 2 ;;
+    --file=*) file=${1#--file=}; shift ;;
+    --target-host) [[ $# -ge 2 ]] || die "--target-host needs a phone"; target=$2; shift 2 ;;
+    --target-host=*) target=${1#--target-host=}; shift ;;
+    --upgrade) upgrade=1; shift ;;
+    --show-trace) trace=(--show-trace); shift ;;
+    -h | --help) usage; exit 0 ;;
+    *) die "no such option: $1 (--help says which there are)" ;;
+  esac
+done
+if [[ -z $flake && -z $file ]]; then
+  if [[ -f flake.nix ]]; then flake=.
+  elif [[ -f configuration.nix ]]; then file=configuration.nix
+  else die "there is no flake.nix or configuration.nix here: give --flake or --file"
+  fi
+fi
+[[ -z $flake || -z $file ]] || die "give --flake or --file, not both"
+command -v nix > /dev/null || die "there is no nix here"
+
+# --- The phone: through adb, or ssh.
+serial="" host=""
+case $target in
+  adb)
+    # The phones adb sees; one phone seen several ways (USB, and Wi-Fi) is one phone, taken by USB.
+    mapfile -t seen < <(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
+    ((${#seen[@]})) || die "adb sees no phone: connect it (USB debugging on), or give --target-host"
+    declare -A phones=()
+    for s in "${seen[@]}"; do
+      id="$(adb -s "$s" shell getprop ro.serialno < /dev/null 2> /dev/null | tr -d '\r')"
+      id=${id:-$s}
+      [[ -n ${phones[$id]:-} && ${phones[$id]} != *:* ]] || phones[$id]=$s
+    done
+    ((${#phones[@]} == 1)) || die "adb sees ${#phones[@]} phones (${seen[*]}): pick one with --target-host adb:<serial>"
+    serial="${phones[*]}" ;;
+  adb:*) serial=${target#adb:} ;;
+  *) host=$target ;;
+esac
+
+# A word for the phone's shell, quoted.
+q() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
+# Runs a command as root on the phone: what it says comes here, and so does its exit status.
+as_root() {
+  if [[ -n $serial ]]; then adb -s "$serial" shell -T "su -c $(q "$1")" < /dev/null
+  else ssh -o BatchMode=yes "$host" "su -c $(q "$1")" < /dev/null
+  fi
+}
+# Its output as it is, for files (tar).
+from_root() {
+  if [[ -n $serial ]]; then adb -s "$serial" exec-out "su -c $(q "$1")" < /dev/null
+  else ssh -o BatchMode=yes "$host" "su -c $(q "$1")" < /dev/null
+  fi
+}
+# A file from here into a file on the phone that root alone can read (it waits until it is all there).
+send() {
+  local command="umask 077; cat > $(q "$2")"
+  if [[ -n $serial ]]; then adb -s "$serial" shell -T "su -c $(q "$command")" < "$1"
+  else ssh -o BatchMode=yes "$host" "su -c $(q "$command")" < "$1"
+  fi
+}
+
+by=adb
+[[ -n $host ]] && by=ssh
+incoming=/data/adb/seraph/incoming
+# The newest module: the update waiting for a restart, else the running one.
+module='d=/data/adb/modules_update/seraph; [ -f $d/remote.sh ] || d=/data/adb/modules/seraph; [ -f $d/remote.sh ] || exit 3; '
+status=0
+as_root "${module}id -u" > /dev/null || status=$?
+case $status in
+  0) ;;
+  3) die "the phone has no Seraph module that builds from a PC (remote.sh): install the newest one" ;;
+  *) die "no root on the phone through $by: let it use su (Magisk: Superuser)" ;;
+esac
+phone_name="$(as_root "settings get global device_name" | tr -d '\r')"
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# --- The config, evaluated here: a flake's seraphConfigurations.<name>, or a configuration.nix alone.
+nixx() { nix --extra-experimental-features 'nix-command flakes' "$@" "${trace[@]}"; }
+if [[ -n $flake ]]; then
+  ref=${flake%%#*} name=""
+  [[ $flake == *#* ]] && name=${flake#*#}
+  if ((upgrade)); then
+    case $ref in
+      . | ./* | ../* | /* | path:* | git+file:*) say "== Updating the flake's inputs (flake.lock)"; nixx flake update --flake "$ref" ;;
+      *) say "(--upgrade: $ref is not a folder here, so its flake.lock stays as its repository has it)" ;;
+    esac
+  fi
+  if [[ -z $name ]]; then
+    listed="$(nixx eval --raw "$ref#seraphConfigurations" --apply 'c: builtins.concatStringsSep "\n" (builtins.attrNames c)')" \
+      || die "$ref has no seraphConfigurations (Nix says why above)"
+    mapfile -t names < <(printf '%s\n' "$listed" | grep .)
+    for n in "${names[@]}"; do [[ $n == "$phone_name" ]] && name=$n; done
+    if [[ -z $name ]]; then
+      ((${#names[@]} == 1)) || die "$ref has ${#names[@]} seraphConfigurations (${names[*]}), and none is named after the phone ($phone_name): give --flake '$ref#<name>'"
+      name=${names[0]}
+    fi
+  fi
+  built="$ref#seraphConfigurations.\"$name\".config.system.build"
+  evaluate() { SERAPH_REPOS="$work/repos" nixx eval --impure "$@" "$built.$what"; }
+  what_built="$ref#$name"
+else
+  [[ -f $file ]] || die "there is no $file"
+  file="$(readlink -f "$file")"
+  nixpkgs=()
+  nix-instantiate --find-file nixpkgs > /dev/null 2>&1 || nixpkgs=(-I nixpkgs=flake:nixpkgs)
+  evaluate() {
+    nixx eval "${nixpkgs[@]}" --impure "$@" --expr \
+      "(import (/. + \"$seraph_dir/nix/eval.nix\") { lib = import <nixpkgs/lib>; modules = [ (/. + \"$file\") ]; reposDir = \"$work/repos\"; }).config.system.build.$what"
+  }
+  what_built="$file"
+fi
+mkdir -p "$work/repos"
+say "== Config: $what_built (for ${phone_name:-the phone}, through $by)"
+
+# The repositories first (they need no package names), whose indexes the phone brings up to date; their
+# package names come back here.
+what=repos evaluate --json > "$work/repos.json" || die "the config did not build (Nix says why above); nothing was changed"
+as_root "rm -rf $incoming && mkdir -p $incoming && chmod 700 $incoming" || die "could not make $incoming on the phone"
+send "$work/repos.json" "$incoming/repos.json" || die "could not send the repositories to the phone"
+index_mode=""
+((upgrade)) && index_mode=update
+as_root "${module}sh \$d/remote.sh $by index $index_mode" || die "the phone could not bring the indexes up to date (see above)"
+from_root 'cd /data/adb/seraph/repos && set -- */tree.json && [ -f "$1" ] && tar -cf - "$@"' | tar -C "$work/repos" -xf - 2> /dev/null || true
+
+# The profile, built here with those names; and the secrets' files, by name.
+say "== Evaluating $what_built"
+what=profile evaluate --json > "$work/profile.json" || die "the config did not build (Nix says why above); nothing was changed"
+what=secrets evaluate --raw --apply 's: builtins.concatStringsSep "\n" (map (n: n + "\t" + (if s.${n} == null then "" else s.${n})) (builtins.attrNames s))' \
+  > "$work/secrets.txt" || die "the config's secrets could not be read (Nix says why above)"
+
+if [[ $action == build ]]; then
+  as_root "rm -rf $incoming" || true
+  cp "$work/profile.json" result.json
+  say "Built: $(pwd)/result.json (nothing went to the phone)"
+  exit 0
+fi
+
+# What it was built from, for the phone's generation: the flake as Nix resolved it, at its commit, with its lock.
+built_on="$(hostname 2> /dev/null || uname -n)"
+printf '%s\n' "$built_on" > "$work/built-on"
+if [[ -n $flake ]] && nixx flake metadata --json "$ref" > "$work/metadata.json" 2> /dev/null; then
+  metadata() { nixx eval --raw --impure --expr "let m = builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/metadata.json")); in $1"; }
+  url="$(metadata 'm.resolvedUrl or m.originalUrl or ""' 2> /dev/null || true)"
+  revision="$(metadata 'm.revision or ""' 2> /dev/null || true)"
+  dirty="$(metadata 'm.dirtyRevision or ""' 2> /dev/null || true)"
+  source="${url:-$ref}#$name"
+  if [[ -n $revision ]]; then source+=" (commit $revision)"
+  elif [[ -n $dirty ]]; then source+=" (commit ${dirty%-dirty}, with changes not committed)"
+  fi
+  metadata 'builtins.toJSON m.locks' > "$work/flake.lock" 2> /dev/null || rm -f "$work/flake.lock"
+else
+  source="$what_built"
+fi
+printf '%s\n' "$source" > "$work/source"
+
+say "== Sending it to the phone"
+for part in profile.json source built-on flake.lock; do
+  [[ -f $work/$part ]] || continue
+  send "$work/$part" "$incoming/$part" || die "could not send $part to the phone"
+done
+as_root "mkdir -p $incoming/secrets && chmod 700 $incoming/secrets" || die "could not make $incoming/secrets on the phone"
+# (Nix's --raw ends the last line with no newline, which read would leave out.)
+while IFS=$'\t' read -r secret path || [[ -n $secret ]]; do
+  [[ -n $secret ]] || continue
+  if [[ -z $path ]]; then
+    say "Secret $secret: not sent (it has no file: the phone must have it already)"
+    continue
+  fi
+  [[ -r $path ]] || die "android.secrets.$secret: there is no $path here to send (nothing was changed)"
+  send "$path" "$incoming/secrets/$secret" || die "could not send the secret $secret to the phone"
+  say "Secret $secret: sent"
+done < "$work/secrets.txt"
+
+case $action in
+  dry-activate) mode=dry ;;
+  *) if ((upgrade)); then mode=update; else mode=switch; fi ;;
+esac
+status=0
+as_root "${module}sh \$d/remote.sh $by $mode" || status=$?
+exit $status

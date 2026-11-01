@@ -102,8 +102,8 @@ let
   isReleasesApp = app: builtins.isAttrs app && !(app ? _id) && app ? url;
   idOf = app: if builtins.isString app then app else if app ? _id then app._id else app.id;
 
-  # Lists of android.packages that are not F-Droid repositories, always there: apps from their
-  # releases, and Nix packages (pkgs, a later step).
+  # Lists of android.packages that are not F-Droid repositories: apps from their releases, and pkgs,
+  # which is refused below with where Nix packages go (environment.systemPackages, as on NixOS).
   builtinSources = [ "obtainium" "pkgs" ];
 
   repos = config.android.repos;
@@ -154,7 +154,7 @@ let
   check = assertion: message: { inherit assertion message; };
 in
 {
-  imports = [ ./system.nix ./lineage.nix ./services.nix ./build.nix ];
+  imports = [ ./system.nix ./lineage.nix ./global.nix ./services.nix ./secrets.nix ./renamed.nix ./build.nix ];
 
   options = {
     assertions = mkOption {
@@ -203,8 +203,8 @@ in
         like "in.example.app", needs one). android.packages.obtainium takes apps from
         their own releases instead, as Obtainium does: { id = …; url = …; }. An app can
         come from one source only. An app that came with the phone is removed with
-        android.apps.<app>.debloat = true. android.packages.pkgs is kept for Nix packages
-        (from nixpkgs), a later step.
+        android.apps.<app>.debloat = true. Nix packages (from nixpkgs) are
+        environment.systemPackages, as on NixOS.
       '';
     };
 
@@ -272,8 +272,8 @@ in
     (check (badReleaseUrls == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " badReleaseUrls} needs an https:// url of its repository, like https://github.com/<owner>/<repo>.")
     (check (badSigners == [ ]) "android.packages.obtainium: the signer of ${lib.concatStringsSep ", " badSigners} is not a SHA-256 (64 hex digits).")
     (check (lib.elem "obtainium" (lib.attrNames repos) == false) "android.repos.obtainium: that name is taken by android.packages.obtainium (apps from their own releases); name the repository otherwise.")
-    (check (lib.elem "pkgs" (lib.attrNames repos) == false) "android.repos.pkgs: that name is taken by android.packages.pkgs (Nix packages); name the repository otherwise.")
-    (check (!(packages ? pkgs)) "android.packages.pkgs: Nix packages (from nixpkgs) are not here yet; they come in a later step.")
+    (check (lib.elem "pkgs" (lib.attrNames repos) == false) "android.repos.pkgs: that name is nixpkgs' own (pkgs.pkgs); name the repository otherwise.")
+    (check (!(packages ? pkgs)) "android.packages.pkgs: Nix packages (from nixpkgs) go in environment.systemPackages, as on NixOS; they are not on the phone yet.")
     (check (badRepoNames == [ ]) "android.repos: ${lib.concatStringsSep ", " badRepoNames} is not a name like byarchitect (a letter, then letters and digits).")
     (check (notHttps == [ ]) "android.repos: ${lib.concatStringsSep ", " notHttps} needs an https:// address.")
     (check (badKeys == [ ]) (lib.concatMapStringsSep "\n" (name:

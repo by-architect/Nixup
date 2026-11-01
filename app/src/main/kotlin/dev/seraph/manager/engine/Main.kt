@@ -11,14 +11,15 @@ import kotlin.system.exitProcess
  *   index [--force] <file>        brings the indexes of the repositories in <file> (android.repos) up to date
  *                                 (once a day, or now with --force), and when it is a profile, the releases of its
  *                                 apps from releases (android.packages.obtainium) too
- *   apply <profile> [--dry-run] [--force]
- *                                 makes the apps, their settings, the debloat, the system settings and the services match the
- *                                 profile (with --dry-run: only plans and checks; with --force, the releases are asked
- *                                 for again even when new enough)
+ *   apply <profile> [--dry-run] [--force] [--secrets=<folder>]
+ *                                 makes the apps, their settings, the debloat, the system settings, the secrets and the
+ *                                 services match the profile (with --dry-run: only plans and checks; with --force, the
+ *                                 releases are asked for again even when new enough; --secrets: the folder of the
+ *                                 secrets a PC sent with it, seraph-rebuild's)
  *   dns                           prints the DNS servers of the network in use, as resolv.conf lines
  *   etc                           writes Seraph's /etc for the Linux programs it runs (Nix, tailscaled): DNS servers,
  *                                 trusted certificates, a root user (see Etc)
- *   services                      at boot: starts the services the last build left running (android.services)
+ *   services                      at boot: starts the services the last build left running (services.*)
  *   support                       says which settings that need something of the phone (a feature, a newer Android,
  *                                 LineageOS) this phone can have
  *   restore                       brings back the apps it removed, gives back every app and system setting the module
@@ -40,7 +41,9 @@ object Main {
                 "index" -> index(File(files.firstOrNull() ?: usage()), force = "--force" in args)
                 "apply" -> {
                     val profile = File(files.firstOrNull() ?: usage())
-                    Apply(FDroid.of(JSONObject(profile.readText()), data), data).run(profile, dryRun = "--dry-run" in args, force = "--force" in args)
+                    val incoming = args.firstOrNull { it.startsWith("--secrets=") }?.let { File(it.removePrefix("--secrets=")) }
+                    Apply(FDroid.of(JSONObject(profile.readText()), data), data, incoming)
+                        .run(profile, dryRun = "--dry-run" in args, force = "--force" in args)
                 }
                 "restore" -> Apply(emptyMap(), data).restore()
                 "support" -> SystemSettings(data).report().let { 0 }
@@ -119,5 +122,5 @@ object Main {
     }
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] | restore | support | dns | etc | services | updates | update [--auto] [apps...]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | restore | support | dns | etc | services | updates | update [--auto] [apps...]")
 }
