@@ -5,10 +5,11 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Makes the apps on the phone match the profile's android.packages (a list for each repository, and the apps from
- * releases), in nixos-rebuild's order: first the plan and every check, and when one fails nothing changes; then the
- * apps (see Installer), the settings of apps (android.apps, see AppSettings), and the apps that left the config
- * removed, their data kept.
+ * Makes the phone match the profile: its apps (android.packages: a list for each repository, and the apps from
+ * releases), their settings (android.apps), the apps that came with the phone to remove (android.debloat) and the
+ * phone's own settings (android.system), in nixos-rebuild's order: first the plan and every check, and when one fails
+ * nothing changes; then the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
+ * the system settings (see SystemSettings), and the apps that left the config removed, their data kept.
  */
 class Apply(private val repos: Map<String, FDroid>, private val data: File) {
     private val installer = Installer(data)
@@ -92,15 +93,21 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
             removals.forEach { Out.line("  $it") }
         }
         if (upToDate.isNotEmpty()) Out.line("Up to date (${upToDate.size}): ${upToDate.joinToString(", ")}")
+        val debloat = Debloat(data)
+        debloat.plan(android.optJSONArray("debloat"), homeApp(apps), problems)
+        // An app being removed (left the config, or debloated) gets no settings.
+        val leaving = removals.toSet() + debloat.removing
         val settings = AppSettings(data)
-        settings.plan(apps, toInstall.map { it.id }.toSet(), removals.toSet(), problems)
+        settings.plan(apps, toInstall.map { it.id }.toSet(), leaving, problems)
+        val system = SystemSettings(data)
+        system.plan(android.optJSONObject("system"), problems)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
             return 2
         }
-        if (steps.isEmpty() && removals.isEmpty() && !settings.changes) {
-            Out.line("Apps: nothing to change")
+        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes) {
+            Out.line("Nothing to change")
             if (!dryRun) finish(profile, ids, fromReleases)
             return 0
         }
@@ -109,7 +116,11 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
 
         val status = installer.fetchAndInstall(steps)
         if (status != 0) return status
-        val failed = settings.apply(apps, removals.toSet())
+        var failed = settings.apply(apps, leaving)
+        // An app that came with the phone keeps its data while removed: it gets its settings from before back first.
+        for (id in debloat.removing) failed += settings.restoreApp(id)
+        failed += debloat.apply()
+        failed += system.apply()
         for (id in removals) {
             if (Device.uninstallKeepingData(id)) {
                 installer.writeOwned(installer.readOwned() - id)
@@ -122,10 +133,15 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         settings.forgetRemoved(removals)
         finish(profile, ids, fromReleases)
         if (failed > 0) {
-            Out.line("$failed app settings did not take (see above); building again tries them again.")
+            Out.line("$failed settings did not take (see above); building again tries them again.")
             return 1
         }
         return 0
+    }
+
+    /** The app the config makes the home app (android.apps.<app>.defaultFor = [ "home" ]), if any. */
+    private fun homeApp(apps: JSONObject): String? = apps.keys().asSequence().firstOrNull { app ->
+        apps.getJSONObject(app).optJSONArray("defaultFor")?.let { roles -> (0 until roles.length()).any { roles.getString(it) == "home" } } == true
     }
 
     /** The versions for the generation, the updates list (the build may have installed some of them), and Obtainium's list. */
@@ -139,11 +155,14 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File) {
         Out.size(steps.filter { it.size >= 0 }.sumOf { it.size }) + if (steps.any { it.size < 0 }) " and some of unknown size" else ""
 
     /**
-     * Gives back every app setting the module changed, takes the apps it put in Obtainium's list out again and
-     * removes the apps it installed, keeping their data: the module is being removed.
+     * Brings back the apps it removed (debloat), gives back every app setting and system setting the module changed,
+     * takes the apps it put in Obtainium's list out again and removes the apps it installed, keeping their data: the
+     * module is being removed.
      */
     fun restore(): Int {
-        val failed = AppSettings(data).restoreAll()
+        var failed = Debloat(data).restoreAll()
+        failed += AppSettings(data).restoreAll()
+        failed += SystemSettings(data).restoreAll()
         releases.tellObtainium(emptyList())
         for (id in installer.readOwned()) {
             if (Device.uninstallKeepingData(id)) Out.line("✔ Removed $id (its data is kept)") else Out.line("✘ Could not remove $id")

@@ -24,6 +24,22 @@ let
 
   failed = map (check: check.message) (lib.filter (check: !check.assertion) cfg.assertions);
 
+  # The phone's own settings: Android's settings tables (true and false as 1 and 0), and those
+  # that take a command; a table or option that is not set is left out.
+  system = lib.filterAttrs (_: value: value != null && value != { }) {
+    settings = lib.filterAttrs (_: table: table != { }) (lib.mapAttrs (_: lib.mapAttrs (_: value:
+      if builtins.isBool value then (if value then 1 else 0) else value
+    )) cfg.android.rawSettings);
+    inherit (cfg.android.display) density;
+    navigation = if cfg.android.navigation.mode == null then null
+      else { gestures = "gestural"; threeButton = "threebutton"; twoButton = "twobutton"; }.${cfg.android.navigation.mode};
+    language = if cfg.android.language == null then null
+      else lib.concatStringsSep "," (lib.toList cfg.android.language);
+    inherit (cfg.android.time) timeZone;
+    inherit (cfg.android.network) dataSaver;
+    location = cfg.android.location.enable;
+  };
+
   # An app's settings without the ones left null (not managed); an app with none is left out.
   managed = value:
     if builtins.isAttrs value then
@@ -54,5 +70,7 @@ else
       settings = lib.mapAttrs (name: _: { autoupdatePackages = cfg.android.settings.${name}.autoupdatePackages or false; })
         (repos // { obtainium = { }; });
       apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: managed) cfg.android.apps);
+      inherit system;
+      inherit (cfg.android) debloat;
     };
   }

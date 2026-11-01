@@ -1,10 +1,13 @@
 package dev.andronix.manager.engine
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.Signature
 import android.content.pm.SigningInfo
+import android.content.res.Configuration
 import android.os.Build
+import android.os.LocaleList
 import android.os.Looper
 import android.os.StatFs
 import android.system.Os
@@ -335,6 +338,125 @@ object Device {
 
     /** Ends the app's processes that are in the background (not as force-stop does: its jobs and alarms stay). */
     fun killInBackground(id: String) = run("am", "kill", id)
+
+    // --- The phone's own settings.
+
+    /** A settings table (system, secure, global) of the main user, as `settings list` gives it; a setting without a value is left out. */
+    fun settings(table: String): Map<String, String> {
+        val values = LinkedHashMap<String, String>()
+        var last: String? = null
+        for (line in run("settings", "--user", "0", "list", table).second.lineSequence()) {
+            val setting = SETTING_LINE.matchEntire(line)
+            if (setting != null) {
+                last = setting.groupValues[1]
+                values[last] = setting.groupValues[2]
+            } else if (last != null && line.isNotEmpty()) {
+                // A value with a line break in it.
+                values[last] = values[last] + "\n" + line
+            }
+        }
+        return values.filterValues { it != "null" }
+    }
+
+    /** Sets a setting of the main user, or deletes it ([value] null): Android then takes its own default. */
+    fun putSetting(table: String, key: String, value: String?): Boolean =
+        if (value == null) run("settings", "--user", "0", "delete", table, key).first == 0
+        else run("settings", "--user", "0", "put", table, key, value).first == 0
+
+    private val SETTING_LINE = Regex("([A-Za-z0-9_.:-]+)=(.*)")
+
+    /** The display density set over the screen's own (wm density), or null when the screen has its own. */
+    fun density(): String? = Regex("""Override density: (\d+)""").find(run("wm", "density").second)?.groupValues?.get(1)
+
+    fun setDensity(dpi: String?): Boolean = run("wm", "density", dpi ?: "reset").first == 0
+
+    /** The navigation modes this phone has (gestural, threebutton, twobutton: overlays of the system), and the one on. */
+    fun navigationModes(): Map<String, Boolean> = run("cmd", "overlay", "list", "--user", "0", "android").second.lineSequence()
+        .mapNotNull { NAVBAR_LINE.matchEntire(it.trim()) }
+        .associate { it.groupValues[2] to (it.groupValues[1] == "x") }
+
+    fun setNavigationMode(mode: String): Boolean =
+        run("cmd", "overlay", "enable-exclusive", "--user", "0", "--category", "com.android.internal.systemui.navbar.$mode").first == 0
+
+    private val NAVBAR_LINE = Regex("""\[(.)] com\.android\.internal\.systemui\.navbar\.(gestural|threebutton|twobutton)""")
+
+    /** The phone's languages in order, as language tags ("tr-TR,en-US"). */
+    fun languages(): String = run("settings", "--user", "0", "get", "system", "system_locales").second.trim().let { if (it == "null") "" else it }
+
+    /**
+     * Sets the phone's languages, as Settings does: a new persistent configuration with these locales, set by the
+     * user. Where that cannot be called, Android 16's `cmd locale` sets the first of them.
+     */
+    fun setLanguages(tags: String): Boolean {
+        try {
+            val config = Configuration()
+            config.setLocales(LocaleList.forLanguageTags(tags))
+            Configuration::class.java.getField("userSetLocale").setBoolean(config, true)
+            val activityManager = Class.forName("android.app.ActivityManager").getMethod("getService").invoke(null)!!
+            activityManager.javaClass.getMethod("updatePersistentConfiguration", Configuration::class.java).invoke(activityManager, config)
+            return true
+        } catch (e: Throwable) {
+            return run("cmd", "locale", "set-device-locale", tags.substringBefore(',')).first == 0
+        }
+    }
+
+    fun property(name: String): String = run("getprop", name).second.trim()
+
+    /** Sets a system property; an empty value takes a persist. property out of what is kept over a restart. */
+    fun setProperty(name: String, value: String): Boolean = run("setprop", name, value).first == 0
+
+    fun timeZone(): String = property("persist.sys.timezone")
+
+    fun setTimeZone(id: String): Boolean = run("cmd", "alarm", "set-timezone", id).first == 0
+
+    /** Tells the clocks (the status bar's, the lock screen's) that the time format changed, as Settings does. */
+    fun tellTimeFormat(twentyFour: Boolean) {
+        run("am", "broadcast", "-a", "android.intent.action.TIME_SET", "-f", "0x01000000", "--ei", "android.intent.extra.TIME_PREF_24_HOUR_FORMAT", if (twentyFour) "1" else "0")
+    }
+
+    /** Whether Data Saver is on, or null when this phone does not say. */
+    fun dataSaver(): Boolean? = Regex("""status: (enabled|disabled)""").find(run("cmd", "netpolicy", "get", "restrict-background").second)
+        ?.groupValues?.get(1)?.let { it == "enabled" }
+
+    fun setDataSaver(on: Boolean): Boolean = run("cmd", "netpolicy", "set", "restrict-background", on.toString()).first == 0
+
+    /** Whether location is on for the main user, or null when this phone does not say. */
+    fun location(): Boolean? = when (run("cmd", "location", "is-location-enabled", "--user", "0").second.trim()) {
+        "true" -> true
+        "false" -> false
+        else -> null
+    }
+
+    fun setLocation(on: Boolean): Boolean = run("cmd", "location", "set-location-enabled", on.toString(), "--user", "0").first == 0
+
+    // --- Apps that came with the phone.
+
+    /** What Android knows of an app that may have come with the phone: installed for the main user, and core when Android needs it (a system user's app, or one that always runs). */
+    class Preinstalled(val system: Boolean, val installed: Boolean, val core: String?)
+
+    /** The app, also when it is uninstalled for the main user; null when the phone does not have it (or it cannot be read here). */
+    fun preinstalled(id: String): Preinstalled? {
+        val pm = packageManager ?: return null
+        val info = try {
+            pm.getApplicationInfo(id, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+        } catch (e: PackageManager.NameNotFoundException) {
+            return null
+        }
+        val core = when {
+            info.uid % 100000 < 10000 -> "it runs as one of Android's own users"
+            info.flags and ApplicationInfo.FLAG_PERSISTENT != 0 -> "it always runs"
+            else -> null
+        }
+        return Preinstalled(info.flags and ApplicationInfo.FLAG_SYSTEM != 0, info.flags and ApplicationInfo.FLAG_INSTALLED != 0, core)
+    }
+
+    /** Uninstalls an app for the main user, keeping its data; one that came with the phone stays on it for install-existing. */
+    fun uninstallForUser(id: String): Boolean =
+        run("pm", "uninstall", "-k", "--user", "0", id).let { (status, said) -> status == 0 && said.contains("Success") }
+
+    /** Installs again, for the main user, an app the phone still has (one that came with it), with the data it kept. */
+    fun installExisting(id: String): Boolean =
+        run("cmd", "package", "install-existing", "--user", "0", id).let { (status, said) -> status == 0 && said.contains("installed") }
 
     /** Runs one of Android's commands with no input (it would hand that to Android, which may not read /data/adb); its exit status and what it said. */
     fun run(vararg command: String): Pair<Int, String> {

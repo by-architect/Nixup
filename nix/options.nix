@@ -132,6 +132,11 @@ let
   notHttps = lib.filter (name: !lib.hasPrefix "https://" repos.${name}.address) (lib.attrNames repos);
   badKeys = lib.filter (name: builtins.match "[0-9a-f]{64}" repos.${name}.signingKey == null) (lib.attrNames repos);
 
+  debloat = config.android.debloat;
+  debloatNotNames = lib.filter (id: !isPackageName id) debloat;
+  debloatTwice = lib.unique (lib.filter (id: lib.count (other: other == id) debloat > 1) debloat);
+  debloatInstalled = lib.unique (lib.filter (id: lib.elem id allIds) debloat);
+
   apps = config.android.apps;
   appsNotNames = lib.filter (id: !isPackageName id) (lib.attrNames apps);
   # Each default (browser, dialer, ...) can belong to one app only.
@@ -144,6 +149,8 @@ let
   check = assertion: message: { inherit assertion message; };
 in
 {
+  imports = [ ./system.nix ];
+
   options = {
     assertions = mkOption {
       type = types.listOf (types.submodule {
@@ -217,6 +224,20 @@ in
       description = "Settings of each repository (android.settings.<repo>).";
     };
 
+    android.debloat = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "org.lineageos.jelly" "com.android.egg" ];
+      description = ''
+        Apps that came with the phone (the ROM's own) to remove, by package name: each is
+        uninstalled for the user, its data kept, so taking it out of the list (or removing the
+        module) brings it back as it was. A name this phone does not have is passed over, so one
+        list fits several phones. Parts Android needs (System UI, Settings, the phone app, the
+        package installer, the current launcher and keyboard, ...) are refused.
+        android.apps.<app>.enabled = false disables an app instead.
+      '';
+    };
+
     android.apps = mkOption {
       type = types.attrsOf (types.submodule ./app.nix);
       default = { };
@@ -264,6 +285,9 @@ in
     (check (badKeys == [ ]) (lib.concatMapStringsSep "\n" (name:
       "android.repos.${name}: its fingerprint (the SHA-256 of its signing key: 64 hex digits, in ?fingerprint= or in fingerprint) is missing or not right."
     ) badKeys))
+    (check (debloatNotNames == [ ]) "android.debloat: ${lib.concatStringsSep ", " debloatNotNames} is not a package name (like \"org.example.app\").")
+    (check (debloatTwice == [ ]) "android.debloat lists ${lib.concatStringsSep ", " debloatTwice} more than once: list each app once.")
+    (check (debloatInstalled == [ ]) "${lib.concatStringsSep ", " debloatInstalled}: in android.packages and in android.debloat; pick one.")
     (check (appsNotNames == [ ]) "android.apps: ${lib.concatStringsSep ", " appsNotNames} is not a package name (like \"org.example.app\").")
     (check (roleClash == [ ]) (lib.concatMapStringsSep "\n" (role:
       "android.apps: more than one app is the default for ${role} ("
@@ -277,5 +301,7 @@ in
   config.warnings = lib.concatLists (lib.mapAttrsToList (id: app:
     lib.optional (app.permissions.preciseLocation != null && lib.elem app.permissions.location [ null false "ask" ])
       "android.apps.\"${id}\": preciseLocation does nothing while location is ${builtins.toJSON app.permissions.location}."
+    ++ lib.optional (lib.elem id debloat)
+      "android.apps.\"${id}\": ${id} is in android.debloat, so its settings do nothing."
   ) apps);
 }

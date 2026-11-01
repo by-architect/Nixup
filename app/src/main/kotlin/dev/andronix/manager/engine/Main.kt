@@ -12,9 +12,11 @@ import kotlin.system.exitProcess
  *                                 (once a day, or now with --force), and when it is a profile, the releases of its
  *                                 apps from releases (android.packages.obtainium) too
  *   apply <profile> [--dry-run] [--force]
- *                                 makes the apps and their settings match the profile (with --dry-run: only plans and
- *                                 checks; with --force, the releases are asked for again even when new enough)
- *   restore                       gives back every app setting the module changed and removes the apps it installed
+ *                                 makes the apps, their settings, the debloat and the system settings match the
+ *                                 profile (with --dry-run: only plans and checks; with --force, the releases are asked
+ *                                 for again even when new enough)
+ *   restore                       brings back the apps it removed, gives back every app and system setting the module
+ *                                 changed, and removes the apps it installed
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
  *                                 android.settings.<repo>.autoupdatePackages is true)

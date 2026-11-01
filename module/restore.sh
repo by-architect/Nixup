@@ -26,6 +26,18 @@ restore_apps() {
   rm -f "$owned"
 }
 
+# The apps that came with the phone and were removed (android.debloat) come back
+# (the engine does this, with their enabled state; this is for when it could not
+# run). The phone kept them and their data: install-existing brings them back.
+restore_debloat() {
+  journal=$ORIGINAL/debloat.json
+  [ -f "$journal" ] || return 0
+  grep -o '"[A-Za-z0-9_.]*": *{' "$journal" | cut -d'"' -f2 | while read -r app; do
+    cmd package install-existing --user 0 "$app" < /dev/null > /dev/null 2>&1 && echo "Brought $app back"
+  done
+  rm -f "$journal"
+}
+
 # The apps the module put in Obtainium's list go out of it again (the engine does
 # this; this is for when it could not run). Only the files the module wrote.
 restore_obtainium() {
@@ -47,6 +59,7 @@ if [ "${0##*/}" = andronix-restore.sh ]; then
   engine=/data/adb/andronix/engine.apk
   [ -f "$engine" ] && CLASSPATH="$engine" /system/bin/app_process /system/bin dev.andronix.manager.engine.Main restore < /dev/null
   restore_apps
+  restore_debloat
   restore_obtainium
   pm uninstall dev.andronix.manager < /dev/null > /dev/null 2>&1
   rm -rf /data/adb/andronix

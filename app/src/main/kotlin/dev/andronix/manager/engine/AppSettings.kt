@@ -36,7 +36,7 @@ class AppSettings(data: File) {
         val warnings = ArrayList<String>()
         for (app in apps.keys()) {
             when {
-                app in removing -> warnings += "android.apps.\"$app\": $app leaves android.packages.fdroid, so its settings are not applied"
+                app in removing -> warnings += "android.apps.\"$app\": $app is being removed, so its settings are not applied"
                 dump(app) != null -> {
                     val wants = wants(app, apps.getJSONObject(app), problems, warnings)
                     plans += Planned(app, wants, journalKeys(app) - wants.map { it.key }.toSet())
@@ -110,6 +110,14 @@ class AppSettings(data: File) {
             }
             for (key in journalKeys(app)) failed += giveBack(app, key)
         }
+        return failed
+    }
+
+    /** Gives back the settings the module changed of one app, which is about to be removed for the user (debloat). Returns how many failed. */
+    fun restoreApp(app: String): Int {
+        if (dump(app) == null) return 0
+        var failed = 0
+        for (key in journalKeys(app)) failed += giveBack(app, key)
         return failed
     }
 

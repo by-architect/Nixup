@@ -29,6 +29,19 @@
 #   ];
 #   android.settings.obtainium.autoupdatePackages = true;
 #
+#   android.debloat = [ "org.lineageos.jelly" ];     apps that came with the phone, removed (their
+#                                                    data kept: out of the list, they come back)
+#
+#   android.display.fontScale = 1.15;                the phone's own settings (nix/system.nix has all)
+#   android.display.density = 420;                   display size, in dpi
+#   android.display.screenTimeout = 60;              seconds
+#   android.navigation.mode = "gestures";            "gestures", "threeButton"
+#   android.language = [ "tr-TR" "en-US" ];
+#   android.time.timeZone = "Europe/Istanbul";
+#   android.network.privateDns = "dns.quad9.net";    "off", "automatic", or a provider
+#   android.lockScreen.sensitiveNotifications = false;
+#   android.rawSettings.global.stay_on_while_plugged_in = 7;   any of Android's settings
+#
 #   android.apps."org.example.app" = {               an installed app's settings
 #     permissions.camera = false;                    true, false (denied), "ask"
 #     permissions.location = "whileUsing";           "always", "whileUsing", false, "ask"
@@ -39,7 +52,8 @@
 #     defaultFor = [ "browser" ];
 #   };
 #
-# Every option, with what it does: nix/options.nix and nix/app.nix in the project.
+# Every option, with what it does: nix/options.nix, nix/system.nix and nix/app.nix in
+# the project.
 { pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [
