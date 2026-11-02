@@ -100,6 +100,16 @@ in
       '';
     };
 
+    environment.extraInit = mkOption {
+      type = types.lines;
+      default = "";
+      example = ''export PATH="$PATH:/data/data/com.termux/files/usr/bin"'';
+      description = ''
+        Shell commands every session in Seraph's view runs first, as NixOS's environment.extraInit: an ssh login or
+        command, the app's terminal and seraph-shell, for root and every user (plain sh).
+      '';
+    };
+
     system.activationScripts = mkOption {
       type = types.attrsOf scriptType;
       default = { };

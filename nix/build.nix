@@ -106,6 +106,9 @@ in
             # The backups (nix/backup.nix): the repository, and each app and folder backed up.
             backup = config.system.build.backup;
             inherit system;
+            # The view's users and groups (nix/users.nix), and what each session runs first.
+            users = config.system.build.users;
+            inherit (config.environment) extraInit;
             # adb's port and the computers it trusts (nix/adb.nix).
             adb = config.system.build.adb;
             # The secrets' names: the phone checks each is there, and removes one that left.

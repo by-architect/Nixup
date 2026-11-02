@@ -1,9 +1,10 @@
 # OpenSSH's server, as NixOS's services.openssh: sshd, a unit run by root in Seraph's view of the phone (see
-# nix/units.nix), so a session is root's shell there, the one the app's terminal and seraph-shell open:
-# environment.systemPackages on PATH, /nix, and Android's own commands. The phone has one user, root, so logins are
-# root's, with keys only: users.users.root.openssh.authorizedKeys, as on NixOS, ~/.ssh/authorized_keys in its home
-# (/data/adb/seraph/home), or authorizedKeysFiles. Its host keys are made on its first start, in /etc/ssh
-# (/data/adb/seraph/etc/ssh on the phone itself), and kept, also when it is turned off.
+# nix/units.nix), so a session is a shell there, the one the app's terminal and seraph-shell open:
+# environment.systemPackages on PATH, /nix, and Android's own commands. Logins are root's or those of the users in
+# users.users (nix/users.nix), with keys only: users.users.<name>.openssh.authorizedKeys, as on NixOS,
+# ~/.ssh/authorized_keys in the user's home, or authorizedKeysFiles. Its host keys are made on its first start, in
+# /etc/ssh (/data/adb/seraph/etc/ssh on the phone itself), and kept, also when it is turned off; a hostKeys path
+# that is there already (a secret the build puts on the phone) is used as it is.
 #
 # Its options are NixOS's, with the same names, types and meanings; one the phone cannot do is there too, and setting
 # it stops the build and says why. Two defaults differ, as a phone's root has no password: PasswordAuthentication and
@@ -12,7 +13,6 @@
 let
   inherit (lib) mkOption types;
   cfg = config.services.openssh;
-  root = config.users.users.root.openssh.authorizedKeys or { keys = [ ]; keyFiles = [ ]; };
   q = lib.escapeShellArg;
 
   # As NixOS writes settings into sshd_config: true and false as yes and no; lists comma- or space-separated.
@@ -23,12 +23,24 @@ let
     else toString value;
   settings = lib.filterAttrs (_: value: value != null) (removeAttrs cfg.settings [ "_module" ]);
 
-  # Keys from files of the config's folder are read now, as on NixOS; a file named by its full path on the phone is
-  # read there, when sshd starts.
-  keyLines = root.keys ++ lib.concatMap (file:
+  # Each user's keys: from files of the config's folder read now, as on NixOS; a file named by its full path on the
+  # phone is read there, when sshd starts.
+  keyLines = keys: keys.keys ++ lib.concatMap (file:
     lib.filter (line: line != "" && !lib.hasPrefix "#" line) (map lib.trim (lib.splitString "\n" (builtins.readFile file)))
-  ) (lib.filter builtins.isPath root.keyFiles);
-  phoneKeyFiles = lib.filter (file: !builtins.isPath file) root.keyFiles;
+  ) (lib.filter builtins.isPath keys.keyFiles);
+  phoneKeyFiles = keys: lib.filter (file: !builtins.isPath file) keys.keyFiles;
+  withKeys = lib.filterAttrs (_: user: user.openssh.authorizedKeys.keys != [ ] || user.openssh.authorizedKeys.keyFiles != [ ])
+    config.users.users;
+  writeKeys = name: user: let keys = user.openssh.authorizedKeys; in ''
+    {
+      printf '%s' ${q (lib.concatMapStrings (line: "${line}\n") (keyLines keys))}
+      ${lib.concatMapStrings (file: ''
+        if [ -r ${q file} ]; then cat ${q file}; echo; else echo "No key file ${file} on the phone: its keys are left out" >&2; fi
+      '') (phoneKeyFiles keys)}
+    } | grep -v '^[[:space:]]*$' > /etc/ssh/authorized_keys.d/.${name}.new || true
+    chmod 0444 /etc/ssh/authorized_keys.d/.${name}.new
+    mv -f /etc/ssh/authorized_keys.d/.${name}.new /etc/ssh/authorized_keys.d/${name}
+  '';
 
   listen = { addr, port, ... }:
     let host = if port != null && lib.hasInfix ":" addr then "[${addr}]" else addr;
@@ -38,7 +50,7 @@ let
     # Seraph's sshd_config, from services.openssh (see nix/openssh.nix).
     ${lib.concatMapStrings (port: "Port ${toString port}\n") cfg.ports}${lib.concatMapStrings listen cfg.listenAddresses}${lib.concatMapStrings (key: "HostKey ${key.path}\n") cfg.hostKeys}PidFile none
     PrintLastLog no
-    ${lib.optionalString cfg.allowSFTP "Subsystem sftp ${cfg.sftpServerExecutable} ${lib.concatStringsSep " " cfg.sftpFlags}\n"}AuthorizedKeysFile ${lib.optionalString cfg.authorizedKeysInHomedir "%h/.ssh/authorized_keys "}/etc/ssh/authorized_keys.d/%u ${lib.concatStringsSep " " cfg.authorizedKeysFiles}
+    ${lib.optionalString cfg.allowSFTP "Subsystem sftp ${cfg.sftpServerExecutable} ${lib.concatStringsSep " " cfg.sftpFlags}\n"}${lib.optionalString (!(settings ? AuthorizedKeysFile)) "AuthorizedKeysFile ${lib.optionalString cfg.authorizedKeysInHomedir "%h/.ssh/authorized_keys "}/etc/ssh/authorized_keys.d/%u ${lib.concatStringsSep " " cfg.authorizedKeysFiles}\n"}
     ${lib.optionalString (cfg.banner != null) "Banner /etc/ssh/banner\n"}${lib.concatStrings (lib.mapAttrsToList (key: value: "${key} ${settingValue key value}\n") settings)}${cfg.extraConfig}
   '';
 
@@ -137,7 +149,7 @@ in
       description = ''
         More files sshd reads keys from, as AuthorizedKeysFile takes them (%u: the user, %h: its home). On the phone
         each must be in a folder only root can write to, all the way up: /data is not one, so a key file there goes in
-        users.users.root.openssh.authorizedKeys.keyFiles instead.
+        users.users.<name>.openssh.authorizedKeys.keyFiles instead.
       '';
     };
 
@@ -189,7 +201,7 @@ in
           PermitRootLogin = mkOption {
             type = types.nullOr (types.enum [ "yes" "without-password" "prohibit-password" "forced-commands-only" "no" ]);
             default = "prohibit-password";
-            description = "Whether root may log in, and how: \"prohibit-password\" takes keys only. root is the phone's only user.";
+            description = "Whether root may log in, and how: \"prohibit-password\" takes keys only.";
           };
           X11Forwarding = mkOption {
             type = types.nullOr types.bool;
@@ -275,40 +287,6 @@ in
     };
   };
 
-  options.users.users = mkOption {
-    type = types.attrsOf (types.submodule {
-      options.openssh = {
-        authorizedKeys = {
-          keys = mkOption {
-            type = types.listOf types.singleLineStr;
-            default = [ ];
-            example = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… neo@laptop" ];
-            description = "Public keys that may log in as this user, as on NixOS.";
-          };
-          keyFiles = mkOption {
-            type = types.listOf (types.either types.path types.str);
-            default = [ ];
-            example = lib.literalExpression ''[ ./laptop.pub "/data/adb/seraph/secrets/ssh_keys" ]'';
-            description = ''
-              Files of public keys that may log in as this user: a file from the config's folder (read when the config
-              is built, as on NixOS), or, as a string, the full path of one on the phone (read there when sshd starts).
-            '';
-          };
-        };
-        authorizedPrincipals = mkOption {
-          type = types.listOf types.singleLineStr;
-          default = [ ];
-          description = "Certificate principals this user may log in with, as on NixOS: not on the phone yet.";
-        };
-      };
-    });
-    default = { };
-    description = ''
-      The phone's users, as NixOS's users.users: it has one, root, whose openssh.authorizedKeys sshd takes
-      (services.openssh).
-    '';
-  };
-
   config = lib.mkIf cfg.enable {
     # ssh, scp and ssh-keygen in sessions too, as on NixOS.
     environment.systemPackages = [ cfg.package ];
@@ -331,15 +309,11 @@ in
         printf '%s' ${q sshdConfig} > /etc/ssh/sshd_config
         ${if cfg.banner != null then "printf '%s\\n' ${q cfg.banner} > /etc/ssh/banner" else "rm -f /etc/ssh/banner"}
         cp -f ${q (toString cfg.moduliFile)} /etc/ssh/moduli 2> /dev/null || true
-        keys=/etc/ssh/authorized_keys.d/root
-        {
-          printf '%s' ${q (lib.concatMapStrings (line: "${line}\n") keyLines)}
-          ${lib.concatMapStrings (file: ''
-            if [ -r ${q file} ]; then cat ${q file}; echo; else echo "No key file ${file} on the phone: its keys are left out" >&2; fi
-          '') phoneKeyFiles}
-        } | grep -v '^[[:space:]]*$' > "$keys.new" || true
-        chmod 0444 "$keys.new"
-        mv -f "$keys.new" "$keys"
+        # Each user's keys; a user who left the config takes its file along.
+        for file in /etc/ssh/authorized_keys.d/*; do
+          case " ${lib.concatStringsSep " " (lib.attrNames withKeys)} " in *" ''${file##*/} "*) ;; *) rm -f "$file" ;; esac
+        done
+        ${lib.concatStrings (lib.mapAttrsToList writeKeys withKeys)}
         sshd -t -f /etc/ssh/sshd_config
       '';
       serviceConfig = {
@@ -350,20 +324,6 @@ in
     };
 
     assertions = [
-      {
-        assertion = lib.all (name: name == "root") (lib.attrNames (lib.filterAttrs (_: user:
-          user.openssh.authorizedKeys.keys != [ ] || user.openssh.authorizedKeys.keyFiles != [ ]
-        ) config.users.users));
-        message = "users.users: the phone has one user, root; give the keys to users.users.root.openssh.authorizedKeys.";
-      }
-      {
-        assertion = lib.all (file: builtins.isPath file || lib.hasPrefix "/" file) root.keyFiles;
-        message = "users.users.root.openssh.authorizedKeys.keyFiles: a file from the config's folder is a path, written without quotes (./laptop.pub); a string is a full path on the phone.";
-      }
-      {
-        assertion = lib.all (user: user.openssh.authorizedPrincipals == [ ]) (lib.attrValues config.users.users);
-        message = "users.users.<name>.openssh.authorizedPrincipals: not on the phone yet.";
-      }
       {
         assertion = cfg.ports != [ ] || lib.all (address: address.port != null) cfg.listenAddresses;
         message = "services.openssh: give it a port to listen on (ports, or listenAddresses with a port).";

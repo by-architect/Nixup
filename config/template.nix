@@ -530,6 +530,21 @@
     keyFiles = [ ];                               # ./laptop.pub, or "/data/adb/seraph/secrets/ssh_keys" on the phone
   };
 
+  # A user that logs in over SSH, as NixOS's users.users (an example): an Android app's own uid makes a user that
+  # shares that app's files, storage access and su grant (Termux's: u0_a355 = 10355; `pm list packages -U` lists them).
+  users.users.niobe = {
+    isNormalUser = true;                          # a user that logs in
+    uid = 10355;                                  # an app's uid, or another unused one
+    description = "Niobe";                        # full name
+    home = "/data/data/com.termux/files/home";    # its home (here Termux's)
+    createHome = false;                           # true: make the home, owned by it
+    group = "niobe";                              # its own group (made with its uid)
+    extraGroups = [ "inet" "everybody" "external_storage" ];   # network, shared storage (users.groups has Android's)
+    openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleOnlyPutYourOwnKeyHere neo@laptop" ];   # an example
+  };
+
+  environment.extraInit = "";                     # what every shell session runs first, like 'PATH="$PATH:/data/data/com.termux/files/usr/bin"'
+
   # Your own services, as NixOS's systemd.services. Example: the Download folder as a web page for
   # your tailnet. Bound to 127.0.0.1, Wi-Fi cannot reach it, but Seraph's Tailscale passes it on:
   # http://<the phone's tailnet name>:8080 (like logos-1).
