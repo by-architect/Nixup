@@ -103,6 +103,32 @@ in
       description = ''The app's language, like "tr-TR" or "en-US"; "system" follows the phone's.'';
     };
 
+    backup = mkOption {
+      type = types.nullOr (types.either types.bool (types.submodule {
+        options = {
+          apk = toggle "Its APK too (null: android.backup.defaults.apk).";
+          data = toggle "Its data (null: android.backup.defaults.data).";
+          include = mkOption {
+            type = types.nullOr (types.listOf (types.enum [ "data" "deviceData" "storage" "media" "obb" ]));
+            default = null;
+            description = "Which of its data (null: android.backup.defaults.include; nix/backup.nix tells them).";
+          };
+          when = mkOption {
+            type = types.nullOr (types.enum [ "auto" "schedule" "manual" ]);
+            default = null;
+            description = "When it is backed up (null: android.backup.defaults.when).";
+          };
+          autoRestore = toggle "Its data back when a build installs it (null: android.backup.defaults.autoRestore).";
+        };
+      }));
+      default = null;
+      example = { include = [ "data" ]; when = "schedule"; };
+      description = ''
+        Back the app up into android.backup.repository: true (as android.backup.defaults says), its own settings
+        (the others from the defaults), or false (not even when android.backup.apps lists it).
+      '';
+    };
+
     defaultFor = mkOption {
       type = types.listOf (types.enum [ "browser" "dialer" "sms" "home" "assistant" "callScreening" ]);
       default = [ ];

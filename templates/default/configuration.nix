@@ -91,6 +91,12 @@
 #     forgetUnused = false;
 #   };
 #
+#   android.backup = {                               backups of apps (APK and data) and folders,
+#     repository = "/storage/<card>/Backup";         made by the phone itself (restic); a build
+#     passwordFile = ./backup-password;              that installs an app brings its data back
+#     apps = [ "org.example.notes" ];
+#   };
+#
 #   services.tailscale.authKeyFile = ./tailscale.key;    a secret file from the config's folder
 #                                                    (no quotes): each build puts it on the phone,
 #                                                    readable by root alone, never in the profile
@@ -103,7 +109,7 @@
 #
 # Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix,
 # nix/app.nix, nix/global.nix, nix/units.nix, nix/services.nix, nix/syncthing.nix,
-# nix/openssh.nix, nix/adb.nix and nix/nixpkgs.nix in the project.
+# nix/openssh.nix, nix/adb.nix, nix/backup.nix and nix/nixpkgs.nix in the project.
 { config, lib, pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [

@@ -34,6 +34,15 @@ import kotlin.system.exitProcess
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
  *                                 android.settings.repo.<repo>.autoupdatePackages is true)
+ *   backup [--auto] [apps or folders...]
+ *                                 backs up the last build's apps and folders (android.backup), all or the ones named
+ *                                 (with --auto: the ones that are due, as the app's job asks every 15 minutes)
+ *   backups [app or folder]       lists the backups
+ *   backup-status                 each app and folder backed up: when last, and whether (and why) it is due
+ *   backup-restore <app> [snapshot]
+ *                                 brings an installed app's data back from its newest backup (or the one named), over
+ *                                 what it has
+ *   restic <arguments...>         restic itself, with the backups' repository and password
  * Exit status: 0 done, 2 stopped before changing anything, 1 stopped partway.
  */
 object Main {
@@ -74,6 +83,11 @@ object Main {
                     .optJSONArray("storePaths")?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
                 "updates" -> Updates(data).list().let { 0 }
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
+                "backup" -> backups().run(files, auto = "--auto" in args)
+                "backups" -> backups().list(files.firstOrNull())
+                "backup-status" -> backups().status()
+                "backup-restore" -> backups().restoreNow(files.firstOrNull() ?: usage(), files.getOrNull(1))
+                "restic" -> backups().passThrough(args.drop(1))
                 else -> usage()
             }
         } catch (e: Stop) {
@@ -139,6 +153,9 @@ object Main {
         if (!old.renameTo(File(repos, "fdroid"))) old.deleteRecursively()
     }
 
+    private fun backups(): Backup = Backup.ofLastBuild(data)
+        ?: throw Stop("the last build has no backups: set android.backup.repository (and the apps, folders) in the config, then build", 2)
+
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | backup [--auto] [apps...] | backups [app] | backup-status | backup-restore <app> [snapshot] | restic <arguments...>")
 }

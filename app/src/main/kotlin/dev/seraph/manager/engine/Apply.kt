@@ -115,12 +115,15 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         units.plan(android.optJSONObject("units"), problems)
         val adb = Adb(data)
         adb.plan(android.optJSONObject("adb"), problems)
+        // The data of the apps it installs, and the apps backed up with their APK that are not here, from backups.
+        val backup = Backup.of(data, android)
+        backup?.planRestore(toInstall.associate { it.id to it.code }, ids.toSet() + debloated)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
             return 2
         }
-        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes) {
+        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes && backup?.changes != true) {
             Out.line("Nothing to change")
             if (!dryRun) {
                 // Root's shell follows environment.systemPackages, which changes no unit.
@@ -136,7 +139,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         if (secrets.apply() != 0) return 1
         val status = installer.fetchAndInstall(steps)
         if (status != 0) return status
-        var failed = settings.apply(appSettings, leaving)
+        // Their data before their settings and before anything starts them.
+        var failed = backup?.applyRestore() ?: 0
+        failed += settings.apply(appSettings, leaving)
         // An app that came with the phone keeps its data while removed: it gets its settings from before back first.
         for (id in debloat.removing) failed += settings.restoreApp(id)
         failed += debloat.apply()

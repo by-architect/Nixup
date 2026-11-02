@@ -27,8 +27,9 @@ rm -f /data/adb/service.d/andronix-restore.sh
 pm uninstall dev.andronix.manager < /dev/null > /dev/null 2>&1 && ui_print "- Removed the Andronix app"
 
 set_perm "$MODPATH/bin/nix" 0 0 0755
-# seraph-shell, in /system/bin once Magisk mounts the module (from the next start).
+# seraph-shell and seraph-backup, in /system/bin once Magisk mounts the module (from the next start).
 set_perm "$MODPATH/system/bin/seraph-shell" 0 0 0755
+set_perm "$MODPATH/system/bin/seraph-backup" 0 0 0755
 ln -sf nix "$MODPATH/bin/nix-instantiate"
 
 # Streamed in, so the installer does not need to read the module's folder.

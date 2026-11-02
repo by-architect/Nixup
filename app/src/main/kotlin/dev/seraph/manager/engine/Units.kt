@@ -344,7 +344,8 @@ class Units(private val data: File) {
     private fun busybox() = BUSYBOXES.firstOrNull { File(it).canExecute() }
         ?: throw Stop("there is no busybox (Magisk's or KernelSU's) to run the services with", 1)
 
-    private fun writeView() {
+    /** The view alone (see VIEW), for what runs in it without a build (backups). */
+    fun writeView() {
         dir.mkdirs()
         view.writeText(VIEW.replace("@BUSYBOX@", busybox()).replace("@DATA@", data.path))
     }

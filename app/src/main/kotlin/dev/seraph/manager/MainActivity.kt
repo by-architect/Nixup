@@ -90,6 +90,7 @@ class MainActivity : Activity() {
 
         Notifications.channels(this)
         UpdateJob.schedule(this)
+        BackupJob.schedule(this)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }

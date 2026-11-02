@@ -181,6 +181,7 @@
     openLinks = null;                             # open its web links in it (it has none)
     language = "tr-TR";                           # its own language; "system": the phone's
     defaultFor = [ ];                             # "browser", "dialer", "sms", "home", "assistant", "callScreening"
+    backup = null;                                # true, false, or { include = [ "data" ]; when = "manual"; ... }
   };
 
   # Default apps.
@@ -485,12 +486,16 @@
   android.settings.lineage.statsCollection = false;   # anonymous statistics to LineageOS
 
   # ==== 4. Backups =============================================================================
-  # Not in Seraph yet. Planned: a backup of each app's APK and data, made by itself when the app
-  # goes to the background (or on a schedule), and restored when a build installs the app again:
-  #   android.apps."org.thoughtcrime.securesms".backup = true;
-  #   android.backup = { path = "/storage/EF27-E719/Backup"; keep = { last = 3; daily = 7; weekly = 4; }; };
-  # Until then this phone's apps are backed up by Neo Backup (above), and its folders are copied
-  # to the PCs over SSH.
+  # Seraph's own backups are off on this phone: Neo Backup (above) backs up its apps, and its
+  # folders are copied to the PCs over SSH. Turned on, they would look like this (the SD card is
+  # full, so a PC over SSH; the password file stays out of the repo, in a copy on the phone):
+  #   android.backup = {
+  #     repository = "sftp:neo@nebuchadnezzar:/backup/logos";
+  #     passwordFile = "/data/adb/seraph/secrets/backup-password";
+  #     apps = [ "com.machiav3lli.fdroid" "io.heckel.ntfy" "net.thunderbird.android" ];
+  #     folders = [ "/storage/emulated/0/Documents" ];
+  #   };
+  #   android.apps."org.thoughtcrime.securesms".backup = false;   # Signal: its own backups (its keys stay with the phone)
 
   # ==== 5. Scripts and services ================================================================
   # Services with NixOS's names and options, run by root from Nix packages, which the phone fetches

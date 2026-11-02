@@ -133,6 +133,7 @@
     openLinks = null;                             # open its web links in it (it has none)
     language = "tr-TR";                           # its own language; "system": the phone's
     defaultFor = [ ];                             # "browser", "dialer", "sms", "home", "assistant", "callScreening"
+    backup = null;                                # true, false, or { include = [ "data" ]; when = "manual"; ... }
   };
 
   # ==== 3. System settings =====================================================================
@@ -379,12 +380,29 @@
   android.settings.lineage.statsCollection = false;   # anonymous statistics to LineageOS
 
   # ==== 4. Backups =============================================================================
-  # Not in Seraph yet. Planned: a backup of each app's APK and data, made by itself when the app
-  # goes to the background (or on a schedule), and restored when a build installs the app again:
-  #   android.apps."org.thoughtcrime.securesms".backup = true;
-  #   android.backup = { path = "/storage/EF27-E719/Backup"; keep = { last = 3; daily = 7; weekly = 4; }; };
-  # Until then this phone's apps are backed up by Neo Backup (above), and its folders are copied
-  # to the PCs over SSH.
+  # Each app's APK and data, and folders, backed up by the phone itself into a restic repository
+  # (encrypted, each file stored once). An app is backed up after it was used, a build that installs
+  # it brings its data back, and an app not on any list comes back from its backup. By hand:
+  # su -c seraph-backup (list, status, now, restore <app>, restic ...). Off while repository is null.
+  android.backup = {
+    repository = null;                            # "/storage/<card>/Backup", "sftp:me@pc:/backup/phone", ...
+    passwordFile = null;                          # ./backup-password: keep a copy off the phone
+    environmentFile = null;                       # ./backup-env: a remote repository's keys (NAME=value)
+    initialize = true;                            # make the repository at the first backup
+    apps = [ ];                                   # [ "org.example.notes" ]: backed up with the defaults
+    folders = [ ];                                # [ "/storage/emulated/0/DCIM" ]: once a schedule
+    defaults = {
+      apk = true;                                 # its APK too: installable from the backup
+      data = true;                                # false: the APK alone
+      include = [ "data" "deviceData" "storage" ];   # also "media", "obb" (Android/media, Android/obb)
+      when = "auto";                              # "auto": after use; "schedule"; "manual"
+      autoRestore = true;                         # data back when a build installs it
+    };
+    schedule = "daily";                           # "hourly", "daily", "weekly", "6h", ...
+    quietTime = "10m";                            # "auto": this long in the background first
+    keep = { last = 3; hourly = 0; daily = 7; weekly = 4; monthly = 0; yearly = 0; };
+    onlyWhileCharging = false;                    # by itself only on the charger
+  };
 
   # ==== 5. Scripts and services ================================================================
   # Services with NixOS's names and options, run by root from Nix packages, which the phone fetches

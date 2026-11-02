@@ -1,5 +1,7 @@
 package dev.seraph.manager.engine
 
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -118,6 +120,26 @@ object Device {
         apk.inputStream().use { input -> process.outputStream.use { input.copyTo(it) } }
         val said = process.inputStream.bufferedReader().readText().trim()
         return if (process.waitFor() == 0 && said.contains("Success")) null else said.ifEmpty { "exit ${process.exitValue()}" }
+    }
+
+    /**
+     * Installs an app from its APKs (a base APK and its splits), each streamed into one pm session, as adb
+     * install-multiple does. Null when it worked, else what pm said.
+     */
+    fun installAll(apks: List<File>): String? {
+        val created = run("pm", "install-create", "-r", "--user", "current", "-S", apks.sumOf { it.length() }.toString()).second
+        val session = Regex("""\[(\d+)]""").find(created)?.groupValues?.get(1) ?: return created.trim()
+        for ((i, apk) in apks.withIndex()) {
+            val process = ProcessBuilder("pm", "install-write", "-S", apk.length().toString(), session, "$i-${apk.name}", "-").redirectErrorStream(true).start()
+            apk.inputStream().use { input -> process.outputStream.use { input.copyTo(it) } }
+            val said = process.inputStream.bufferedReader().readText().trim()
+            if (process.waitFor() != 0 || !said.contains("Success")) {
+                run("pm", "install-abandon", session)
+                return said.ifEmpty { "exit ${process.exitValue()}" }
+            }
+        }
+        val (status, said) = run("pm", "install-commit", session)
+        return if (status == 0 && said.contains("Success")) null else said.trim()
     }
 
     /** Uninstalls an app but keeps its data, so installing it again brings the data back. */
@@ -350,6 +372,33 @@ object Device {
 
     /** Ends the app's processes that are in the background (not as force-stop does: its jobs and alarms stay). */
     fun killInBackground(id: String) = run("am", "kill", id)
+
+    /** How an app was used lately: whether it is on the screen now, and when it last left it (0: not lately). */
+    class Use(val foreground: Boolean, val leftAt: Long)
+
+    /** Each app's use since [since], from Android's usage stats; null when they cannot be read here. */
+    fun usage(since: Long): Map<String, Use>? {
+        val stats = context?.getSystemService(UsageStatsManager::class.java) ?: return null
+        val events = try {
+            stats.queryEvents(since, System.currentTimeMillis()) ?: return null
+        } catch (e: Exception) {
+            Out.line("(usage stats cannot be read here: ${e.javaClass.simpleName}; apps are backed up on their schedule)")
+            return null
+        }
+        val last = HashMap<String, Pair<Boolean, Long>>()
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> last[event.packageName] = true to (last[event.packageName]?.second ?: 0L)
+                UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED -> last[event.packageName] = false to event.timeStamp
+            }
+        }
+        return last.mapValues { (_, value) -> Use(value.first, value.second) }
+    }
+
+    /** Whether the phone is charging (or full, on a charger). */
+    fun charging(): Boolean = Regex("""status: (\d+)""").find(run("dumpsys", "battery").second)?.groupValues?.get(1) in setOf("2", "5")
 
     // --- The phone's own settings.
 

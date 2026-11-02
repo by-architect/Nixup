@@ -13,6 +13,7 @@ class UpdatesReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Notifications.channels(context)
         UpdateJob.schedule(context)
+        BackupJob.schedule(context)
         val title = intent.getStringExtra("title") ?: ""
         val text = intent.getStringExtra("text") ?: ""
         when (intent.getStringExtra("event")) {

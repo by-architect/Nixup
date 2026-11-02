@@ -56,12 +56,13 @@ in
   config.system.build = {
     # needsNixpkgs: whether the config uses Nix packages, which a configuration.nix alone gets from
     # the phone's copy of nixpkgs (fetched the first time one does). Asked without the packages
-    # themselves, which need it: whether a module sets environment.systemPackages, and whether a
-    # unit is there.
+    # themselves, which need it: whether a module sets environment.systemPackages, whether a
+    # unit is there, and whether there are backups (restic).
     repos = {
       android = { inherit repos; };
       needsNixpkgs = options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
-        || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { };
+        || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { }
+        || config.android.backup.repository != null;
     };
 
     # toString: a path stays where it is, where interpolating it would copy it into the store.
@@ -98,10 +99,12 @@ in
             )) config.android.packages;
             settings = lib.mapAttrs (name: _: { autoupdatePackages = settings.repo.${name}.autoupdatePackages or false; })
               (repos // { obtainium = { }; });
-            # debloat only when true: false is the same as not managed.
+            # debloat only when true: false is the same as not managed; backup goes in backup.
             apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: app:
-              managed (app // { debloat = if app.debloat == true then true else null; })
+              managed (removeAttrs app [ "backup" ] // { debloat = if app.debloat == true then true else null; })
             ) config.android.apps);
+            # The backups (nix/backup.nix): the repository, and each app and folder backed up.
+            backup = config.system.build.backup;
             inherit system;
             # adb's port and the computers it trusts (nix/adb.nix).
             adb = config.system.build.adb;
@@ -111,7 +114,7 @@ in
             # every store path the phone needs for them and environment.systemPackages: it fetches
             # those from cache.nixos.org before the build changes anything.
             units = config.system.build.units;
-            storePaths = lib.unique (config.system.build.unitStorePaths
+            storePaths = lib.unique (config.system.build.unitStorePaths ++ config.system.build.backupStorePaths
               ++ map (package: builtins.unsafeDiscardStringContext "${package}") (config.environment.systemPackages ++ shellPackages));
             # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
             # NixOS has them; none without Nix packages.
