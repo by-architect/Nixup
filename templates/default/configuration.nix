@@ -79,9 +79,9 @@
 #   environment.systemPackages = with pkgs; [ htop rsync ];   Nix packages for root's shell:
 #                                                    su -c seraph-shell (on adb, or in Termux)
 #
-#   android.secrets.tailscale.file = ./tailscale.key;    a secret: a file seraph-rebuild sends
-#   services.tailscale.authKeyFile =                     from the PC that builds the config; root
-#     config.android.secrets.tailscale.path;             alone reads it on the phone
+#   services.tailscale.authKeyFile = ./tailscale.key;    a secret file from the config's folder
+#                                                    (no quotes): each build puts it on the phone,
+#                                                    readable by root alone, never in the profile
 #
 # Built on the phone (the app's Build), or on a PC and applied on the phone over adb or ssh, as
 # nixos-rebuild --target-host: nix run github:by-architect/Seraph -- switch --flake .#phone
@@ -90,8 +90,8 @@
 # and builds nothing.
 #
 # Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix,
-# nix/app.nix, nix/global.nix, nix/units.nix, nix/services.nix, nix/syncthing.nix,
-# nix/nixpkgs.nix and nix/secrets.nix in the project.
+# nix/app.nix, nix/global.nix, nix/units.nix, nix/services.nix, nix/syncthing.nix
+# and nix/nixpkgs.nix in the project.
 { config, lib, pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [

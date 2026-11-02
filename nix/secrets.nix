@@ -1,13 +1,12 @@
 # Secrets: files that programs of the config read on the phone (a login key, a token), which never go
-# into the profile or Nix's store, as agenix's age.secrets does for NixOS. Each is a file on the
-# machine the config is built on, which seraph-rebuild sends to the phone with the profile; there it
-# is /data/adb/seraph/secrets/<name>, which root alone can read, and the options that need it take
-# that path: services.tailscale.authKeyFile = config.android.secrets.tailscale.path;
-#
-# A build on the phone itself sends nothing: a secret must be there already (one a PC sent stays,
-# until it leaves the config). The profile has each secret's name only, and a build stops before
-# changing anything when one is missing. A secret can also be text the config reads from elsewhere
-# (a JSON file of secrets): seraph-rebuild writes it to a file only you can read, and sends that.
+# into the profile or Nix's store. Seraph's own, not a user's to name: the options that take a secret
+# file (services.tailscale.authKeyFile, services.syncthing.cert, ...; see secret-files.nix) keep one
+# here when they are given a file from the config's folder. Each build puts it on the phone (a build
+# on the PC sends it, seraph-rebuild; one on the phone copies it), as /data/adb/seraph/secrets/<name>,
+# which root alone can read, and the option's program reads it there. The profile has each secret's
+# name only; a build stops before changing anything when one cannot be had, and one that leaves the
+# config goes. A module can also give a secret as text it reads from elsewhere (a JSON file of
+# secrets), which the build writes to such a file.
 { config, lib, ... }:
 let
   inherit (lib) mkOption types;
@@ -53,6 +52,7 @@ in
   options.android.secrets = mkOption {
     type = types.attrsOf (types.submodule secretModule);
     default = { };
+    internal = true;
     example = lib.literalExpression ''
       {
         tailscale.file = ./secrets/tailscale.key;

@@ -23,9 +23,9 @@
 #   networking.hostName, time.timeZone, i18n.defaultLocale
 #                            the phone's name, time zone and language, with NixOS's names
 #                            (nix/global.nix); an android.settings one set too wins
-#   android.secrets.<name>   a file programs read on the phone (a login key), which seraph-rebuild
-#                            sends from the PC that builds the config; root alone reads it there,
-#                            at android.secrets.<name>.path (nix/secrets.nix)
+#   a secret file (services.tailscale.authKeyFile = ./tailscale.key;, written without quotes)
+#                            comes from the config's folder: each build puts it on the phone,
+#                            readable by root alone, never in the profile or Nix's store
 #
 # Built on the phone (the app's Build), or on a PC and applied on the phone over adb or ssh:
 #   nix run github:by-architect/Seraph -- switch --flake .#Logos

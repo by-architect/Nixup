@@ -70,6 +70,12 @@ in
       text = secret.text != null;
     }) config.android.secrets;
     secretTexts = lib.mapAttrs (_: secret: secret.text) (lib.filterAttrs (_: secret: secret.text != null) config.android.secrets);
+    # The same for a build on the phone, which puts them in place itself: each file's path (in
+    # the config's folder, or a flake's copy of it) or text.
+    secretsToDeliver = lib.mapAttrs (_: secret: {
+      file = if secret.file == null then null else toString secret.file;
+      inherit (secret) text;
+    }) config.android.secrets;
 
     profile =
       if failed != [ ] then

@@ -9,7 +9,7 @@
 # reposOnly = true: that needs no package names, and gives the repositories to fetch the indexes
 # of (into reposDir, whose trees are pkgs.<repo>) before the whole configuration is evaluated, and
 # whether it needs nixpkgs at all (the phone's copy of nixos-unstable, given as nixpkgs).
-{ configFile, reposDir ? "", reposOnly ? false, nixpkgs ? "", lib ? import <nixpkgs/lib> }:
+{ configFile, reposDir ? "", reposOnly ? false, part ? "", nixpkgs ? "", lib ? import <nixpkgs/lib> }:
 let
   seraph = import ./eval.nix {
     inherit lib reposDir;
@@ -17,4 +17,5 @@ let
     modules = [ (/. + configFile) ];
   };
 in
-seraph.config.system.build.${if reposOnly then "repos" else "profile"}
+# part: another of config.system.build's, like secretsToDeliver.
+seraph.config.system.build.${if part != "" then part else if reposOnly then "repos" else "profile"}

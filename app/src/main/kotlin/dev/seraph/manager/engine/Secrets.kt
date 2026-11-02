@@ -2,6 +2,7 @@ package dev.seraph.manager.engine
 
 import android.system.Os
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -73,4 +74,39 @@ class Secrets(data: File, private val incoming: File?) {
     private fun sent(name: String): File? = incoming?.let { File(it, name) }?.takeIf { it.isFile }
 
     private fun same(a: File, b: File) = b.isFile && a.length() == b.length() && a.readBytes().contentEquals(b.readBytes())
+
+    companion object {
+        /**
+         * The secrets a build on the phone puts in place itself, as its config gives them ([json]: each one's file, in the
+         * config's folder or a flake's copy of it in Seraph's [store], or its text), into [into], readable by root alone,
+         * for [Secrets] to take as if a PC had sent them. 0, or 2 when one cannot be had.
+         */
+        fun stage(json: File, into: File, store: File?): Int {
+            val secrets = JSONObject(json.readText())
+            into.mkdirs()
+            Os.chmod(into.path, "700".toInt(8))
+            var failed = 0
+            for (name in secrets.keys()) {
+                val secret = secrets.getJSONObject(name)
+                val target = File(into, name)
+                try {
+                    when {
+                        !secret.isNull("text") -> target.writeText(secret.getString("text"))
+                        !secret.isNull("file") -> {
+                            val path = secret.getString("file")
+                            val source = if (store != null && path.startsWith("/nix/store/")) File(store, path.removePrefix("/")) else File(path)
+                            if (!source.isFile) throw IllegalStateException("there is no $path to put on the phone")
+                            source.copyTo(target, overwrite = true)
+                        }
+                        else -> continue
+                    }
+                    Os.chmod(target.path, "600".toInt(8))
+                } catch (e: Exception) {
+                    Out.line("✘ $name: ${e.message}")
+                    failed++
+                }
+            }
+            return if (failed == 0) 0 else 2
+        }
+    }
 }

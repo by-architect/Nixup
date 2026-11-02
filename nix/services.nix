@@ -16,6 +16,9 @@
 let
   inherit (lib) mkOption types;
   cfg = config.services.tailscale;
+  secretFiles = import ./secret-files.nix { inherit lib; };
+  # The auth key's file on the phone: put there by the build, when it is a file from the config's folder.
+  keyFile = secretFiles.path config "services.tailscale.authKeyFile" cfg.authKeyFile;
 
   socket = "/run/tailscale/tailscaled.sock";
   params = lib.concatStringsSep "&" (lib.mapAttrsToList (key: value:
@@ -90,13 +93,14 @@ in
     };
 
     authKeyFile = mkOption {
-      type = types.nullOr types.str;
+      type = secretFiles.type;
       default = null;
-      example = "/data/adb/seraph/secrets/tailscale.key";
+      example = lib.literalExpression "./tailscale.key";
       description = ''
-        A file on the phone with an auth key (from the admin console: Settings, Keys), to log in
-        without a link: config.android.secrets.<name>.path is the place for it. Give its full path,
-        as a string: a path like ./tailscale.key would copy it into Nix's store.
+        A file with an auth key (from the admin console: Settings, Keys), to log in without a link:
+        a file from the config's folder (./tailscale.key), which each build puts on the phone,
+        readable by root alone and never in the profile or Nix's store; or, as a string, the full
+        path of one already on the phone.
       '';
     };
 
@@ -151,6 +155,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    android.secrets = secretFiles.secrets "services.tailscale.authKeyFile" cfg.authKeyFile;
+
     systemd.services.tailscaled = {
       description = "Tailscale's daemon";
       wantedBy = [ "multi-user.target" ];
@@ -189,10 +195,10 @@ in
         [ -n "$state" ] || { echo "tailscaled does not answer (its log: /data/adb/seraph/units/tailscaled/log)"; exit 1; }
         host=${hostName}
         login=()
-        ${lib.optionalString (cfg.authKeyFile != null) ''
+        ${lib.optionalString (keyFile != null) ''
           case $state in
             NeedsLogin | NeedsMachineAuth | Stopped)
-              login=(--auth-key="$(cat ${lib.escapeShellArg cfg.authKeyFile})${lib.optionalString (params != "") "?${params}"}") ;;
+              login=(--auth-key="$(cat ${lib.escapeShellArg keyFile})${lib.optionalString (params != "") "?${params}"}") ;;
           esac
         ''}
         # Without a login a phone not logged in yet waits for one: up gives up after its timeout,
@@ -215,8 +221,8 @@ in
         message = "services.tailscale.interfaceName: on a phone Tailscale runs in userspace mode only (\"userspace-networking\"): a TUN interface would need the phone's VPN slot, which the Tailscale app has.";
       }
       {
-        assertion = cfg.authKeyFile == null || lib.hasPrefix "/" cfg.authKeyFile;
-        message = "services.tailscale.authKeyFile: give the file's full path on the phone, like /data/adb/seraph/secrets/tailscale.key.";
+        assertion = secretFiles.valid cfg.authKeyFile;
+        message = secretFiles.problem "services.tailscale.authKeyFile" cfg.authKeyFile;
       }
       {
         assertion = !lib.any (flag: builtins.match "--?(tun|statedir|state|socket)(=.*)?" flag != null) cfg.extraDaemonFlags;

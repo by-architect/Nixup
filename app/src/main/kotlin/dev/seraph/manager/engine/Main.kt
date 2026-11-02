@@ -18,6 +18,10 @@ import kotlin.system.exitProcess
  *                                 secrets a PC sent with it, seraph-rebuild's)
  *   paths <profile>               prints the store paths the profile needs (its android.storePaths), one a line, for
  *                                 the module to fetch from cache.nixos.org before applying it
+ *   secrets <file> <folder> [--store=<root>]
+ *                                 puts the secrets a build on the phone gives (<file>: each one's file or text) in
+ *                                 <folder>, readable by root alone, as a PC sends them (--store: Seraph's store, for
+ *                                 the files of a flake's copy)
  *   dns                           prints the DNS servers of the network in use, as resolv.conf lines
  *   etc                           writes Seraph's /etc for the Linux programs it runs (Nix, tailscaled): DNS servers,
  *                                 trusted certificates, a root user (see Etc)
@@ -56,6 +60,10 @@ object Main {
                     0
                 }
                 "services" -> Units(data).start()
+                "secrets" -> Secrets.stage(
+                    File(files.getOrNull(0) ?: usage()), File(files.getOrNull(1) ?: usage()),
+                    args.firstOrNull { it.startsWith("--store=") }?.let { File(it.removePrefix("--store=")) },
+                )
                 "paths" -> JSONObject(File(files.firstOrNull() ?: usage()).readText()).getJSONObject("android")
                     .optJSONArray("storePaths")?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
                 "updates" -> Updates(data).list().let { 0 }
@@ -126,5 +134,5 @@ object Main {
     }
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | restore | support | dns | etc | services | updates | update [--auto] [apps...]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...]")
 }

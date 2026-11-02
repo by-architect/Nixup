@@ -135,6 +135,10 @@ eval_profile() {
   if [ -n "$FLAKE" ]; then SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.profile"
   else nix_eval --argstr reposDir "$DATA/repos"; fi
 }
+eval_secrets() {
+  if [ -n "$FLAKE" ]; then SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.secretsToDeliver"
+  else nix_eval --argstr reposDir "$DATA/repos" --argstr part secretsToDeliver; fi
+}
 
 GEN_SOURCE=$SRC GEN_LOCK=
 if [ -n "$FLAKE" ]; then
@@ -181,5 +185,19 @@ profile=$(eval_profile) \
 log "Profile: $profile"
 # printf, not echo: Android's echo turns the profile's \\ and \n into other characters.
 printf '%s\n' "$profile" > "$PROFILE.new"
+
+# The secret files the config's options name (files from its folder, or text): put apart from the
+# profile, in a folder only root can read, for switch_to to put in place, as when a PC sends them.
+if grep -q '"secrets":\["' "$PROFILE.new"; then
+  IN=$DATA/incoming
+  rm -rf "$IN" && mkdir -p "$IN" && chmod 700 "$IN"
+  trap 'rm -rf "$IN"' EXIT
+  (umask 077; eval_secrets > "$IN/secrets.json") \
+    || fail "the config's secret files could not be read (Nix says why above); nothing was changed"
+  engine secrets "$IN/secrets.json" "$IN/secrets" ${FLAKE:+--store=$DATA/nix} \
+    || fail "a secret file of the config could not be had (see above); nothing was changed"
+  rm -f "$IN/secrets.json"
+  SECRETS_IN=$IN/secrets
+fi
 
 switch_to "$PROFILE.new" "$MODE"

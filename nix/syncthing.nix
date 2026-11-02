@@ -19,6 +19,10 @@ let
   json = types.attrsOf types.anything;
   anyAutoAccept = lib.any (device: device.autoAcceptFolders) (lib.attrValues cfg.settings.devices);
   home = "/var/lib/syncthing";
+  # The secret files on the phone: put there by the build, when they are files from the config's folder.
+  secretFiles = import ./secret-files.nix { inherit lib; };
+  secretOptions = { cert = cfg.cert; key = cfg.key; guiPasswordFile = cfg.guiPasswordFile; };
+  onPhone = lib.mapAttrs (option: value: secretFiles.path config "services.syncthing.${option}" value) secretOptions;
 
   deviceModule = { name, ... }: {
     freeformType = json;
@@ -205,8 +209,8 @@ let
     ${lib.concatStrings (lib.mapAttrsToList (part: value: ''
       st -X ${if builtins.isAttrs value then "PATCH" else "PUT"} --json ${q (builtins.toJSON value)} ${api "/rest/config/${part}"} > /dev/null
     '') others)}
-    ${lib.optionalString (cfg.guiPasswordFile != null) ''
-      st -X PATCH --json "$(jq -n --rawfile password ${q cfg.guiPasswordFile} '{ password: ($password | rtrimstr("\n")) }')" ${api "/rest/config/gui"} > /dev/null
+    ${lib.optionalString (onPhone.guiPasswordFile != null) ''
+      st -X PATCH --json "$(jq -n --rawfile password ${q onPhone.guiPasswordFile} '{ password: ($password | rtrimstr("\n")) }')" ${api "/rest/config/gui"} > /dev/null
     ''}
 
     if st ${api "/rest/config/restart-required"} | jq -e .requiresRestart > /dev/null; then
@@ -229,27 +233,29 @@ in
     package = lib.mkPackageOption pkgs "syncthing" { };
 
     cert = mkOption {
-      type = types.nullOr types.str;
+      type = secretFiles.type;
       default = null;
-      example = "/data/adb/seraph/secrets/syncthing-cert";
+      example = lib.literalExpression "./syncthing/cert.pem";
       description = ''
-        The cert.pem file on the phone (with key: the phone's identity, its device ID), copied into
-        Syncthing's folder; config.android.secrets.<name>.path is the place for it. null: Syncthing makes
-        one of its own on its first start, and keeps it.
+        The cert.pem file (with key: the phone's identity, its device ID), copied into Syncthing's
+        folder: a file from the config's folder (./syncthing/cert.pem), which each build puts on the
+        phone, readable by root alone and never in the profile or Nix's store; or, as a string, the
+        full path of one already on the phone. null: Syncthing makes one of its own on its first
+        start, and keeps it.
       '';
     };
 
     key = mkOption {
-      type = types.nullOr types.str;
+      type = secretFiles.type;
       default = null;
-      example = "/data/adb/seraph/secrets/syncthing-key";
-      description = "The key.pem file on the phone, with cert.";
+      example = lib.literalExpression "./syncthing/key.pem";
+      description = "The key.pem file, with cert (a file from the config's folder, or a full path on the phone).";
     };
 
     guiPasswordFile = mkOption {
-      type = types.nullOr types.str;
+      type = secretFiles.type;
       default = null;
-      description = "A file on the phone with the GUI's password, as on NixOS (config.android.secrets.<name>.path).";
+      description = "A file with the GUI's password, as on NixOS (a file from the config's folder, or a full path on the phone).";
     };
 
     overrideDevices = mkOption {
@@ -383,6 +389,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    android.secrets = lib.foldl' (all: option: all // secretFiles.secrets "services.syncthing.${option}" secretOptions.${option}) { } (lib.attrNames secretOptions);
+
     systemd.services.syncthing = {
       description = "Syncthing";
       wantedBy = [ "multi-user.target" ];
@@ -393,8 +401,8 @@ in
         all_proxy = cfg.all_proxy;
       };
       # The config's identity, readable by root alone, so its device ID is theirs.
-      preStart = lib.optionalString (cfg.cert != null) ''
-        for part in ${q cfg.cert}:cert.pem ${q cfg.key}:key.pem; do
+      preStart = lib.optionalString (onPhone.cert != null) ''
+        for part in ${q onPhone.cert}:cert.pem ${q onPhone.key}:key.pem; do
           [ "$(sha256sum < "''${part%:*}")" = "$(sha256sum < ${home}/"''${part#*:}" 2> /dev/null)" ] \
             || install -m 600 "''${part%:*}" ${home}/"''${part#*:}"
         done
@@ -424,10 +432,10 @@ in
         assertion = (cfg.cert == null) == (cfg.key == null);
         message = "services.syncthing: cert and key go together (the phone's identity), or neither is set.";
       }
-      {
-        assertion = lib.all (file: file == null || lib.hasPrefix "/" file) [ cfg.cert cfg.key cfg.guiPasswordFile ];
-        message = "services.syncthing.cert / key / guiPasswordFile: give the files' full paths on the phone, like config.android.secrets.<name>.path.";
-      }
+    ] ++ lib.mapAttrsToList (option: value: {
+      assertion = secretFiles.valid value;
+      message = secretFiles.problem "services.syncthing.${option}" value;
+    }) secretOptions ++ [
       {
         assertion = builtins.match "[^/ ]+:[0-9]+|unix:///[^ ]+" cfg.guiAddress != null;
         message = "services.syncthing.guiAddress: \"${cfg.guiAddress}\" is not host:port (like 127.0.0.1:8384) or unix:///<a socket's path>.";
