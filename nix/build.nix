@@ -1,12 +1,17 @@
 # What a build makes of a configuration, as NixOS has config.system.build.toplevel:
 #   config.system.build.repos     the repositories, whose indexes the phone fetches first: it
-#                                 needs no package names, so it evaluates with pkgs empty
+#                                 needs no package names, so it evaluates with pkgs empty; and
+#                                 whether the config needs nixpkgs
 #   config.system.build.profile   the profile, the JSON the module applies; evaluating it checks
 #                                 the assertions and shows the warnings, as nixos-rebuild does
-#   config.system.build.secrets   each secret's file where the config is built (or null), which
-#                                 seraph-rebuild sends to the phone; never in the profile
-{ config, lib, ... }:
+#   config.system.build.secrets   how each secret gets to the phone: { file = <its path where the
+#                                 config is built>; } or { text = true; } (secretTexts has it), or
+#                                 neither, which seraph-rebuild sends; never in the profile
+{ config, options, lib, pkgs, ... }:
 let
+  # What a shell has besides environment.systemPackages, as on NixOS.
+  shellPackages = lib.optionals (config.environment.systemPackages != [ ]) (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+
   repos = lib.mapAttrs (_: repo: { url = repo.address; fingerprint = repo.signingKey; }) config.android.repos;
 
   failed = map (check: check.message) (lib.filter (check: !check.assertion) config.assertions);
@@ -49,10 +54,22 @@ in
   };
 
   config.system.build = {
-    repos = { android = { inherit repos; }; };
+    # needsNixpkgs: whether the config uses Nix packages, which a configuration.nix alone gets from
+    # the phone's copy of nixpkgs (fetched the first time one does). Asked without the packages
+    # themselves, which need it: whether a module sets environment.systemPackages, and whether a
+    # unit is there.
+    repos = {
+      android = { inherit repos; };
+      needsNixpkgs = options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
+        || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { };
+    };
 
     # toString: a path stays where it is, where interpolating it would copy it into the store.
-    secrets = lib.mapAttrs (_: secret: if secret.file == null then null else toString secret.file) config.android.secrets;
+    secrets = lib.mapAttrs (_: secret: {
+      file = if secret.file == null then null else toString secret.file;
+      text = secret.text != null;
+    }) config.android.secrets;
+    secretTexts = lib.mapAttrs (_: secret: secret.text) (lib.filterAttrs (_: secret: secret.text != null) config.android.secrets);
 
     profile =
       if failed != [ ] then
@@ -82,16 +99,18 @@ in
             inherit system;
             # The secrets' names: the phone checks each is there, and removes one that left.
             secrets = lib.attrNames config.android.secrets;
-            # The services that run, with what each needs; one that left the config is stopped.
-            services = lib.optionalAttrs config.services.tailscale.enable {
-              tailscale = let ts = config.services.tailscale; in {
-                inherit (ts) package port authKeyFile;
-                # Its name on the tailnet; null: the phone's device name.
-                hostname = if config.networking.hostName == "" then null else config.networking.hostName;
-                upFlags = ts.extraUpFlags;
-                daemonFlags = ts.extraDaemonFlags
-                  ++ lib.optional (ts.disableUpstreamLogging && !lib.elem "--no-logs-no-support" ts.extraDaemonFlags) "--no-logs-no-support";
-              };
+            # The services (systemd.services, Seraph's own among them) as the engine runs them, and
+            # every store path the phone needs for them and environment.systemPackages: it fetches
+            # those from cache.nixos.org before the build changes anything.
+            units = config.system.build.units;
+            storePaths = lib.unique (config.system.build.unitStorePaths
+              ++ map (package: builtins.unsafeDiscardStringContext "${package}") (config.environment.systemPackages ++ shellPackages));
+            # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
+            # NixOS has them; none without Nix packages.
+            shell = if config.environment.systemPackages == [ ] then null else {
+              path = builtins.unsafeDiscardStringContext
+                "${lib.makeBinPath (config.environment.systemPackages ++ shellPackages)}:/system/bin";
+              bash = builtins.unsafeDiscardStringContext "${pkgs.bashInteractive}/bin/bash";
             };
           };
         };

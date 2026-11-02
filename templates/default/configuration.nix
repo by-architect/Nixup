@@ -65,6 +65,19 @@
 #   services.tailscale.enable = true;                Tailscale, run by root, with NixOS's
 #                                                    services.tailscale options (the build shows a
 #                                                    link to log in with; it takes no VPN slot)
+#   services.syncthing = {                           Syncthing, with NixOS's options
+#     enable = true;
+#     settings.devices.laptop.id = "ABCDEFG-…";
+#     settings.folders.documents = { path = "/storage/emulated/0/Documents"; devices = [ "laptop" ]; };
+#   };
+#
+#   systemd.services.web = {                         your own service, as on NixOS: programs from
+#     wantedBy = [ "multi-user.target" ];            Nix packages, which the phone fetches from
+#     serviceConfig.ExecStart =                      cache.nixos.org and runs as root
+#       "''${pkgs.python3}/bin/python3 -m http.server 8000";
+#   };
+#   environment.systemPackages = with pkgs; [ htop rsync ];   Nix packages for root's shell:
+#                                                    su -c seraph-shell (on adb, or in Termux)
 #
 #   android.secrets.tailscale.file = ./tailscale.key;    a secret: a file seraph-rebuild sends
 #   services.tailscale.authKeyFile =                     from the PC that builds the config; root
@@ -73,8 +86,12 @@
 # Built on the phone (the app's Build), or on a PC and applied on the phone over adb or ssh, as
 # nixos-rebuild --target-host: nix run github:by-architect/Seraph -- switch --flake .#phone
 #
+# Nix packages come from nixos-unstable (a flake can give its own nixpkgs); the phone fetches them,
+# and builds nothing.
+#
 # Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix,
-# nix/app.nix, nix/global.nix, nix/services.nix and nix/secrets.nix in the project.
+# nix/app.nix, nix/global.nix, nix/units.nix, nix/services.nix, nix/syncthing.nix,
+# nix/nixpkgs.nix and nix/secrets.nix in the project.
 { config, lib, pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [

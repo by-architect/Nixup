@@ -4,9 +4,10 @@
 # They come down to the phone's own settings as those settings' defaults, so an android.settings
 # option set too wins: networking.hostName is android.settings.deviceName unless that is set.
 #
-# Nix packages (environment.systemPackages) and scripts (system.activationScripts) have their names
-# here already, with NixOS's types; using them is an error until they come, in a later step. The
-# services, with NixOS's names too, are in nix/services.nix.
+# environment.systemPackages are Nix packages the phone fetches (nix/nixpkgs.nix); scripts
+# (system.activationScripts) have their name here already, with NixOS's type, and using it is an
+# error until they come. The services, with NixOS's names too, are in nix/units.nix and
+# nix/services.nix.
 { config, lib, ... }:
 let
   inherit (lib) mkOption types;
@@ -92,9 +93,10 @@ in
     environment.systemPackages = mkOption {
       type = types.listOf types.package;
       default = [ ];
+      example = lib.literalExpression "with pkgs; [ htop rsync ]";
       description = ''
-        Nix packages (from nixpkgs) for the phone, as NixOS's environment.systemPackages. Not on the
-        phone yet: they come in a later step, and until then setting it stops the build.
+        Nix packages (from nixpkgs) for the phone, as NixOS's environment.systemPackages: each build
+        fetches them from cache.nixos.org into Seraph's store, for the phone's own commands to use.
       '';
     };
 
@@ -119,10 +121,6 @@ in
       {
         assertion = locale == null || noLanguage || parts != null;
         message = "i18n.defaultLocale: \"${toString locale}\" is not a locale like \"tr_TR.UTF-8\" (or set android.settings.language, like \"tr-TR\").";
-      }
-      {
-        assertion = config.environment.systemPackages == [ ];
-        message = "environment.systemPackages: Nix packages (from nixpkgs) are not on the phone yet; they come in a later step.";
       }
       {
         assertion = config.system.activationScripts == { };

@@ -9,9 +9,10 @@ mkdir -p "$DATA/tmp"
 # Keep the log small: past 64 KB the old one is set aside.
 [ -f "$LOG" ] && [ "$(stat -c %s "$LOG")" -gt 65536 ] && mv -f "$LOG" "$LOG.old"
 
+# printf, not echo: Android's echo turns \\ and \n in what it says into other characters.
 log() {
-  echo "$*"
-  echo "$(date '+%F %T') [$BY] $*" >> "$LOG"
+  printf '%s\n' "$*"
+  printf '%s\n' "$(date '+%F %T') [$BY] $*" >> "$LOG"
 }
 
 # Shown under the module's name in the Magisk app.
@@ -87,15 +88,16 @@ new_generation() {
   cp "$PROFILE" "$generations/new/profile.json"
   [ -f "$DATA/resolved.json" ] && cp "$DATA/resolved.json" "$generations/new/apps.json"
   if [ -n "$GEN_SOURCE" ]; then
-    echo "$GEN_SOURCE" > "$generations/new/source"
-    [ -n "$GEN_BUILT_ON" ] && echo "$GEN_BUILT_ON" > "$generations/new/built-on"
+    printf '%s\n' "$GEN_SOURCE" > "$generations/new/source"
+    [ -n "$GEN_BUILT_ON" ] && printf '%s\n' "$GEN_BUILT_ON" > "$generations/new/built-on"
     [ -n "$GEN_LOCK" ] && [ -f "$GEN_LOCK" ] && cp "$GEN_LOCK" "$generations/new/flake.lock"
   elif [ "$last" -gt 0 ]; then
     for kept in source built-on flake.lock; do
       [ -f "$generations/$last/$kept" ] && cp "$generations/$last/$kept" "$generations/new/$kept"
     done
   fi
-  if [ "$last" -gt 0 ] && diff -r "$generations/new" "$generations/$last" > /dev/null 2>&1; then
+  # Android's diff (toybox's) says 0 for folders whose files differ: what it prints tells.
+  if [ "$last" -gt 0 ] && [ -z "$(diff -r "$generations/new" "$generations/$last" 2>&1)" ]; then
     rm -rf "$generations/new"
     log "Generation $last (nothing changed)"
   else
@@ -137,12 +139,53 @@ nix_conf() {
     'flake-registry =' 'warn-dirty = false' > "$DATA/home/nix.conf"
 }
 
+# Nix's environment: its caches and settings in the module's data, and the tokens.
+nix_env() {
+  export HOME=$DATA/home TMPDIR=$DATA/tmp USER=root NIX_CONF_DIR=$DATA/home XDG_CACHE_HOME=$DATA/home/.cache
+  nix_conf
+  nix_tokens
+}
+
+# Nix with Seraph's store ($DATA/nix: the paths are /nix/store/... to Nix, and the
+# services see them there), in the namespace with Seraph's /etc (nix_run).
+nix_store() { nix_run "$MODDIR/bin/nix" --store "$DATA/nix" "$@"; }
+
+# The Nix packages a profile needs (its storePaths: the services' programs and
+# environment.systemPackages), fetched from cache.nixos.org into Seraph's store; with
+# dry, only said. Nothing is built on the phone: a package the cache has not got
+# (built from the config, unfree, or changed by an overlay) stops the build here,
+# before anything changes.
+fetch_packages() {
+  paths=$(engine paths "$1" | grep '^/nix/store/') || paths=
+  [ -n "$paths" ] || return 0
+  log "== Packages"
+  nix_env
+  nix_etc > /dev/null || { log "Nix could not get its /etc (the network's DNS servers): is the phone online?"; return 1; }
+  if [ "$2" = dry ]; then
+    nix_store build --dry-run --no-link $paths
+  else
+    nix_store build --no-link $paths
+  fi
+}
+
+# The packages of the profile in use, kept from Nix's garbage collection (each a root
+# in Seraph's store), as a NixOS system's are.
+keep_packages() {
+  roots=$DATA/nix/nix/var/nix/gcroots/seraph
+  rm -rf "$roots" && mkdir -p "$roots"
+  i=0
+  for path in $(engine paths "$PROFILE" | grep '^/nix/store/'); do
+    ln -s "$path" "$roots/$i" && i=$((i + 1))
+  done
+}
+
 # The second half of every build, wherever the profile was built (build.sh on the
 # phone, remote.sh for a PC): its plan and every check (all a dry run does), then its
 # apps and settings, activated, and a new generation. When a check fails, nothing
 # changes. Arguments: the profile, and what to do (switch, dry, update); SECRETS_IN
 # is the folder of the secrets a PC sent with it.
 switch_to() {
+  fetch_packages "$1" "$2" || { rm -f "$1"; fail "the config's packages could not be fetched from cache.nixos.org (Nix says why above); nothing was changed"; }
   log "== Apps"
   sent=
   [ -n "$SECRETS_IN" ] && sent="--secrets=$SECRETS_IN"
@@ -163,6 +206,7 @@ switch_to() {
   fi
   log "== Activating"
   mv -f "$1" "$PROFILE"
+  keep_packages
   sh "$MODDIR/apply.sh" "$BY" || exit 1
   new_generation
   # The app schedules its update check, now that the config may have changed.

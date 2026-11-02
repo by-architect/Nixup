@@ -38,13 +38,6 @@ class Secrets(data: File, private val incoming: File?) {
         Out.line("Secrets: ${parts.joinToString(", ")}")
     }
 
-    /** Whether [path] is a secret's, which is there once the plan is carried out (sent with this build, or there already). */
-    fun present(path: String): Boolean {
-        val file = File(path)
-        if (file.isFile) return true
-        return file.parentFile?.absolutePath == dir.absolutePath && sent(file.name) != null && file.name in wanted
-    }
-
     /** Puts the secrets sent with the build in place (readable by root alone), and removes those that left the config. */
     fun apply(): Int {
         if (!changes) return 0

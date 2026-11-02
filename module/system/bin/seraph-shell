@@ -1,0 +1,34 @@
+#!/system/bin/sh
+# seraph-shell: a shell, or a command, as root in Seraph's view of the phone, where /nix exists and
+# the config's environment.systemPackages are on PATH, as on any Linux with Nix:
+#   su -c seraph-shell             a bash with them
+#   su -c 'seraph-shell htop'      one of them
+# The view is the one Seraph's services run in (Android's folders as they are, Seraph's /etc, /var
+# and /run, a /tmp of its own); Android's own commands are on PATH too, after them.
+DATA=/data/adb/seraph
+[ "$(id -u)" = 0 ] || { echo "seraph-shell: run it as root: su -c seraph-shell" >&2; exit 1; }
+[ -f "$DATA/units/view.sh" ] || { echo "seraph-shell: build the config once first (Seraph makes its view then)" >&2; exit 1; }
+busybox=
+for b in /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox; do
+  [ -x "$b" ] && busybox=$b && break
+done
+# The profile's shell: its PATH and bash (none when the config has no environment.systemPackages).
+path=$(grep -o '"shell":{[^}]*}' "$DATA/profile.json" 2> /dev/null | grep -o '"path":"[^"]*"' | cut -d'"' -f4)
+bash=$(grep -o '"shell":{[^}]*}' "$DATA/profile.json" 2> /dev/null | grep -o '"bash":"[^"]*"' | cut -d'"' -f4)
+script=$DATA/tmp/seraph-shell.$$
+mkdir -p "$DATA/tmp"
+{
+  printf "export PATH='%s' HOME='%s' TERM='%s'\n" "${path:-/system/bin}" "$DATA/home" "${TERM:-xterm-256color}"
+  echo "cd /"
+  if [ $# -gt 0 ]; then
+    printf 'exec'
+    for word; do printf " '%s'" "$(printf '%s' "$word" | sed "s/'/'\\\\''/g")"; done
+    echo
+  else
+    echo "exec ${bash:-/system/bin/sh} -i"
+  fi
+} > "$script"
+"$busybox" sh "$DATA/units/view.sh" "$script"
+status=$?
+rm -f "$script"
+exit $status

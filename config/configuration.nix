@@ -15,8 +15,11 @@
 #   android.settings.raw     any other of Android's settings, by its name
 #   android.apps."<package>" an app's settings (every one: nix/app.nix); debloat = true removes
 #                            one that came with the phone (its data kept)
-#   services.<name>          programs root keeps running, with NixOS's names and options
-#                            (every one: nix/services.nix): services.tailscale.enable = true;
+#   services.<name>          programs root keeps running, with NixOS's names and options (from
+#                            Nix packages): services.tailscale.enable = true; (nix/services.nix,
+#                            nix/syncthing.nix)
+#   systemd.services.<name>  your own services, as on NixOS (nix/units.nix)
+#   environment.systemPackages   Nix packages, for root's shell: su -c seraph-shell
 #   networking.hostName, time.timeZone, i18n.defaultLocale
 #                            the phone's name, time zone and language, with NixOS's names
 #                            (nix/global.nix); an android.settings one set too wins

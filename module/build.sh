@@ -9,7 +9,10 @@
 #   update   switch, with the indexes (and the releases of the apps from releases)
 #            fetched again even when they are new enough, and a flake's inputs at their
 #            newest (a flake on the phone has its flake.lock updated; one fetched from its
-#            address is fetched again, at its newest commit)
+#            address is fetched again, at its newest commit); a configuration.nix alone
+#            gets the newest nixpkgs too
+# The config's Nix packages (its services' programs, environment.systemPackages) are
+# fetched from cache.nixos.org before anything changes (fetch_packages in common.sh).
 #   again    the last profile applied again as it is, nothing evaluated: after a build
 #            on a PC (seraph-rebuild), whose config the phone may not have
 # The config is what the app's Config picked (config_source in common.sh): a
@@ -36,7 +39,7 @@ SRC=$(config_source)
 [ -n "$SRC" ] || fail "there is no config yet: in the Seraph app, Config picks your configuration.nix or flake.nix (New makes one), or takes a flake's address, like github:you/phone"
 # A phone set up before the config could be picked keeps the one it had, now as picked.
 if [ -z "$SERAPH_SOURCE" ] && [ ! -s "$SOURCE" ]; then
-  echo "$SRC" > "$SOURCE"
+  printf '%s\n' "$SRC" > "$SOURCE"
   log "The config is $SRC, as before (the app's Config picks another)"
 fi
 
@@ -71,18 +74,36 @@ case "$WHERE" in
     [ "$MODE" = update ] && REFRESH=--refresh ;;
 esac
 
-mkdir -p "$DATA/home"
-
 # Nix keeps its caches and settings in the module's data.
-export HOME=$DATA/home TMPDIR=$DATA/tmp USER=root NIX_CONF_DIR=$DATA/home XDG_CACHE_HOME=$DATA/home/.cache
-nix_conf
-nix_tokens
+nix_env
 
-# configuration.nix alone: Nix evaluates it with nixpkgs' lib, packed in the module;
-# it needs no store (dummy://).
+# configuration.nix alone: Nix evaluates it with nixpkgs' lib, packed in the module, and
+# for a config that uses Nix packages, with the phone's copy of nixpkgs (NIXPKGS). It
+# needs no store (dummy://): read-only, it works out the packages' store paths without
+# writing any, and the phone fetches them after.
+NIXPKGS=
 nix_eval() {
-  "$MODDIR/bin/nix-instantiate" --eval --strict --json --store dummy:// -I nixpkgs="$MODDIR/nixpkgs" \
-    "$MODDIR/nix/profile.nix" --argstr configFile "$CONFIG" "$@"
+  "$MODDIR/bin/nix-instantiate" --eval --strict --json --readonly-mode --store dummy:// -I nixpkgs="$MODDIR/nixpkgs" \
+    "$MODDIR/nix/profile.nix" --argstr configFile "$CONFIG" --argstr nixpkgs "$NIXPKGS" "$@"
+}
+
+# The phone's copy of nixpkgs, as a NixOS channel: nixos-unstable (or the one
+# $DATA/channel names), fetched the first time a config uses Nix packages, and again in an
+# update. It is kept in Seraph's store, as a root of it.
+channel() {
+  url=$(cat "$DATA/channel" 2> /dev/null)
+  [ -n "$url" ] || url=https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz
+  link=$DATA/channels/nixpkgs
+  if [ ! -d "$link/" ] || [ "$MODE" = update ]; then
+    log "== nixpkgs ($url)"
+    nix_etc > /dev/null || { log "Nix could not get its /etc (the network's DNS servers): is the phone online?"; return 1; }
+    path=$(nix_run "$MODDIR/bin/nix" --store "$DATA/nix" eval --raw --impure --option tarball-ttl 0 \
+      --expr "builtins.fetchTarball \"$url\"") || return 1
+    mkdir -p "$DATA/channels" "$DATA/nix/nix/var/nix/gcroots"
+    ln -sfn "$path" "$DATA/nix/nix/var/nix/gcroots/seraph-channel"
+    ln -sfn "$DATA/nix$path" "$link"
+  fi
+  NIXPKGS=$(readlink -f "$link")
 }
 
 # A flake, as `nixos-rebuild --flake`: Nix fetches its inputs (Seraph's options,
@@ -148,10 +169,17 @@ eval_repos > "$DATA/tmp/repos.json" \
 if [ "$MODE" = update ]; then engine index --force "$DATA/tmp/repos.json"; else engine index "$DATA/tmp/repos.json"; fi \
   || log "Building with the indexes there are (a repository without one: its apps cannot be named)"
 
+# A configuration.nix alone that uses Nix packages needs the phone's copy of nixpkgs (a
+# flake has its own, as an input).
+if [ -z "$FLAKE" ] && grep -q '"needsNixpkgs":true' "$DATA/tmp/repos.json"; then
+  channel || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
+fi
+
 log "== Evaluating $CONFIG"
 profile=$(eval_profile) \
   || fail "the config did not build (Nix says why above); nothing was changed"
 log "Profile: $profile"
-echo "$profile" > "$PROFILE.new"
+# printf, not echo: Android's echo turns the profile's \\ and \n into other characters.
+printf '%s\n' "$profile" > "$PROFILE.new"
 
 switch_to "$PROFILE.new" "$MODE"

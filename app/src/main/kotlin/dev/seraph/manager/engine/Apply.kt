@@ -7,9 +7,9 @@ import java.io.File
 /**
  * Makes the phone match the profile: its apps (android.packages: a list for each repository, and the apps from
  * releases), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
- * phone's own settings (android.system), the secrets (android.secrets) and the services (android.services, from the config's services.*), in nixos-rebuild's order: first the plan and every check, and when one fails
+ * phone's own settings (android.system), the secrets (android.secrets) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
  * nothing changes; then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
- * the system settings (see SystemSettings), the services (see Services), and the apps that left the config removed, their data kept.
+ * the system settings (see SystemSettings), the services (see Units), and the apps that left the config removed, their data kept.
  */
 class Apply(private val repos: Map<String, FDroid>, private val data: File, private val incoming: File? = null) {
     private val installer = Installer(data)
@@ -106,14 +106,14 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         system.plan(android.optJSONObject("system"), toInstall.map { it.id }.toSet(), problems)
         val secrets = Secrets(data, incoming)
         secrets.plan(android.optJSONArray("secrets"), problems)
-        val services = Services(data)
-        services.plan(android.optJSONObject("services"), problems, secrets::present)
+        val units = Units(data)
+        units.plan(android.optJSONObject("units"), problems)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
             return 2
         }
-        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !services.changes) {
+        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes) {
             Out.line("Nothing to change")
             if (!dryRun) finish(profile, ids, fromReleases)
             return 0
@@ -130,7 +130,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         for (id in debloat.removing) failed += settings.restoreApp(id)
         failed += debloat.apply()
         failed += system.apply()
-        failed += services.apply()
+        failed += units.apply()
         for (id in removals) {
             if (Device.uninstallKeepingData(id)) {
                 installer.writeOwned(installer.readOwned() - id)
@@ -173,7 +173,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         var failed = Debloat(data).restoreAll()
         failed += AppSettings(data).restoreAll()
         failed += SystemSettings(data).restoreAll()
-        failed += Services(data).restoreAll()
+        failed += Units(data).removeAll()
         releases.tellObtainium(emptyList())
         for (id in installer.readOwned()) {
             if (Device.uninstallKeepingData(id)) Out.line("✔ Removed $id (its data is kept)") else Out.line("✘ Could not remove $id")

@@ -1,35 +1,30 @@
-# Services: programs that root keeps running on the phone, with NixOS's names (services.<name>), so a
-# module that sets one works on a NixOS machine too. Each starts with the phone, starts again when it
-# stops, and is gone again (with what it kept) when it leaves the config or the module is removed.
+# Services with NixOS's names (services.<name>), so a module that sets one works on a NixOS machine
+# too: each is a module that makes systemd.services units, as NixOS's do, which the phone runs from
+# Nix packages (see nix/units.nix). Here: Tailscale; Syncthing is in nix/syncthing.nix.
 #
 # Each has all of NixOS's options for it, with the same names, types and meanings. One the phone
-# cannot do (yet) is there too, so a module shared with NixOS builds, but setting it to anything but
-# its default stops the build and says why; one with nothing to do on a phone (a firewall to open)
-# takes its value and does nothing. package is the one that differs: on NixOS it is a Nix package,
-# which the phone has not got yet, so here it is the program's own static build (a module shared
-# with NixOS leaves it out).
-{ config, lib, ... }:
+# cannot do is there too, so a module shared with NixOS builds, but setting it to anything but its
+# default stops the build and says why; one with nothing to do on a phone (a firewall to open)
+# takes its value and does nothing.
+#
+# Tailscale, as NixOS's services.tailscale: tailscaled, run by root in userspace mode (it takes no
+# VPN slot and changes no routes, so the Tailscale app can stay), and tailscaled-up, which gives it
+# the config's settings with `tailscale up --reset` at each build: what the config leaves out goes
+# back to Tailscale's default. Its name on the tailnet is networking.hostName, or the phone's device
+# name. Its first build shows a link to log in with, unless authKeyFile is set.
+{ config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
   cfg = config.services.tailscale;
 
-  # Tailscale's own build for Linux, one for each kind of processor, as pkgs.tailscale.com
-  # has it: static, so it runs on Android as it is.
-  version = "1.104.4";
-  tarball = arch: sha256: { url = "https://pkgs.tailscale.com/stable/tailscale_${version}_${arch}.tgz"; inherit sha256; };
-
-  # NixOS's options the phone has not got (yet): each one's value that leaves it unused, and what to
-  # do instead.
-  notHere = [
-    { name = "interfaceName"; unused = cfg.interfaceName == "userspace-networking";
-      why = "on a phone Tailscale runs in userspace mode only (\"userspace-networking\"): a TUN interface would need the phone's VPN slot, which the Tailscale app has."; }
-    { name = "permitCertUid"; unused = cfg.permitCertUid == null; why = "not on the phone yet."; }
-    { name = "disableTaildrop"; unused = !cfg.disableTaildrop; why = "not on the phone yet."; }
-    { name = "authKeyParameters"; unused = lib.all (value: value == null) (lib.attrValues (removeAttrs cfg.authKeyParameters [ "_module" ]));
-      why = "not on the phone yet; an OAuth client secret takes them after it in authKeyFile, like tskey-client-…?ephemeral=false&preauthorized=true."; }
-    { name = "extraSetFlags"; unused = cfg.extraSetFlags == [ ];
-      why = "`tailscale set` is not on the phone yet; the flags `tailscale up` takes too go in extraUpFlags."; }
-  ];
+  socket = "/run/tailscale/tailscaled.sock";
+  params = lib.concatStringsSep "&" (lib.mapAttrsToList (key: value:
+    "${key}=${if builtins.isBool value then lib.boolToString value else toString value}"
+  ) (lib.filterAttrs (_: value: value != null) (removeAttrs cfg.authKeyParameters [ "_module" ])));
+  # Its name on the tailnet: the config's, or the phone's device name as the tailnet takes names.
+  hostName =
+    if config.networking.hostName != "" then lib.escapeShellArg config.networking.hostName
+    else ''"$(/system/bin/settings get global device_name | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9-' '-' | sed 's/^-*//; s/-*$//')"'';
 in
 {
   options.services.tailscale = {
@@ -40,37 +35,7 @@ in
       networking.hostName, or the phone's device name. Its first build shows a link to log in with,
       unless authKeyFile is set'';
 
-    package = mkOption {
-      type = types.submodule {
-        options = {
-          version = mkOption { type = types.str; description = "Tailscale's version."; };
-          tarballs = mkOption {
-            type = types.attrsOf (types.submodule {
-              options = {
-                url = mkOption { type = types.str; description = "Where the build is."; };
-                sha256 = mkOption { type = types.str; description = "Its SHA-256, checked before it is used."; };
-              };
-            });
-            description = "The build for each kind of processor: arm64, arm, amd64, 386.";
-          };
-        };
-      };
-      default = {
-        inherit version;
-        tarballs = {
-          arm64 = tarball "arm64" "a1c249ce6bdebef62e1ae3b997595555bce2ae4709bf95a718e9ca7a129dad7e";
-          arm = tarball "arm" "7412390619633d040dbb030c92626d10f3d056e2d9087fc1026556881bbe0de3";
-          amd64 = tarball "amd64" "624ea093d47d62cf56f17b8332d74b8decda4a1faa610ebc60a1de334b2b3dc9";
-          "386" = tarball "386" "462e367bb965f6db8044f78c96ba5e9101f8d5ad91506b4a0f33a96912e63573";
-        };
-      };
-      defaultText = lib.literalMD "Tailscale ${version}, from pkgs.tailscale.com";
-      description = ''
-        The Tailscale to run: its static Linux builds (tailscale and tailscaled in a .tgz), with their
-        checksums. On NixOS this is a Nix package (pkgs.tailscale), which the phone has not got yet,
-        so a module shared with NixOS leaves it out.
-      '';
-    };
+    package = lib.mkPackageOption pkgs "tailscale" { };
 
     port = mkOption {
       type = types.port;
@@ -91,19 +56,19 @@ in
     permitCertUid = mkOption {
       type = types.nullOr types.nonEmptyStr;
       default = null;
-      description = "The user allowed to fetch the node's TLS certificates, as on NixOS. Not on the phone yet.";
+      description = "The user allowed to fetch the node's TLS certificates, as on NixOS.";
     };
 
     disableTaildrop = mkOption {
       type = types.bool;
       default = false;
-      description = "Turn Taildrop (sending files between devices) off, as on NixOS. Not on the phone yet.";
+      description = "Turn Taildrop (sending files between devices) off, as on NixOS.";
     };
 
     disableUpstreamLogging = mkOption {
       type = types.bool;
       default = false;
-      description = "Send no debug logs to Tailscale (tailscaled --no-logs-no-support), as on NixOS.";
+      description = "Send no debug logs to Tailscale, as on NixOS.";
     };
 
     openFirewall = mkOption {
@@ -130,8 +95,8 @@ in
       example = "/data/adb/seraph/secrets/tailscale.key";
       description = ''
         A file on the phone with an auth key (from the admin console: Settings, Keys), to log in
-        without a link. Give its full path, as a string: keep it out of the config folder, which a
-        path like ./tailscale.key would copy into Nix's store.
+        without a link: config.android.secrets.<name>.path is the place for it. Give its full path,
+        as a string: a path like ./tailscale.key would copy it into Nix's store.
       '';
     };
 
@@ -156,10 +121,7 @@ in
         };
       };
       default = { };
-      description = ''
-        What NixOS adds after an OAuth client secret in authKeyFile. Not on the phone yet: write it
-        after the secret in the file, like tskey-client-…?ephemeral=false&preauthorized=true.
-      '';
+      description = "What goes after an OAuth client secret in authKeyFile, as on NixOS.";
     };
 
     extraUpFlags = mkOption {
@@ -177,7 +139,7 @@ in
       type = types.listOf types.str;
       default = [ ];
       example = [ "--advertise-exit-node" ];
-      description = "Flags for `tailscale set`, as on NixOS. Not on the phone yet; the flags `tailscale up` takes too go in extraUpFlags.";
+      description = "Flags for `tailscale set`, run after `tailscale up`, as on NixOS.";
     };
 
     extraDaemonFlags = mkOption {
@@ -188,21 +150,78 @@ in
     };
   };
 
-  config.assertions = lib.optionals cfg.enable ([
-    {
-      assertion = cfg.authKeyFile == null || lib.hasPrefix "/" cfg.authKeyFile;
-      message = "services.tailscale.authKeyFile: give the file's full path on the phone, like /data/adb/seraph/secrets/tailscale.key.";
-    }
-    {
-      assertion = !lib.any (flag: builtins.match "--?(tun|statedir|state|socket)(=.*)?" flag != null) cfg.extraDaemonFlags;
-      message = "services.tailscale.extraDaemonFlags: Seraph sets --tun (userspace mode), --statedir and --socket itself.";
-    }
-    {
-      assertion = cfg.package.tarballs != { };
-      message = "services.tailscale.package: it has no build (tarballs) for any kind of processor.";
-    }
-  ] ++ map (option: {
-    assertion = option.unused;
-    message = "services.tailscale.${option.name}: ${option.why}";
-  }) notHere);
+  config = lib.mkIf cfg.enable {
+    systemd.services.tailscaled = {
+      description = "Tailscale's daemon";
+      wantedBy = [ "multi-user.target" ];
+      environment = {
+        TS_PERMIT_CERT_UID = cfg.permitCertUid;
+        TS_DISABLE_TAILDROP = if cfg.disableTaildrop then "true" else null;
+        TS_NO_LOGS_NO_SUPPORT = if cfg.disableUpstreamLogging then "true" else null;
+      };
+      serviceConfig = {
+        ExecStart = "${cfg.package}/bin/tailscaled --tun=${cfg.interfaceName} --statedir=/var/lib/tailscale"
+          + " --socket=${socket} --port=${toString cfg.port} ${lib.escapeShellArgs cfg.extraDaemonFlags}";
+        StateDirectory = "tailscale";
+        RuntimeDirectory = "tailscale";
+        Restart = "on-failure";
+        RestartSec = 10;
+      };
+    };
+
+    # The config's settings, with `tailscale up --reset`; logged in with the auth key when it is not
+    # yet, else it waits for its login, and says the link to log in with.
+    systemd.services.tailscaled-up = {
+      description = "Tailscale's settings, and its login";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "tailscaled.service" ];
+      wants = [ "tailscaled.service" ];
+      path = [ cfg.package pkgs.jq ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        ts() { tailscale --socket=${socket} "$@"; }
+        state=
+        for i in $(seq 150); do
+          state=$(ts status --json --peers=false 2> /dev/null | jq -r .BackendState) || state=
+          [ -n "$state" ] && [ "$state" != NoState ] && break
+          sleep 0.2
+        done
+        [ -n "$state" ] || { echo "tailscaled does not answer (its log: /data/adb/seraph/units/tailscaled/log)"; exit 1; }
+        host=${hostName}
+        login=()
+        ${lib.optionalString (cfg.authKeyFile != null) ''
+          case $state in
+            NeedsLogin | NeedsMachineAuth | Stopped)
+              login=(--auth-key="$(cat ${lib.escapeShellArg cfg.authKeyFile})${lib.optionalString (params != "") "?${params}"}") ;;
+          esac
+        ''}
+        # Without a login a phone not logged in yet waits for one: up gives up after its timeout,
+        # and the link to log in with is in its status.
+        ts up --reset --timeout=20s --hostname="''${host:-android}" "''${login[@]}" ${lib.escapeShellArgs cfg.extraUpFlags} \
+          || [ "$state" = NeedsLogin ]
+        ${lib.optionalString (cfg.extraSetFlags != [ ]) "ts set ${lib.escapeShellArgs cfg.extraSetFlags}"}
+        status=$(ts status --json --peers=false)
+        case $(echo "$status" | jq -r .BackendState) in
+          Running) echo "Tailscale: running as $(echo "$status" | jq -r '.Self.DNSName | rtrimstr(".")') ($(echo "$status" | jq -r '.Self.TailscaleIPs[0]'))" ;;
+          NeedsLogin) echo "! Tailscale: waiting for its login: open $(echo "$status" | jq -r .AuthURL) (on any device) and log in" ;;
+          *) echo "Tailscale: $(echo "$status" | jq -r .BackendState)" ;;
+        esac
+      '';
+    };
+
+    assertions = [
+      {
+        assertion = cfg.interfaceName == "userspace-networking";
+        message = "services.tailscale.interfaceName: on a phone Tailscale runs in userspace mode only (\"userspace-networking\"): a TUN interface would need the phone's VPN slot, which the Tailscale app has.";
+      }
+      {
+        assertion = cfg.authKeyFile == null || lib.hasPrefix "/" cfg.authKeyFile;
+        message = "services.tailscale.authKeyFile: give the file's full path on the phone, like /data/adb/seraph/secrets/tailscale.key.";
+      }
+      {
+        assertion = !lib.any (flag: builtins.match "--?(tun|statedir|state|socket)(=.*)?" flag != null) cfg.extraDaemonFlags;
+        message = "services.tailscale.extraDaemonFlags: Seraph sets --tun (userspace mode), --statedir and --socket itself.";
+      }
+    ];
+  };
 }

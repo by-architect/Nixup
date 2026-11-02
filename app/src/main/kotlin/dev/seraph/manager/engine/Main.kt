@@ -16,10 +16,12 @@ import kotlin.system.exitProcess
  *                                 services match the profile (with --dry-run: only plans and checks; with --force, the
  *                                 releases are asked for again even when new enough; --secrets: the folder of the
  *                                 secrets a PC sent with it, seraph-rebuild's)
+ *   paths <profile>               prints the store paths the profile needs (its android.storePaths), one a line, for
+ *                                 the module to fetch from cache.nixos.org before applying it
  *   dns                           prints the DNS servers of the network in use, as resolv.conf lines
  *   etc                           writes Seraph's /etc for the Linux programs it runs (Nix, tailscaled): DNS servers,
  *                                 trusted certificates, a root user (see Etc)
- *   services                      at boot: starts the services the last build left running (services.*)
+ *   services                      at boot: starts the services the last build left (its systemd.services units)
  *   support                       says which settings that need something of the phone (a feature, a newer Android,
  *                                 LineageOS) this phone can have
  *   restore                       brings back the apps it removed, gives back every app and system setting the module
@@ -53,7 +55,9 @@ object Main {
                     if (!File(etc, "resolv.conf").isFile) throw Stop("no network with DNS servers: is the phone online?")
                     0
                 }
-                "services" -> Services(data).start()
+                "services" -> Units(data).start()
+                "paths" -> JSONObject(File(files.firstOrNull() ?: usage()).readText()).getJSONObject("android")
+                    .optJSONArray("storePaths")?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
                 "updates" -> Updates(data).list().let { 0 }
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
                 else -> usage()
@@ -122,5 +126,5 @@ object Main {
     }
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | restore | support | dns | etc | services | updates | update [--auto] [apps...]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | restore | support | dns | etc | services | updates | update [--auto] [apps...]")
 }
