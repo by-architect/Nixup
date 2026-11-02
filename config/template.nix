@@ -414,7 +414,8 @@
     port = 41641;                                 # UDP port for direct connections; 0: any
     interfaceName = "userspace-networking";       # the only mode on a phone
     authKeyFile = "/data/adb/seraph/secrets/tailscale.key";   # secret: auth key, logs in without a link
-    # (or ./tailscale.key: a file next to this one, put on the phone by each build, root-only)
+    # (or ./tailscale.key: a file next to this one; or the key itself, read from elsewhere, like
+    #  hostConfig.tailscale.key from a JSON of secrets: each build puts either on the phone, root-only)
     authKeyParameters = {                         # with an OAuth client secret as the key:
       ephemeral = null;                           #   gone from the tailnet when offline
       preauthorized = null;                       #   needs no approval

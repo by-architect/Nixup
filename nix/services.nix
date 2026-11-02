@@ -97,10 +97,11 @@ in
       default = null;
       example = lib.literalExpression "./tailscale.key";
       description = ''
-        A file with an auth key (from the admin console: Settings, Keys), to log in without a link:
-        a file from the config's folder (./tailscale.key), which each build puts on the phone,
-        readable by root alone and never in the profile or Nix's store; or, as a string, the full
-        path of one already on the phone.
+        An auth key (from the admin console: Settings, Keys), to log in without a link: a file from
+        the config's folder (./tailscale.key), or the key itself read from elsewhere
+        (hostConfig.tailscale.key, tskey-…), which each build puts on the phone as a file readable by
+        root alone, never in the profile or Nix's store; or, as a string, the full path of a file
+        already on the phone. (On NixOS it is a file only; the key's text is Seraph's.)
       '';
     };
 
