@@ -6,6 +6,9 @@
     <!-- The periodic update check stays scheduled across restarts, and waits for Wi-Fi. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- The terminal's sessions keep running while it is closed, with a notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- The apps that open a folder (the Files app, file managers), for Open config folder. -->
     <queries>
@@ -27,6 +30,25 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The terminal: root's shell in Seraph's view, with the config's Nix packages. -->
+        <activity
+            android:name=".terminal.TerminalActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:exported="false"
+            android:label="@string/terminal"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".terminal.TerminalService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Terminal sessions the user started, kept running while the terminal is closed" />
+        </service>
 
         <!-- What the module's engine (as root) tells: not exported, so no other app can. -->
         <receiver

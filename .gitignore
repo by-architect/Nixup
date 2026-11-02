@@ -4,3 +4,5 @@ commit-changes.md
 /build/
 /app/build/
 /local.properties
+/terminal-emulator/build/
+/terminal-view/build/

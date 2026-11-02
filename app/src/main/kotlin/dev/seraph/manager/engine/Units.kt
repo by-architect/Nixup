@@ -86,12 +86,12 @@ class Units(private val data: File) {
         }
     }
 
-    /** Carries the plan out; the number of units that did not start. */
-    fun apply(): Int {
+    /** Carries the plan out, with the shell of [android] (the profile's android part) as root's; the number of units that did not start. */
+    fun apply(android: JSONObject? = null): Int {
         moveLegacy()
         if (toStart.isEmpty() && toStop.isEmpty() && leaving.isEmpty()) return 0
         writeView()
-        Etc.write(data)
+        Etc.write(data, android)
         toStop.forEach { stop(it) }
         for (name in leaving) {
             stop(name)
@@ -347,6 +347,15 @@ class Units(private val data: File) {
     private fun writeView() {
         dir.mkdirs()
         view.writeText(VIEW.replace("@BUSYBOX@", busybox()).replace("@DATA@", data.path))
+    }
+
+    /**
+     * The view and Seraph's /etc, with the shell of [android] (the profile's android part) as root's, for seraph-shell,
+     * the app's terminal and ssh sessions; written by each build, also one that starts no unit.
+     */
+    fun prepare(android: JSONObject?) {
+        writeView()
+        Etc.write(data, android)
     }
 
     /** The services Seraph ran before units: stopped, Tailscale's and Syncthing's state moved to theirs, and gone. */

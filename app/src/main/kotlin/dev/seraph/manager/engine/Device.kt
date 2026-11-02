@@ -14,6 +14,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.LocaleList
 import android.os.Looper
+import android.os.UserManager
 import android.os.StatFs
 import android.os.Vibrator
 import android.system.Os
@@ -49,6 +50,10 @@ object Device {
     }
 
     private val packageManager: PackageManager? get() = context?.packageManager
+
+    /** Whether the phone's user was unlocked since it started (its credential-encrypted storage is there then). */
+    fun unlocked(): Boolean = context?.getSystemService(UserManager::class.java)?.let { users -> runCatching { users.isUserUnlocked }.getOrNull() }
+        ?: (property("sys.user.0.ce_available") == "true")
 
     class Installed(val versionCode: Long, val versionName: String, val signers: Set<String>)
 

@@ -399,7 +399,7 @@ in
     android.settings.time.automaticTimeZone = mkIf (cfg.time.timeZone != null) (lib.mkDefault false);
 
     android.settings.raw = mkMerge (map (m: lib.setAttrByPath (lib.splitString "." m.table ++ [ m.key ]) (stored m)) set);
-    android.settingLabels = lib.listToAttrs (map (m: lib.nameValuePair "${m.table}/${m.key}" "android.settings.${m.option}") set);
+    android.settingLabels = lib.listToAttrs (map (m: lib.nameValuePair "${m.table}/${m.key}" (m.label or "android.settings.${m.option}")) set);
 
     assertions = [
       (check (badRawKeys == [ ]) "android.settings.raw: ${lib.concatStringsSep ", " badRawKeys} is not a setting's name (letters, digits, _ . : -).")

@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import dev.seraph.manager.terminal.TerminalActivity
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -27,7 +28,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
- * Two tabs. Build: the config to build (see [ConfigSource]): a file picked wherever the user keeps it, a new one made
+ * Two tabs, and the terminal (see [TerminalActivity]). Build: the config to build (see [ConfigSource]): a file picked wherever the user keeps it, a new one made
  * from the module's default, or a flake's address typed in; built with the module's build.sh (as root); and its folder
  * opened.
  * Updates: the config's apps that have a newer version, checked and installed with the module's update.sh.
@@ -69,6 +70,7 @@ class MainActivity : Activity() {
             findViewById<Button>(R.id.tab_updates) to findViewById(R.id.updates_pane),
         )
         tabs.forEachIndexed { i, (button, _) -> button.setOnClickListener { select(i) } }
+        findViewById<Button>(R.id.open_terminal).setOnClickListener { startActivity(Intent(this, TerminalActivity::class.java)) }
         build.setOnClickListener { build() }
         source = findViewById(R.id.source)
         lastBuild = findViewById(R.id.last_build)

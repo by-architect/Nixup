@@ -25,11 +25,12 @@ import kotlin.system.exitProcess
  *   dns                           prints the DNS servers of the network in use, as resolv.conf lines
  *   etc                           writes Seraph's /etc for the Linux programs it runs (Nix, tailscaled): DNS servers,
  *                                 trusted certificates, a root user (see Etc)
- *   services                      at boot: starts the services the last build left (its systemd.services units)
+ *   services                      at boot: sets adb's port and trusted computers again (android.adb), and starts the
+ *                                 services the last build left (its systemd.services units)
  *   support                       says which settings that need something of the phone (a feature, a newer Android,
  *                                 LineageOS) this phone can have
  *   restore                       brings back the apps it removed, gives back every app and system setting the module
- *                                 changed, stops the services, and removes the apps it installed
+ *                                 changed (adb's too), stops the services, and removes the apps it installed
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
  *                                 android.settings.repo.<repo>.autoupdatePackages is true)
@@ -59,7 +60,12 @@ object Main {
                     if (!File(etc, "resolv.conf").isFile) throw Stop("no network with DNS servers: is the phone online?")
                     0
                 }
-                "services" -> Units(data).start()
+                "services" -> {
+                    // adb listens on no port after a restart: the profile's again, before the units start.
+                    val android = runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull()
+                    runCatching { Adb(data).boot(android?.optJSONObject("adb")) }.onFailure { Out.line("✘ adb: ${it.message}") }
+                    Units(data).start()
+                }
                 "secrets" -> Secrets.stage(
                     File(files.getOrNull(0) ?: usage()), File(files.getOrNull(1) ?: usage()),
                     args.firstOrNull { it.startsWith("--store=") }?.let { File(it.removePrefix("--store=")) },

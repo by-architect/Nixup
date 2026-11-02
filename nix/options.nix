@@ -154,7 +154,7 @@ let
   check = assertion: message: { inherit assertion message; };
 in
 {
-  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./services.nix ./syncthing.nix ./secrets.nix ./renamed.nix ./build.nix ];
+  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./services.nix ./syncthing.nix ./openssh.nix ./adb.nix ./secrets.nix ./renamed.nix ./build.nix ];
 
   options = {
     assertions = mkOption {

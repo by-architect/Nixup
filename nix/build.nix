@@ -103,6 +103,8 @@ in
               managed (app // { debloat = if app.debloat == true then true else null; })
             ) config.android.apps);
             inherit system;
+            # adb's port and the computers it trusts (nix/adb.nix).
+            adb = config.system.build.adb;
             # The secrets' names: the phone checks each is there, and removes one that left.
             secrets = lib.attrNames config.android.secrets;
             # The services (systemd.services, Seraph's own among them) as the engine runs them, and

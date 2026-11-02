@@ -53,4 +53,15 @@
     <string name="channel_progress">Installing and updating</string>
     <string name="channel_results">Updates</string>
     <string name="progress_count">%1$d of %2$d</string>
+
+    <!-- The terminal. -->
+    <string name="terminal">Terminal</string>
+    <string name="channel_terminal">Terminal</string>
+    <string name="terminal_exit">Exit</string>
+    <plurals name="terminal_sessions">
+        <item quantity="one">%d session: root\'s shell, with the config\'s Nix packages</item>
+        <item quantity="other">%d sessions: root\'s shell, with the config\'s Nix packages</item>
+    </plurals>
+    <string name="terminal_close">Close session %1$d? What runs in it stops.</string>
+    <string name="terminal_close_yes">Close</string>
 </resources>

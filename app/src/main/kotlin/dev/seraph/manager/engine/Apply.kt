@@ -19,6 +19,11 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
     fun run(profile: File, dryRun: Boolean, force: Boolean): Int = Installer.locked(data) { apply(profile, dryRun, force) }
 
     private fun apply(profile: File, dryRun: Boolean, force: Boolean): Int {
+        // Until the first unlock Android keeps the apps' own settings (languages, services, data) out of reach, and they
+        // would read as unset: changed back for nothing, and remembered wrong as what they were.
+        if (!Device.unlocked()) {
+            throw Stop("the phone was not unlocked since it started, and until then Android keeps the apps' settings out of reach: unlock it once, then build")
+        }
         val android = JSONObject(profile.readText()).getJSONObject("android")
         val packages = android.optJSONObject("packages") ?: JSONObject()
         val apps = android.optJSONObject("apps") ?: JSONObject()
@@ -108,14 +113,20 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         secrets.plan(android.optJSONArray("secrets"), problems)
         val units = Units(data)
         units.plan(android.optJSONObject("units"), problems)
+        val adb = Adb(data)
+        adb.plan(android.optJSONObject("adb"), problems)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
             return 2
         }
-        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes) {
+        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes) {
             Out.line("Nothing to change")
-            if (!dryRun) finish(profile, ids, fromReleases)
+            if (!dryRun) {
+                // Root's shell follows environment.systemPackages, which changes no unit.
+                units.prepare(android)
+                finish(profile, ids, fromReleases)
+            }
             return 0
         }
         if (!installer.roomFor(steps)) return 2
@@ -130,7 +141,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         for (id in debloat.removing) failed += settings.restoreApp(id)
         failed += debloat.apply()
         failed += system.apply()
-        failed += units.apply()
+        failed += adb.apply()
+        units.prepare(android)
+        failed += units.apply(android)
         for (id in removals) {
             if (Device.uninstallKeepingData(id)) {
                 installer.writeOwned(installer.readOwned() - id)
@@ -142,6 +155,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         }
         settings.forgetRemoved(removals)
         finish(profile, ids, fromReleases)
+        adb.restartLater()
         if (failed > 0) {
             Out.line("$failed settings did not take (see above); building again tries them again.")
             return 1
@@ -174,6 +188,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         failed += AppSettings(data).restoreAll()
         failed += SystemSettings(data).restoreAll()
         failed += Units(data).removeAll()
+        failed += Adb(data).restore()
         releases.tellObtainium(emptyList())
         for (id in installer.readOwned()) {
             if (Device.uninstallKeepingData(id)) Out.line("✔ Removed $id (its data is kept)") else Out.line("✘ Could not remove $id")

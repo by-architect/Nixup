@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Seraph"
 include(":app")
+// Termux's terminal (Apache License 2.0), for the app's terminal.
+include(":terminal-emulator", ":terminal-view")

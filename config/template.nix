@@ -452,6 +452,66 @@
     relay.enable = false;                         # relay server: not on a phone
   };
 
+  # adb, Android's debugging bridge: on, over the network too (from each boot on), and the computers it lets in
+  # without asking "Allow USB debugging?". NixOS has nothing like it, so it is Android's own: android.adb.
+  android.adb = {
+    enable = true;                                # adb on (USB debugging); null: not managed
+    port = null;                                  # 5555: over the network too, from boot (adb connect <phone>:5555)
+    trustedKeys = [ ];                            # computers let in without asking: each one's ~/.android/adbkey.pub ("QAAAA…= neo@laptop")
+    trustedKeyFiles = [ ];                        # the same from files: ./laptop-adbkey.pub, or "/data/adb/seraph/secrets/adb_keys" on the phone
+    forgetUnused = null;                          # false: keep every computer (Android forgets one unused for 7 days)
+  };
+
+  # SSH, as NixOS's services.openssh: logins get root's shell with the Nix packages below (environment.systemPackages),
+  # the one the app's terminal opens. root is the phone's only user, and logs in with keys only.
+  services.openssh = {
+    enable = false;                               # sshd, at boot and with each build
+    package = pkgs.openssh;                       # which build
+    ports = [ 22 ];                               # its ports
+    listenAddresses = [ { addr = "127.0.0.1"; port = 22; } ];   # 127.0.0.1: the tailnet reaches it (through Tailscale), Wi-Fi does not
+    openFirewall = true;                          # nothing to open on a phone
+    allowSFTP = true;                             # file transfers (file managers, sshfs)
+    sftpServerExecutable = "${pkgs.openssh}/libexec/sftp-server";   # or "internal-sftp"
+    sftpFlags = [ ];                              # flags for it
+    hostKeys = [                                  # the server's keys, made on its first start and kept
+      { type = "rsa"; bits = 4096; path = "/etc/ssh/ssh_host_rsa_key"; }
+      { type = "ed25519"; path = "/etc/ssh/ssh_host_ed25519_key"; }
+    ];
+    banner = null;                                # text before a login
+    authorizedKeysFiles = [ ];                    # more key files (in a folder only root can write to)
+    authorizedKeysInHomedir = true;               # ~/.ssh/authorized_keys too (/data/adb/seraph/home/.ssh)
+    authorizedKeysCommand = "none";               # a program that gives keys: not on the phone yet
+    authorizedKeysCommandUser = "nobody";
+    moduliFile = "${pkgs.openssh}/etc/ssh/moduli";   # Diffie-Hellman groups
+    startWhenNeeded = false;                      # start on a first connection: not on the phone
+    settings = {                                  # sshd_config's settings, by their names there
+      PasswordAuthentication = false;             # passwords (root has none on a phone)
+      KbdInteractiveAuthentication = false;
+      PermitRootLogin = "prohibit-password";      # root with keys only
+      X11Forwarding = false;
+      UseDns = false;                             # look up clients' names
+      StrictModes = true;                         # refuse key files others can write to
+      LogLevel = "INFO";                          # its log: /data/adb/seraph/units/sshd/log
+      GatewayPorts = "no";
+      PrintMotd = false;
+      UsePAM = false;                             # a phone has no PAM
+      Ciphers = null;                             # null: OpenSSH's own lists
+      KexAlgorithms = null;
+      Macs = null;
+      AllowUsers = null;                          # only these may log in
+      DenyUsers = null;
+      AllowGroups = null;
+      DenyGroups = null;
+    };
+    extraConfig = "";                             # more sshd_config lines
+  };
+
+  # Who may log in over SSH, as on NixOS: root, with these public keys.
+  users.users.root.openssh.authorizedKeys = {
+    keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleOnlyPutYourOwnKeyHere neo@laptop" ];   # public keys (an example)
+    keyFiles = [ ];                               # ./laptop.pub, or "/data/adb/seraph/secrets/ssh_keys" on the phone
+  };
+
   # Your own services, as NixOS's systemd.services. Example: the Download folder as a web page for
   # your tailnet. Bound to 127.0.0.1, Wi-Fi cannot reach it, but Seraph's Tailscale passes it on:
   # http://<the phone's tailnet name>:8080 (like logos-1).
@@ -498,7 +558,7 @@
     };
   };
 
-  environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (su -c seraph-shell), like htop rsync
+  environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c seraph-shell), like htop rsync
 
   nixpkgs.config = { };                           # nixpkgs settings, like { allowUnfree = true; }
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)

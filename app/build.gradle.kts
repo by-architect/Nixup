@@ -15,3 +15,8 @@ android {
         versionName = "0.1.0"
     }
 }
+
+dependencies {
+    // The terminal: Termux's emulator and view.
+    implementation(project(":terminal-view"))
+}

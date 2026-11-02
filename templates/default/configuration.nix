@@ -76,8 +76,20 @@
 #     serviceConfig.ExecStart =                      cache.nixos.org and runs as root
 #       "''${pkgs.python3}/bin/python3 -m http.server 8000";
 #   };
-#   environment.systemPackages = with pkgs; [ htop rsync ];   Nix packages for root's shell:
-#                                                    su -c seraph-shell (on adb, or in Termux)
+#   environment.systemPackages = with pkgs; [ htop rsync ];   Nix packages for root's shell: the
+#                                                    app's terminal, ssh, su -c seraph-shell
+#
+#   services.openssh = {                             SSH, with NixOS's options: logins get root's
+#     enable = true;                                 shell with those packages, as the terminal has
+#     listenAddresses = [ { addr = "127.0.0.1"; port = 22; } ];   tailnet only (through Tailscale)
+#   };
+#   users.users.root.openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAA… you@laptop" ];
+#
+#   android.adb = {                                  adb: over the network too, from boot on, and
+#     port = 5555;                                   computers let in without asking (each one's
+#     trustedKeys = [ "QAAAA…= you@laptop" ];        ~/.android/adbkey.pub)
+#     forgetUnused = false;
+#   };
 #
 #   services.tailscale.authKeyFile = ./tailscale.key;    a secret file from the config's folder
 #                                                    (no quotes): each build puts it on the phone,
@@ -90,8 +102,8 @@
 # and builds nothing.
 #
 # Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix,
-# nix/app.nix, nix/global.nix, nix/units.nix, nix/services.nix, nix/syncthing.nix
-# and nix/nixpkgs.nix in the project.
+# nix/app.nix, nix/global.nix, nix/units.nix, nix/services.nix, nix/syncthing.nix,
+# nix/openssh.nix, nix/adb.nix and nix/nixpkgs.nix in the project.
 { config, lib, pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [
