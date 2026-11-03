@@ -4,7 +4,7 @@ What changed in each release of Seraph. The newest comes first. While a release 
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.0 (2026-11-03)
 
 The first public release.
 
