@@ -27,6 +27,8 @@ rm -f /data/adb/service.d/andronix-restore.sh
 pm uninstall dev.andronix.manager < /dev/null > /dev/null 2>&1 && ui_print "- Removed the Andronix app"
 
 set_perm "$MODPATH/bin/nix" 0 0 0755
+# What tells the app about events, for the services too ($SERAPH_NOTIFY).
+set_perm "$MODPATH/notify.sh" 0 0 0755
 # seraph-shell and seraph-backup, in /system/bin once Magisk mounts the module (from the next start).
 set_perm "$MODPATH/system/bin/seraph-shell" 0 0 0755
 set_perm "$MODPATH/system/bin/seraph-backup" 0 0 0755

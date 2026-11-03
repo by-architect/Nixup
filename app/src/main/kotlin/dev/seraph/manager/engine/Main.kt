@@ -24,7 +24,7 @@ import kotlin.system.exitProcess
  *                                 the files of a flake's copy)
  *   dns                           prints the DNS servers of the network in use, as resolv.conf lines
  *   etc                           writes Seraph's /etc for the Linux programs it runs (Nix, tailscaled): DNS servers,
- *                                 trusted certificates, a root user (see Etc)
+ *                                 trusted certificates, a root user (see Etc); and the services' view of the phone
  *   services                      at boot: sets adb's port and trusted computers again (android.adb), and starts the
  *                                 services the last build left (its systemd.services units)
  *   support                       says which settings that need something of the phone (a feature, a newer Android,
@@ -34,15 +34,27 @@ import kotlin.system.exitProcess
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
  *                                 android.settings.repo.<repo>.autoupdatePackages is true)
- *   backup [--auto] [apps or folders...]
- *                                 backs up the last build's apps and folders (android.backup), all or the ones named
- *                                 (with --auto: the ones that are due, as the app's job asks every 15 minutes)
- *   backups [app or folder]       lists the backups
- *   backup-status                 each app and folder backed up: when last, and whether (and why) it is due
- *   backup-restore <app> [snapshot]
- *                                 brings an installed app's data back from its newest backup (or the one named), over
- *                                 what it has
+ *   backup [--auto] [--parts=<parts>] [apps or folders...]
+ *                                 backs up the last build's apps and folders (android.backup), all or the ones named,
+ *                                 which may be any installed app or folder (with --auto: the ones that are due, as the
+ *                                 app's job asks every 15 minutes; --parts: what to take of each app, of apk, data,
+ *                                 deviceData, storage, media, obb, instead of its settings)
+ *   backups [app or folder] [--json]
+ *                                 lists the backups
+ *   backup-status [--json]        each app and folder backed up: when last, and whether (and why) it is due
+ *   backup-restore <app> [snapshot] [--parts=<parts>]
+ *                                 brings an app's data back from its newest backup (or the one named), over what it
+ *                                 has, and its APK when it is not installed (--parts: the parts named, apk among them)
+ *   backup-restore <folder> [snapshot] [--to=<folder>]
+ *                                 brings a folder's files back, into it or into a new folder
+ *   backup-parts <app> <snapshot> what one backup of the app has (--json)
  *   restic <arguments...>         restic itself, with the backups' repository and password
+ *   units [--json]                each service of the last build (its systemd.services units), and how it is
+ *   unit <start|stop|restart> <name>
+ *                                 starts, stops or restarts one, until the next build or restart
+ *   audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]
+ *                                 plays raw sound from its input with Android's audio, as music (services.snapclient's
+ *                                 snapclient writes it), and writes the time Android's audio takes (ms) to the file
  * Exit status: 0 done, 2 stopped before changing anything, 1 stopped partway.
  */
 object Main {
@@ -66,9 +78,12 @@ object Main {
                 "dns" -> Device.dnsServers().ifEmpty { throw Stop("no network with DNS servers: is the phone online?") }
                     .forEach { println("nameserver $it") }.let { 0 }
                 "etc" -> Etc.write(data).let { etc ->
+                    // And the view, for what runs a Nix program without a build (git.sh's git).
+                    runCatching { Units(data).writeView() }
                     if (!File(etc, "resolv.conf").isFile) throw Stop("no network with DNS servers: is the phone online?")
                     0
                 }
+                "audio-out" -> AudioOut.play(option(args, "format") ?: "48000:16:2", option(args, "latency-file")?.let { File(it) }, System.`in`)
                 "services" -> {
                     // adb listens on no port after a restart: the profile's again, before the units start.
                     val android = runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull()
@@ -81,13 +96,28 @@ object Main {
                 )
                 "paths" -> JSONObject(File(files.firstOrNull() ?: usage()).readText()).getJSONObject("android")
                     .optJSONArray("storePaths")?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
-                "updates" -> Updates(data).list().let { 0 }
+                "updates" -> Updates(data).check()
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
-                "backup" -> backups().run(files, auto = "--auto" in args)
-                "backups" -> backups().list(files.firstOrNull())
-                "backup-status" -> backups().status()
-                "backup-restore" -> backups().restoreNow(files.firstOrNull() ?: usage(), files.getOrNull(1))
+                "backup" -> backups().run(files, auto = "--auto" in args, parts = option(args, "parts")?.split(',')?.filter { it.isNotBlank() })
+                "backups" -> if ("--json" in args) json { Backup.ofLastBuild(data)?.listJson(files.firstOrNull()) } else backups().list(files.firstOrNull())
+                "backup-status" -> if ("--json" in args) json { Backup.ofLastBuild(data)?.statusJson() } else backups().status()
+                "backup-restore" -> {
+                    val what = files.firstOrNull() ?: usage()
+                    if (what.startsWith("/")) backups().restoreFolder(what, files.getOrNull(1), option(args, "to"))
+                    else backups().restoreNow(what, files.getOrNull(1), option(args, "parts")?.split(',')?.filter { it.isNotBlank() })
+                }
+                "backup-parts" -> json { backups().partsJson(files.getOrNull(0) ?: usage(), files.getOrNull(1) ?: usage()) }
                 "restic" -> backups().passThrough(args.drop(1))
+                "units" -> Units(data).list().let { list ->
+                    if ("--json" in args) json { list }
+                    else {
+                        val units = list.getJSONArray("units")
+                        if (units.length() == 0) Out.line("No services: the last build has none (services.*, systemd.services)")
+                        for (i in 0 until units.length()) units.getJSONObject(i).let { Out.line("${it.getString("state").padEnd(10)} ${it.getString("name")}  ${it.optString("description")}") }
+                        0
+                    }
+                }
+                "unit" -> Installer.locked(data) { Units(data).control(files.getOrNull(0) ?: usage(), files.getOrNull(1) ?: usage()) }
                 else -> usage()
             }
         } catch (e: Stop) {
@@ -156,6 +186,15 @@ object Main {
     private fun backups(): Backup = Backup.ofLastBuild(data)
         ?: throw Stop("the last build has no backups: set android.backup.repository (and the apps, folders) in the config, then build", 2)
 
+    /** What the app reads: one line of JSON ({"configured":false} when the last build has no backups). */
+    private fun json(make: () -> JSONObject?): Int {
+        println((make() ?: JSONObject().put("configured", false)).toString())
+        return 0
+    }
+
+    /** The value of --<name>=<value>, when it is given. */
+    private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
+
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | backup [--auto] [apps...] | backups [app] | backup-status | backup-restore <app> [snapshot] | restic <arguments...>")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
 }

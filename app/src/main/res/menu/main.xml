@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The main screen's menu: the terminal in the bar, the rest under ⋮. -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/menu_terminal"
+        android:icon="@drawable/ic_terminal"
+        android:showAsAction="ifRoom"
+        android:title="@string/terminal" />
+    <item
+        android:id="@+id/menu_notifications"
+        android:showAsAction="never"
+        android:title="@string/menu_notifications" />
+    <item
+        android:id="@+id/menu_free_space"
+        android:showAsAction="never"
+        android:title="@string/menu_free_space" />
+    <item
+        android:id="@+id/menu_support"
+        android:showAsAction="never"
+        android:title="@string/menu_support" />
+    <item
+        android:id="@+id/menu_about"
+        android:showAsAction="never"
+        android:title="@string/menu_about" />
+</menu>

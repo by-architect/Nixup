@@ -9,6 +9,13 @@
 # no view yet: an interactive shell is then Android's own.
 DATA=/data/adb/seraph
 [ "$(id -u)" = 0 ] || { echo "seraph-shell: run it as root: su -c seraph-shell" >&2; exit 1; }
+# A root shell an app starts (the app's terminal) sees the phone as the app does, without the other apps' data
+# folders: this goes on in init's view of the phone (its mount namespace) instead, as adb's root shell has it.
+if [ "$(readlink /proc/1/ns/mnt)" != "$(readlink /proc/self/ns/mnt)" ]; then
+  for n in "/data/adb/magisk/busybox nsenter" "/data/adb/ksu/bin/busybox nsenter" "/data/adb/ap/bin/busybox nsenter" /system/bin/nsenter; do
+    $n -t 1 -m -- true 2> /dev/null && exec $n -t 1 -m -- /system/bin/sh "$0" "$@"
+  done
+fi
 busybox=
 for b in /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox; do
   [ -x "$b" ] && busybox=$b && break

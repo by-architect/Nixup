@@ -123,6 +123,13 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
             problems.forEach { Out.line("  - $it") }
             return 2
         }
+        // What changes, in one line, for what the build tells the app at its end (switch_to in common.sh).
+        val parts = listOfNotNull(
+            "app settings".takeIf { settings.changes }, "apps that came with the phone".takeIf { debloat.changes },
+            "system settings".takeIf { system.changes }, "secrets".takeIf { secrets.changes }, "services".takeIf { units.changes },
+            "adb".takeIf { adb.changes }, "data from backups".takeIf { backup?.changes == true },
+        )
+        writeSummary(dryRun, toInstall.size, toUpdate.size, removals.size, parts)
         if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes && backup?.changes != true) {
             Out.line("Nothing to change")
             if (!dryRun) {
@@ -166,6 +173,23 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
             return 1
         }
         return 0
+    }
+
+    /** The summary of a build's changes, in $DATA/tmp/summary: "2 apps installed, 1 updated, system settings". */
+    private fun writeSummary(dryRun: Boolean, installs: Int, updates: Int, removals: Int, parts: List<String>) {
+        val apps = { n: Int -> if (n == 1) "1 app" else "$n apps" }
+        val counts = if (dryRun) {
+            listOfNotNull(installs.takeIf { it > 0 }?.let { "${apps(it)} to install" }, updates.takeIf { it > 0 }?.let { "${apps(it)} to update" }, removals.takeIf { it > 0 }?.let { "${apps(it)} to remove" })
+        } else {
+            listOfNotNull(installs.takeIf { it > 0 }?.let { "${apps(it)} installed" }, updates.takeIf { it > 0 }?.let { "${apps(it)} updated" }, removals.takeIf { it > 0 }?.let { "${apps(it)} removed" })
+        }
+        val all = counts + parts
+        val text = when {
+            all.isEmpty() -> "Nothing to change"
+            dryRun -> "It would change: " + all.joinToString(", ")
+            else -> "Changed: " + all.joinToString(", ")
+        }
+        runCatching { File(data, "tmp").apply { mkdirs() }.resolve("summary").writeText(text + "\n") }
     }
 
     /** The app the config makes the home app (android.apps.<app>.defaultFor = [ "home" ]), if any. */

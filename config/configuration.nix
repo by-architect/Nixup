@@ -517,6 +517,7 @@
     extraUpFlags = [ ];                           # more `tailscale up` flags, like "--ssh"
     extraSetFlags = [ ];                          # `tailscale set` flags, like "--advertise-exit-node"
     extraDaemonFlags = [ ];                       # more tailscaled flags
+    relayServerPort = null;                       # peer relay's UDP port, like 40000; "": off; null: unmanaged
     permitCertUid = null;                         # user that may fetch TLS certificates
     disableTaildrop = false;                      # true: no sending files
     disableUpstreamLogging = false;               # true: no logs to Tailscale

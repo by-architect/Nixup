@@ -31,12 +31,17 @@ case "$MODE" in
 esac
 
 # What was sent goes, whatever happens: the secrets in it too.
-trap 'rm -rf "$IN"' EXIT
+at_exit 'rm -rf "$IN"'
 [ -f "$IN/profile.json" ] || fail "remote.sh: no profile was sent ($IN/profile.json)"
 GEN_SOURCE=$(head -n 1 "$IN/source" 2> /dev/null)
 GEN_BUILT_ON=$(head -n 1 "$IN/built-on" 2> /dev/null)
 [ -f "$IN/flake.lock" ] && GEN_LOCK=$IN/flake.lock
 [ -n "$GEN_SOURCE" ] || GEN_SOURCE="a build on ${GEN_BUILT_ON:-a PC}"
+run_open build "Build from ${GEN_BUILT_ON:-a PC}"
+# What was sent stays until it is applied: a restart in the middle applies it after (resume.sh).
+[ "$MODE" = dry ] || resumable build remote.sh "$MODE"
+if [ "$MODE" = dry ]; then event build start "Dry run of a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURCE"
+else event build start "Applying a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURCE"; fi
 log "== Built on ${GEN_BUILT_ON:-a PC}: $GEN_SOURCE"
 log "Profile: $(cat "$IN/profile.json")"
 SECRETS_IN=$IN/secrets

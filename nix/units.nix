@@ -12,8 +12,12 @@
 #
 # The phone has no systemd: a unit can say what the engine does (the options below, and these of
 # serviceConfig: ExecStart, ExecStartPre, ExecStartPost, ExecStop, Type, Restart, RestartSec,
-# WorkingDirectory, StateDirectory, RuntimeDirectory, RemainAfterExit, Environment). Anything else
-# stops the build and says so, as NixOS's options the phone has not got do.
+# WorkingDirectory, StateDirectory, RuntimeDirectory, RemainAfterExit, Environment, Nice). Anything
+# else stops the build and says so, as NixOS's options the phone has not got do.
+#
+# On a phone the app on the screen comes first: units run on Android's background cores (its
+# system-background cpuset), at Nice 10 unless serviceConfig.Nice says otherwise, with a low share
+# of the storage's time, so a busy service does not make the screen stutter.
 { config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
@@ -24,7 +28,7 @@ let
 
   supported = [
     "ExecStart" "ExecStartPre" "ExecStartPost" "ExecStop" "Type" "Restart" "RestartSec"
-    "WorkingDirectory" "StateDirectory" "RuntimeDirectory" "RemainAfterExit" "Environment"
+    "WorkingDirectory" "StateDirectory" "RuntimeDirectory" "RemainAfterExit" "Environment" "Nice"
   ];
   types' = [ "simple" "exec" "oneshot" ];
   restarts = [ "no" "on-failure" "always" ];
@@ -106,6 +110,15 @@ let
         default = [ ];
         description = "Values whose change restarts it with the next build, as on NixOS.";
       };
+      notifications = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Seraph's own (NixOS has no such thing): whether the app tells, in a notification, when it
+          stops by itself, fails, or runs again after a failure (the Logs tab has it either way).
+          Off for what is about the phone's security (sshd), so its state shows on no screen.
+        '';
+      };
       serviceConfig = mkOption {
         type = types.attrsOf unitValue;
         default = { };
@@ -173,6 +186,9 @@ let
       wants = map nameOf (unit.wants ++ unit.requires);
       requires = map nameOf unit.requires;
       wanted = lib.elem "multi-user.target" unit.wantedBy;
+      # Below the apps, unless the unit says (systemd's Nice: -20, first, to 19, last).
+      nice = sc.Nice or 10;
+      inherit (unit) notifications;
       shell = "${pkgs.bash}/bin/bash";
       pre = commands (sc.ExecStartPre or [ ]) ++ script unit.preStart;
       start = if unit.script != "" then script unit.script else commands (sc.ExecStart or [ ]);
@@ -203,6 +219,7 @@ let
     ++ lib.optional (type != "oneshot" && starts != 1) "${unit'}: a ${toString type} unit has one ExecStart (or script)${lib.optionalString (starts > 1) "; several are a oneshot's"}."
     ++ lib.optional (type == "oneshot" && starts == 0) "${unit'}: give it something to run (serviceConfig.ExecStart or script)."
     ++ lib.optional (!lib.elem (sc.Restart or "no") restarts) "${unit'}.serviceConfig.Restart: \"${toString (sc.Restart or "")}\" is not on the phone (no, on-failure or always)."
+    ++ lib.optional (sc ? Nice && !(builtins.isInt sc.Nice && sc.Nice >= -20 && sc.Nice <= 19)) "${unit'}.serviceConfig.Nice: a number from -20 to 19."
     ++ lib.optional (unit.unitConfig != { }) "${unit'}.unitConfig: not on the phone yet."
     ++ lib.optional (unit.startAt != [ ] && unit.startAt != "") "${unit'}.startAt: timers are not on the phone yet."
     ++ lib.optional (unit.preStop != "") "${unit'}.preStop: not on the phone yet; serviceConfig.ExecStop is."

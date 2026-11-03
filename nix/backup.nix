@@ -7,12 +7,17 @@
 # An app's backup is its APK (and splits) and its data (include picks which). It is made by itself:
 # "auto" when the app was left in the background for quietTime (and at least once a schedule),
 # "schedule" once a schedule, "manual" only with seraph-backup now. Only what changed is read again
-# and stored, an app's processes are paused for the moment of the copy (so its files are whole), and
-# the backups kept follow keep. A build that installs an app restores its data from the newest backup
-# of a version not newer than the one installed, never over data the app already has; and an app
-# backed up with its APK that is not on the phone (one from the Play Store, say) is installed from
-# its backup, with its data (autoRestore). Backups stay when they, or the module, leave the config.
-# The engine does it (see Backup.kt); seraph-backup (list, now, restore, restic) on the phone too.
+# and stored, an idle app's processes are paused for the moment of the copy (so its files are whole;
+# one in use is read as it is), and the backups kept follow keep. Before each backup the repository's
+# storage is checked (there, with room), and an automatic one also waits while the phone is short of
+# memory or hot; one a restart broke off starts again. With autoRestore (off unless turned on, for a
+# new phone), a build that installs an app restores its data from the newest backup of a version not
+# newer than the one installed, never over data the app already has, and an app backed up with its
+# APK that is not on the phone (one from the Play Store, say) is installed from its backup, with its
+# data; an app this phone backed up and that was removed since stays removed (the Backups tab brings
+# it back by hand). Backups stay when they, or the module, leave the config.
+# The engine does it (see Backup.kt); by hand, the app's Backups tab and seraph-backup (list, now,
+# restore, restic) back up any app or folder, and bring back an app's APK and data, or a folder.
 { config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
@@ -67,11 +72,13 @@ let
     };
     autoRestore = mkOption {
       type = if isDefault then types.bool else types.nullOr types.bool;
-      default = if isDefault then true else null;
+      default = if isDefault then false else null;
       description = ''
-        A build that installs the app brings its data back from its newest backup (of a version not newer than the
-        one installed), unless the app has data already; and an app backed up with its APK that is not on the phone
-        and in no list of android.packages is installed from its backup.
+        Off unless turned on (a new phone, to bring everything back): a build that installs the app brings its data
+        back from its newest backup (of a version not newer than the one installed), unless the app has data already;
+        and an app backed up with its APK that is not on the phone and in no list of android.packages is installed
+        from its backup. Never for an app this phone backed up and that was removed since: that one comes back only
+        by hand (the Backups tab, seraph-backup restore).
       '';
     };
   };
@@ -205,6 +212,8 @@ in
       schedule = seconds cfg.schedule;
       quietTime = seconds cfg.quietTime;
       apps = resolved;
+      # For an app backed up by hand that the config does not name (seraph-backup now, the app's Backups tab).
+      defaults = { inherit (cfg.defaults) apk data include when autoRestore; };
     };
     system.build.backupStorePaths = lib.optionals (repository != null)
       (map (package: builtins.unsafeDiscardStringContext "${package}") ([ pkgs.restic ] ++ extraPath));

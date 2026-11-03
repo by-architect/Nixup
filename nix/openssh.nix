@@ -294,6 +294,8 @@ in
     systemd.services.sshd = {
       description = "SSH daemon";
       wantedBy = [ "multi-user.target" ];
+      # The phone's security: what the SSH server does shows in no notification (the Logs tab has it).
+      notifications = false;
       path = [ cfg.package ];
       # Its config, keys and banner, written before each start: sshd_config(5) refuses what it does not take.
       preStart = ''

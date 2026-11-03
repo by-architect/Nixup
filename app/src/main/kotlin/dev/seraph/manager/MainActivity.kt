@@ -11,6 +11,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
@@ -22,21 +24,30 @@ import android.widget.TextView
 import android.widget.Toast
 import dev.seraph.manager.terminal.TerminalActivity
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Executors
 
 /**
- * Two tabs, and the terminal (see [TerminalActivity]). Build: the config to build (see [ConfigSource]): a file picked wherever the user keeps it, a new one made
- * from the module's default, or a flake's address typed in; built with the module's build.sh (as root); and its folder
- * opened.
+ * Five tabs, and a menu with the terminal (see [TerminalActivity]), the notifications' settings, freeing up space,
+ * what the phone supports, and about.
+ * Build: the config to build (see [ConfigSource]): a file picked wherever the user keeps it, a new one made from the
+ * module's default, a git repository cloned onto the phone (pulled, cloned again: the module's git.sh), or a flake's
+ * address typed in; built with the module's build.sh (as root), or only tried (a dry run), or built with everything at
+ * its newest (upgrade); its folder opened; and the generations, to go back to one.
  * Updates: the config's apps that have a newer version, checked and installed with the module's update.sh.
+ * Backups: see [BackupsPane]. Services: see [ServicesPane]. Logs: see [LogsPane].
  */
 class MainActivity : Activity() {
-    private val worker = Executors.newSingleThreadExecutor()
+    private lateinit var runner: Runner
     private lateinit var tabs: List<Pair<Button, View>>
-    private lateinit var build: Button
+    private lateinit var backups: BackupsPane
+    private lateinit var services: ServicesPane
+    private lateinit var logs: LogsPane
+    private lateinit var gitPanel: View
+    private lateinit var gitStatus: TextView
+    private lateinit var gitButtons: List<Button>
+    /** The clone the config comes from (git.sh status), when it comes from one. */
+    private var clone: JSONObject? = null
+    private lateinit var buildButtons: List<Button>
     private lateinit var source: TextView
     private lateinit var lastBuild: TextView
     private lateinit var configButtons: List<Button>
@@ -49,14 +60,14 @@ class MainActivity : Activity() {
     private lateinit var updatesList: LinearLayout
     private lateinit var updatesOutput: TextView
     private lateinit var updatesScroll: ScrollView
-    private var running = false
+    private var tab = 0
     private var currentSource: String? = null
     private var builtOn: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        build = findViewById(R.id.build)
+        runner = Runner(this) { setRunning(it) }
         output = findViewById(R.id.output)
         scroll = findViewById(R.id.scroll)
         updatesStatus = findViewById(R.id.updates_status)
@@ -68,10 +79,17 @@ class MainActivity : Activity() {
         tabs = listOf(
             findViewById<Button>(R.id.tab_build) to findViewById(R.id.build_pane),
             findViewById<Button>(R.id.tab_updates) to findViewById(R.id.updates_pane),
+            findViewById<Button>(R.id.tab_backups) to findViewById(R.id.backups_pane),
+            findViewById<Button>(R.id.tab_services) to findViewById(R.id.services_pane),
+            findViewById<Button>(R.id.tab_logs) to findViewById(R.id.logs_pane),
         )
         tabs.forEachIndexed { i, (button, _) -> button.setOnClickListener { select(i) } }
-        findViewById<Button>(R.id.open_terminal).setOnClickListener { startActivity(Intent(this, TerminalActivity::class.java)) }
-        build.setOnClickListener { build() }
+        buildButtons = listOf(
+            findViewById<Button>(R.id.build).apply { setOnClickListener { build() } },
+            findViewById<Button>(R.id.dry_run).apply { setOnClickListener { buildScript("dry", R.string.dry_running) } },
+            findViewById<Button>(R.id.upgrade).apply { setOnClickListener { upgrade() } },
+            findViewById<Button>(R.id.generations).apply { setOnClickListener { generations() } },
+        )
         source = findViewById(R.id.source)
         lastBuild = findViewById(R.id.last_build)
         openFolder = findViewById(R.id.open_folder)
@@ -79,11 +97,22 @@ class MainActivity : Activity() {
         configButtons = listOf(
             findViewById<Button>(R.id.pick_file).apply { setOnClickListener { pickFile() } },
             findViewById<Button>(R.id.new_config).apply { setOnClickListener { newConfig() } },
+            findViewById<Button>(R.id.git_source).apply { setOnClickListener { gitDialog() } },
             findViewById<Button>(R.id.type_source).apply { setOnClickListener { typeSource() } },
         )
+        gitPanel = findViewById(R.id.git_panel)
+        gitStatus = findViewById(R.id.git_status)
+        gitButtons = listOf(
+            findViewById<Button>(R.id.git_pull).apply { setOnClickListener { gitScript("pull", R.string.git_pulling) } },
+            findViewById<Button>(R.id.git_pull_build).apply { setOnClickListener { pullAndBuild() } },
+            findViewById<Button>(R.id.git_reclone).apply { setOnClickListener { reclone() } },
+        )
+        backups = BackupsPane(this, findViewById(R.id.backups_pane), runner)
+        services = ServicesPane(this, findViewById(R.id.services_pane), runner)
+        logs = LogsPane(this, findViewById(R.id.logs_pane), runner)
         loadSource()
         checkUpdates.setOnClickListener {
-            runRoot(Root.MODULE + "sh \$d/update.sh app check 2>&1", R.string.checking, updatesOutput, updatesScroll) { loadUpdates() }
+            runner.run(Root.MODULE + "sh \$d/update.sh app check 2>&1", getString(R.string.checking), updatesOutput, updatesScroll) { loadUpdates() }
         }
         updateAll.setOnClickListener { update(emptyList()) }
         padForSystemBars(findViewById(R.id.root))
@@ -94,7 +123,7 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        showTab(intent)
+        if (savedInstanceState != null) select(savedInstanceState.getInt(STATE_TAB)) else showTab(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -103,72 +132,245 @@ class MainActivity : Activity() {
         showTab(intent)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(STATE_TAB, tab)
+    }
+
     override fun onDestroy() {
-        worker.shutdown()
+        runner.close()
         super.onDestroy()
     }
 
-    /** A notification opens the Updates tab. */
-    private fun showTab(intent: Intent?) = select(if (intent?.getStringExtra(EXTRA_TAB) == TAB_UPDATES) 1 else 0)
+    override fun onResume() {
+        super.onResume()
+        visible = true
+        if (tab == 4) logs.load()
+    }
+
+    override fun onPause() {
+        visible = false
+        super.onPause()
+    }
+
+    /** A notification opens the tab it is about: Updates, or Logs. */
+    private fun showTab(intent: Intent?) = select(
+        when (intent?.getStringExtra(EXTRA_TAB)) {
+            TAB_UPDATES -> 1
+            TAB_LOGS -> 4
+            else -> 0
+        },
+    )
 
     private fun select(index: Int) {
+        tab = index
         tabs.forEachIndexed { i, (button, pane) ->
             pane.visibility = if (i == index) View.VISIBLE else View.GONE
             button.setTypeface(null, if (i == index) Typeface.BOLD else Typeface.NORMAL)
             button.alpha = if (i == index) 1f else 0.6f
         }
-        if (index == 1) loadUpdates()
-    }
-
-    /** Runs a module script as root and shows what it says, line by line, then [after]. */
-    private fun runRoot(command: String, starting: Int, out: TextView, scroller: ScrollView, after: () -> Unit = {}) {
-        if (running) return
-        setRunning(true)
-        out.text = ""
-        show(out, scroller, getString(starting))
-        worker.execute {
-            val exit = Root.run(command) { line -> runOnUiThread { show(out, scroller, line) } }
-            runOnUiThread {
-                show(out, scroller, when (exit) {
-                    null -> getString(R.string.no_root)
-                    0 -> getString(R.string.done)
-                    else -> getString(R.string.failed, exit)
-                })
-                setRunning(false)
-                after()
-            }
+        when (index) {
+            1 -> loadUpdates()
+            2 -> backups.load()
+            3 -> services.load()
+            4 -> logs.load()
         }
     }
 
     private fun setRunning(on: Boolean) {
-        running = on
-        build.isEnabled = !on
+        buildButtons.forEach { it.isEnabled = !on }
         configButtons.forEach { it.isEnabled = !on }
+        gitButtons.forEach { it.isEnabled = !on }
         checkUpdates.isEnabled = !on
         updateAll.isEnabled = !on
         for (i in 0 until updatesList.childCount) updatesList.getChildAt(i).findViewWithTag<Button>(UPDATE_BUTTON)?.isEnabled = !on
+        backups.setRunning(on)
+        services.setRunning(on)
     }
 
-    private fun show(out: TextView, scroller: ScrollView, line: String) {
-        out.append(line + "\n")
-        scroller.post { scroller.fullScroll(View.FOCUS_DOWN) }
+    // --- The menu.
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        when (item.itemId) {
+            R.id.menu_terminal -> startActivity(Intent(this, TerminalActivity::class.java))
+            R.id.menu_notifications -> startActivity(
+                Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName),
+            )
+            R.id.menu_free_space -> AlertDialog.Builder(this)
+                .setTitle(R.string.free_space_title)
+                .setMessage(R.string.free_space_message)
+                .setPositiveButton(R.string.free_space) { _, _ -> buildScript("gc", R.string.freeing_space) }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            R.id.menu_support -> {
+                val show = Ui.textDialog(this, getString(R.string.menu_support), getString(R.string.reading))
+                runner.read(Root.ENGINE + "support 2>&1") { exit, said -> show(if (exit == null) getString(R.string.no_root) else said) }
+            }
+            R.id.menu_about -> about()
+            else -> return super.onOptionsItemSelected(item)
+        }
+        return true
+    }
+
+    /** The app's version and the module's, and where Seraph's source is. */
+    private fun about() {
+        val app = packageManager.getPackageInfo(packageName, 0).versionName
+        runner.read(Root.MODULE + "sed -n 's/^version=//p' \$d/module.prop 2>/dev/null") { _, said ->
+            AlertDialog.Builder(this)
+                .setIcon(R.mipmap.ic_launcher)
+                .setTitle(R.string.app_name)
+                .setMessage(getString(R.string.about_message, app, said.trim().ifEmpty { getString(R.string.module_missing) }))
+                .setPositiveButton(R.string.close, null)
+                .setNeutralButton(R.string.about_source) { _, _ ->
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SOURCE)))
+                    } catch (e: ActivityNotFoundException) {
+                        toast(SOURCE)
+                    }
+                }
+                .show()
+        }
     }
 
     // --- The config: kept by the module in /data/adb/seraph/source (see ConfigSource).
 
     /** The config a build reads (as the module's config_source finds it, so a phone set up before it could be picked shows its own), and the last build's. */
     private fun loadSource() {
-        worker.execute {
-            val said = mutableMapOf<String, String>()
-            Root.run(
-                Root.MODULE + "if [ -f \$d/common.sh ]; then MODDIR=\$d; . \$d/common.sh > /dev/null 2>&1; s=\$(config_source); " +
-                    "else s=\$(head -n 1 ${ConfigSource.FILE} 2>/dev/null); fi; echo \"source=\$s\"; " +
-                    "g=\$(cat /data/adb/seraph/generations/last 2>/dev/null); echo \"generation=\$g\"; " +
-                    "[ -n \"\$g\" ] && echo \"built=\$(head -n 1 /data/adb/seraph/generations/\$g/source 2>/dev/null)\" && " +
-                    "echo \"on=\$(head -n 1 /data/adb/seraph/generations/\$g/built-on 2>/dev/null)\"",
-            ) { line -> line.indexOf('=').takeIf { it > 0 }?.let { said[line.substring(0, it)] = line.substring(it + 1) } }
-            runOnUiThread { showSource(said["source"].orEmpty(), said["generation"].orEmpty(), said["built"].orEmpty(), said["on"].orEmpty()) }
+        runner.read(
+            Root.MODULE + "if [ -f \$d/common.sh ]; then MODDIR=\$d; . \$d/common.sh > /dev/null 2>&1; s=\$(config_source); " +
+                "else s=\$(head -n 1 ${ConfigSource.FILE} 2>/dev/null); fi; echo \"source=\$s\"; " +
+                "g=\$(cat /data/adb/seraph/generations/last 2>/dev/null); echo \"generation=\$g\"; " +
+                "[ -n \"\$g\" ] && echo \"built=\$(head -n 1 /data/adb/seraph/generations/\$g/source 2>/dev/null)\" && " +
+                "echo \"on=\$(head -n 1 /data/adb/seraph/generations/\$g/built-on 2>/dev/null)\"; " +
+                "[ -f \$d/git.sh ] && echo \"git=\$(sh \$d/git.sh app status --json 2>/dev/null | tail -n 1)\"",
+        ) { _, said ->
+            val values = said.lineSequence().mapNotNull { line -> line.indexOf('=').takeIf { it > 0 }?.let { line.substring(0, it) to line.substring(it + 1) } }.toMap()
+            showSource(values["source"].orEmpty(), values["generation"].orEmpty(), values["built"].orEmpty(), values["on"].orEmpty())
+            showClone(values["git"]?.let { runCatching { JSONObject(it) }.getOrNull() }?.takeIf { it.optBoolean("clone") })
         }
+    }
+
+    /** The clone, when the config comes from one: its repository, branch, commit and local changes, and its buttons. */
+    private fun showClone(json: JSONObject?) {
+        clone = json
+        val inIt = json != null && currentSource?.startsWith(json.optString("path") + "/") == true
+        gitPanel.visibility = if (inIt) View.VISIBLE else View.GONE
+        if (json == null || !inIt) return
+        val url = json.optString("url").removePrefix("https://")
+        val commit = listOf(json.optString("commit"), json.optString("subject")).filter { it.isNotEmpty() }.joinToString(" ").ifEmpty { getString(R.string.unknown) }
+        var line = getString(R.string.git_status, url, json.optString("branch").ifEmpty { getString(R.string.unknown) }, commit)
+        val changes = json.optInt("changes")
+        if (changes > 0) line = resources.getQuantityString(R.plurals.git_status_changes, changes, line, changes)
+        json.optLong("pulled").takeIf { it > 0 }?.let { line = getString(R.string.git_status_pulled, line, Ui.ago(it * 1000)) }
+        gitStatus.text = line
+    }
+
+    /** Git: a repository to clone onto the phone, whose config is then the one built (the module's git.sh). */
+    private fun gitDialog() {
+        val pad = Ui.dp(this, 20)
+        fun field(hint: Int, value: String = "", secret: Boolean = false) = EditText(this).apply {
+            setSingleLine()
+            this.hint = getString(hint)
+            setText(value)
+            if (secret) {
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                // A password field's font is monospace otherwise.
+                typeface = Typeface.DEFAULT
+            }
+        }
+        val now = clone
+        val repository = field(R.string.git_repository_hint, now?.optString("url").orEmpty())
+        val branch = field(R.string.git_branch_hint, now?.optString("branch").orEmpty())
+        val dir = field(R.string.git_dir_hint, now?.optString("dir").orEmpty())
+        val name = field(R.string.git_name_hint, now?.optString("name").orEmpty())
+        val token = field(R.string.git_token_hint, secret = true)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            listOf(repository, branch, dir, name, token).forEach { addView(it) }
+            addView(Ui.note(this@MainActivity, getString(R.string.git_note)))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.git_title)
+            .setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton(R.string.git_clone) { _, _ ->
+                val values = listOf(repository, branch, dir, name).map { it.text.toString().trim() }
+                cloneRepository(values[0], values[1], values[2], values[3], token.text.toString().trim())
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun cloneRepository(url: String, branch: String, dir: String, name: String, token: String) {
+        if (!GIT_ADDRESS.matches(url) || listOf(branch, dir, name).any { !GIT_WORD.matches(it) } || (token.isNotEmpty() && !TOKEN.matches(token))) {
+            return toast(getString(R.string.git_invalid))
+        }
+        val clone = {
+            val args = listOf("clone", url) + listOfNotNull(
+                branch.takeIf { it.isNotEmpty() }?.let { "--branch=$it" }, dir.takeIf { it.isNotEmpty() }?.let { "--dir=$it" },
+                name.takeIf { it.isNotEmpty() }?.let { "--name=$it" },
+            )
+            gitScript(args.joinToString(" ") { ConfigSource.quote(it) }, R.string.git_cloning, url)
+        }
+        val start = {
+            if (token.isEmpty()) clone()
+            else saveToken(hostOf(url), token) { clone() }
+        }
+        val old = this.clone
+        if (old == null) return start()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.git_replace_title)
+            .setMessage(getString(R.string.git_replace_message, old.optString("url").removePrefix("https://")))
+            .setPositiveButton(R.string.git_clone) { _, _ -> start() }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** The site of a repository's address (github.com for you/phone), whose token it is. */
+    private fun hostOf(url: String): String = when {
+        url.startsWith("github:") || !url.contains(':') -> "github.com"
+        url.startsWith("gitlab:") -> "gitlab.com"
+        url.contains("://") -> url.substringAfter("://").substringBefore('/').substringAfter('@')
+        else -> url.substringAfter('@').substringBefore(':')
+    }
+
+    /**
+     * A private repository's token, in Nix's access-tokens (only root reads it), where git.sh and Nix take it: it goes
+     * to root through its input, never in a command.
+     */
+    private fun saveToken(host: String, token: String, then: () -> Unit) {
+        val file = "/data/adb/seraph/secrets/nix-access-tokens"
+        runner.read(
+            "umask 077; mkdir -p /data/adb/seraph/secrets && IFS= read -r t && " +
+                "{ grep -v '^${host.replace(".", "\\.")}=' $file 2>/dev/null; printf '%s=%s\\n' ${ConfigSource.quote(host)} \"\$t\"; } > $file.new && mv -f $file.new $file",
+            input = token + "\n",
+        ) { exit, _ -> if (exit == 0) then() else toast(getString(R.string.git_token_failed)) }
+    }
+
+    /** Runs the module's git.sh with [args] in the Build tab, then shows the config again. */
+    private fun gitScript(args: String, starting: Int, vararg formatArgs: Any) {
+        select(0)
+        runner.run(Root.MODULE + "sh \$d/git.sh app $args 2>&1", getString(starting, *formatArgs), output, scroll) { loadSource() }
+    }
+
+    private fun pullAndBuild() {
+        select(0)
+        runner.run(Root.MODULE + "sh \$d/git.sh app pull 2>&1 && sh \$d/build.sh app switch 2>&1", getString(R.string.git_pulling), output, scroll) { loadSource() }
+    }
+
+    private fun reclone() {
+        val url = clone?.optString("url") ?: return
+        AlertDialog.Builder(this)
+            .setTitle(R.string.git_reclone_title)
+            .setMessage(getString(R.string.git_reclone_message, url.removePrefix("https://")))
+            .setPositiveButton(R.string.git_reclone) { _, _ -> gitScript("reclone", R.string.git_cloning, url) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun showSource(picked: String, generation: String, built: String, on: String) {
@@ -190,24 +392,70 @@ class MainActivity : Activity() {
         openFolder.isEnabled = currentSource?.let { ConfigSource.folderDocument(it) } != null
     }
 
+    /** Runs the module's build.sh with [args] in the Build tab, then shows the last build again. */
+    private fun buildScript(args: String, starting: Int, vararg formatArgs: Any) {
+        select(0)
+        runner.run(Root.MODULE + "sh \$d/build.sh app $args 2>&1", getString(starting, *formatArgs), output, scroll) { loadSource() }
+    }
+
     /**
      * Build: the picked config, built on the phone. When the last build came from a PC (seraph-rebuild), whose config
      * the phone may not have, it can instead be applied again as it is.
      */
     private fun build() {
-        val pc = builtOn
-        val buildHere = { runRoot(Root.MODULE + "sh \$d/build.sh app 2>&1", R.string.building, output, scroll) { loadSource() } }
-        if (pc == null) {
-            buildHere()
-            return
-        }
+        val pc = builtOn ?: return buildScript("switch", R.string.building)
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.built_elsewhere_title, pc))
             .setMessage(R.string.built_elsewhere_message)
-            .setPositiveButton(R.string.apply_again) { _, _ ->
-                runRoot(Root.MODULE + "sh \$d/build.sh app again 2>&1", R.string.building, output, scroll) { loadSource() }
+            .setPositiveButton(R.string.apply_again) { _, _ -> buildScript("again", R.string.building) }
+            .setNeutralButton(R.string.build_here) { _, _ -> buildScript("switch", R.string.building) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** Upgrade: a build with the app lists, releases and a flake's inputs at their newest (build.sh update). */
+    private fun upgrade() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.upgrade_title)
+            .setMessage(R.string.upgrade_message)
+            .setPositiveButton(R.string.upgrade) { _, _ -> buildScript("update", R.string.upgrading) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private class Generation(val number: String, val time: Long, val source: String, val builtOn: String)
+
+    /** The generations, newest first; one picked can be tried (a dry run) or switched to (build.sh generation). */
+    private fun generations() {
+        runner.read(GENERATIONS) { exit, said ->
+            if (exit == null) return@read toast(getString(R.string.no_root))
+            val current = said.lineSequence().firstOrNull { it.startsWith("last=") }?.removePrefix("last=")?.trim()
+            val all = said.lineSequence().map { it.split('\t') }.filter { it.size >= 4 && it[0].isNotEmpty() && it[0].all(Char::isDigit) }
+                .map { Generation(it[0], (it[1].toLongOrNull() ?: 0L) * 1000, it[2], it[3]) }.toList()
+            if (all.isEmpty()) return@read toast(getString(R.string.no_generations))
+            val items = all.map { g ->
+                getString(R.string.generation_item, g.number, when (g.time) { 0L -> getString(R.string.unknown); else -> Ui.date(g.time) },
+                    if (g.number == current) getString(R.string.generation_current) else "", from(g))
             }
-            .setNeutralButton(R.string.build_here) { _, _ -> buildHere() }
+            AlertDialog.Builder(this)
+                .setTitle(R.string.generations)
+                .setItems(items.toTypedArray()) { _, i -> generation(all[i]) }
+                .setNegativeButton(R.string.close, null)
+                .show()
+        }
+    }
+
+    private fun from(g: Generation): String {
+        val source = ConfigSource.shown(g.source, getString(R.string.phone_storage)).ifEmpty { getString(R.string.unknown) }
+        return if (g.builtOn.isNotEmpty()) getString(R.string.generation_from_pc, source, g.builtOn) else source
+    }
+
+    private fun generation(g: Generation) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.generation_title, g.number))
+            .setMessage(getString(R.string.generation_message, if (g.time == 0L) getString(R.string.unknown) else Ui.date(g.time), from(g)))
+            .setPositiveButton(R.string.switch_to) { _, _ -> buildScript("generation ${g.number}", R.string.switching, g.number) }
+            .setNeutralButton(R.string.dry_run) { _, _ -> buildScript("generation ${g.number} dry", R.string.generation_dry, g.number) }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }
@@ -226,6 +474,9 @@ class MainActivity : Activity() {
         NEW_CONFIG,
     )
 
+    /** A folder to back up, from the system's folder picker (for the Backups tab). */
+    fun pickFolder() = startForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER)
+
     private fun startForResult(intent: Intent, request: Int) = try {
         startActivityForResult(intent, request)
     } catch (e: ActivityNotFoundException) {
@@ -239,43 +490,35 @@ class MainActivity : Activity() {
         when (requestCode) {
             PICK_FILE -> savePicked(uri)
             NEW_CONFIG -> writeNew(uri)
+            PICK_FOLDER -> backups.folderPicked(uri)
         }
     }
 
     /** A picked document as the path root reads it at, kept as the config. */
     private fun savePicked(uri: Uri) {
-        worker.execute {
-            val path = ConfigSource.pathOf(uri) ?: ConfigSource.mediaId(uri)?.let { id ->
-                val said = StringBuilder()
-                Root.run(ConfigSource.mediaPathCommand(id)) { said.append(it).append('\n') }
-                ConfigSource.mediaPathIn(said.toString())
-            }
-            runOnUiThread {
-                when {
-                    path == null -> toast(getString(R.string.not_a_phone_file))
-                    !path.endsWith(".nix") -> toast(getString(R.string.not_nix))
-                    else -> saveSource(path)
-                }
-            }
-        }
+        val path = ConfigSource.pathOf(uri)
+        val media = if (path == null) ConfigSource.mediaId(uri) else null
+        if (path != null || media == null) return checkPicked(path)
+        runner.read(ConfigSource.mediaPathCommand(media)) { _, said -> checkPicked(ConfigSource.mediaPathIn(said)) }
+    }
+
+    private fun checkPicked(path: String?) = when {
+        path == null -> toast(getString(R.string.not_a_phone_file))
+        !path.endsWith(".nix") -> toast(getString(R.string.not_nix))
+        else -> saveSource(path)
     }
 
     /** The module's default config, written into the new document, which then is the config. */
     private fun writeNew(uri: Uri) {
-        worker.execute {
-            val template = StringBuilder()
-            val exit = Root.run(Root.MODULE + "cat \$d/config/configuration.nix") { template.append(it).append('\n') }
-            val written = exit == 0 && template.isNotEmpty() && try {
-                contentResolver.openOutputStream(uri, "wt")?.use { it.write(template.toString().toByteArray()) } != null
-            } catch (e: Exception) {
-                false
-            }
-            runOnUiThread {
-                when {
-                    exit != 0 || template.isEmpty() -> toast(getString(R.string.no_template))
-                    !written -> toast(getString(R.string.not_written))
-                    else -> savePicked(uri)
+        runner.read(Root.MODULE + "cat \$d/config/configuration.nix") { exit, template ->
+            if (exit != 0 || template.isEmpty()) return@read toast(getString(R.string.no_template))
+            runner.background {
+                val written = try {
+                    contentResolver.openOutputStream(uri, "wt")?.use { it.write(template.toByteArray()) } != null
+                } catch (e: Exception) {
+                    false
                 }
+                runOnUiThread { if (written) savePicked(uri) else toast(getString(R.string.not_written)) }
             }
         }
     }
@@ -287,7 +530,7 @@ class MainActivity : Activity() {
             hint = getString(R.string.type_source_hint)
             setText(currentSource.orEmpty())
         }
-        val pad = (20 * resources.displayMetrics.density).toInt()
+        val pad = Ui.dp(this, 20)
         val box = FrameLayout(this).apply {
             setPadding(pad, pad / 2, pad, 0)
             addView(field)
@@ -313,16 +556,13 @@ class MainActivity : Activity() {
         } else {
             ""
         }
-        worker.execute {
-            val exit = Root.run(
-                check + "mkdir -p /data/adb/seraph && printf '%s\\n' ${ConfigSource.quote(picked)} > ${ConfigSource.FILE} && rm -f /data/adb/seraph/build-from",
-            )
-            runOnUiThread {
-                when (exit) {
-                    0 -> loadSource()
-                    3 -> toast(getString(R.string.not_readable, where))
-                    else -> toast(getString(R.string.no_root))
-                }
+        runner.read(
+            check + "mkdir -p /data/adb/seraph && printf '%s\\n' ${ConfigSource.quote(picked)} > ${ConfigSource.FILE} && rm -f /data/adb/seraph/build-from",
+        ) { exit, _ ->
+            when (exit) {
+                0 -> loadSource()
+                3 -> toast(getString(R.string.not_readable, where))
+                else -> toast(getString(R.string.no_root))
             }
         }
     }
@@ -334,16 +574,12 @@ class MainActivity : Activity() {
     private fun update(ids: List<String>) {
         // The names come from updates.json; only package names go into the command.
         val apps = ids.filter { PACKAGE_NAME.matches(it) }.joinToString(" ")
-        runRoot(Root.MODULE + "sh \$d/update.sh app now $apps 2>&1", R.string.updating, updatesOutput, updatesScroll) { loadUpdates() }
+        runner.run(Root.MODULE + "sh \$d/update.sh app now $apps 2>&1", getString(R.string.updating), updatesOutput, updatesScroll) { loadUpdates() }
     }
 
     /** The last check's result (updates.json, kept by the module), read as root. */
     private fun loadUpdates() {
-        worker.execute {
-            val text = StringBuilder()
-            Root.run("cat /data/adb/seraph/updates.json 2>/dev/null") { text.append(it) }
-            runOnUiThread { showUpdates(text.toString()) }
-        }
+        runner.read("cat /data/adb/seraph/updates.json 2>/dev/null") { _, said -> showUpdates(said) }
     }
 
     private fun showUpdates(saved: String) {
@@ -355,7 +591,7 @@ class MainActivity : Activity() {
             updateAll.isEnabled = false
             return
         }
-        val checked = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT).format(Date(json.optLong("checked")))
+        val checked = Ui.date(json.optLong("checked"))
         val auto = json.optJSONObject("autoUpdate")
         val repos = auto?.keys()?.asSequence()?.joinToString(", ") { repo ->
             getString(R.string.auto_repo, repo, getString(if (auto.optBoolean(repo)) R.string.auto_on else R.string.auto_off))
@@ -387,13 +623,13 @@ class MainActivity : Activity() {
                 Button(this).apply {
                     setText(R.string.update)
                     tag = UPDATE_BUTTON
-                    isEnabled = !running
+                    isEnabled = !runner.running
                     setOnClickListener { update(listOf(id)) }
                 },
             )
             updatesList.addView(row)
         }
-        updateAll.isEnabled = !running
+        updateAll.isEnabled = !runner.running
     }
 
     private fun size(bytes: Long): String = when {
@@ -428,9 +664,28 @@ class MainActivity : Activity() {
     companion object {
         const val EXTRA_TAB = "tab"
         const val TAB_UPDATES = "updates"
+        const val TAB_LOGS = "logs"
+
+        /** Whether the app is on the screen: what the user started in it, and watches, needs no notification. */
+        @Volatile
+        var visible = false
+
+        /** A repository's address, a branch, folder or configuration name, and a token, as git.sh takes them. */
+        private val GIT_ADDRESS = Regex("[A-Za-z0-9][A-Za-z0-9+._~:@/-]*")
+        private val GIT_WORD = Regex("[A-Za-z0-9._/-]*")
+        private val TOKEN = Regex("[A-Za-z0-9_.-]+")
+        private const val STATE_TAB = "tab"
         private const val UPDATE_BUTTON = "update"
         private const val PICK_FILE = 1
         private const val NEW_CONFIG = 2
+        private const val PICK_FOLDER = 3
+        private const val SOURCE = "https://github.com/by-architect/Seraph"
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+
+        /** Each generation, newest first: its number, when it was made, what from and on which PC; and the current one. */
+        private const val GENERATIONS = "g=/data/adb/seraph/generations; echo \"last=\$(cat \$g/last 2>/dev/null)\"; " +
+            "for n in \$(ls \$g 2>/dev/null | grep -E '^[0-9]+\$' | sort -rn); do " +
+            "printf '%s\\t%s\\t%s\\t%s\\n' \"\$n\" \"\$(stat -c %Y \$g/\$n/profile.json 2>/dev/null)\" " +
+            "\"\$(head -n 1 \$g/\$n/source 2>/dev/null)\" \"\$(head -n 1 \$g/\$n/built-on 2>/dev/null)\"; done"
     }
 }

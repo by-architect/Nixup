@@ -1,5 +1,6 @@
 package dev.seraph.manager.engine
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -18,12 +19,17 @@ import java.util.concurrent.TimeUnit
 class Units(private val data: File) {
     private val dir = File(data, "units")
     private val view = File(dir, "view.sh")
+    private val background = File(dir, "background.sh")
     private val varDir = File(data, "var")
     private val runDir = File(data, "run")
     /** The services of Seraph before units (its own Tailscale and Syncthing code), moved over at the next build. */
     private val legacy = File(data, "services")
 
     private var wanted: Map<String, JSONObject> = emptyMap()
+    /** The units startAll could not start, the last time. */
+    private var broken: List<String> = emptyList()
+    /** At boot, and while a unit is tried again after it (SERAPH_RETRY): a failure is kept, not told, until the last try. */
+    private var quietFailures = System.getenv("SERAPH_RETRY") == "1"
     private var toStop: List<String> = emptyList()
     private var toStart: List<String> = emptyList()
     private var leaving: List<String> = emptyList()
@@ -110,7 +116,33 @@ class Units(private val data: File) {
         runDir.deleteRecursively()
         writeView()
         Etc.write(data)
-        return startAll(order(active(had), had), had)
+        val names = order(active(had), had)
+        quietFailures = true
+        val count = startAll(names, had)
+        // In the journal (the Logs tab); one that did not start is tried again, and told about if it never does.
+        Notify.event(
+            "service", if (count == 0) "ok" else "warn",
+            if (count == 0) "Services started at boot" else "$count of ${names.size} services did not start at boot: tried again in a while",
+            if (count == 0) names.joinToString(", ") else broken.joinToString(", "), quiet = true,
+        )
+        broken.forEach { retryLater(it) }
+        return count
+    }
+
+    /**
+     * A unit that did not start at boot, tried again after 30 seconds, a minute and a half and 4 minutes: what it needs
+     * may come only after the boot (an SD card that mounts later, the network), as systemd's units wait for theirs.
+     * Told about when the last try fails too.
+     */
+    private fun retryLater(name: String) {
+        val module = Notify.module ?: return
+        val script = "for wait in 30 90 240; do sleep \$wait; sh \"\$1/units.sh\" boot start \"\$2\" > /dev/null 2>&1 && exit 0; done; " +
+            "sh \"\$1/notify.sh\" service error \"\$2 did not start\" \"It failed at boot and 3 times after; its log: /data/adb/seraph/units/\$2/log\" \"service:\$2\""
+        runCatching {
+            ProcessBuilder(busybox(), "setsid", "sh", "-c", script, "seraph-retry", module.path, name)
+                .redirectInput(File("/dev/null")).redirectOutput(File("/dev/null")).redirectError(File("/dev/null"))
+                .apply { environment()["SERAPH_RETRY"] = "1"; environment().remove("SERAPH_RUN") }.start()
+        }
     }
 
     /** The module is being removed: every unit stops, and what they kept goes with the module's data. */
@@ -124,11 +156,82 @@ class Units(private val data: File) {
         return 0
     }
 
+    /**
+     * Each unit the last build left, and how it is, as systemctl says: a simple one running, restarting (its loop
+     * waits to start it again) or stopped; a oneshot done, failed, or not run (nothing wants it). Also since when
+     * (its start, or its run), and its log.
+     */
+    fun list(): JSONObject {
+        val had = applied()
+        val active = active(had)
+        val units = JSONArray()
+        for (name in had.keys.sorted()) {
+            val unit = had.getValue(name)
+            val once = oneshot(unit)
+            val state = when {
+                once -> when (status(name)) { OK -> "done"; "" -> "not run"; else -> "failed" }
+                running(name) -> "running"
+                supervisorPid(name) != null -> "restarting"
+                else -> "stopped"
+            }
+            val since = File(dir, if (once) "$name/status" else "$name/main.pid").lastModified()
+            units.put(
+                JSONObject().put("name", name).put("description", unit.optString("description"))
+                    .put("type", if (once) "oneshot" else "simple").put("state", state).put("wanted", name in active)
+                    .put("since", since).put("log", File(dir, "$name/log").path),
+            )
+        }
+        return JSONObject().put("units", units)
+    }
+
+    /**
+     * systemctl's start, stop and restart of one unit of the last build, by hand: until the next build or restart,
+     * which start the units as the config says. A oneshot starts by running again; it has nothing to stop.
+     */
+    fun control(action: String, name: String): Int {
+        val had = applied()
+        val unit = had[name] ?: throw Stop("there is no service $name in the last build (${had.keys.sorted().joinToString(", ").ifEmpty { "it has none" }})")
+        val once = oneshot(unit)
+        return when (action) {
+            "stop" -> {
+                when {
+                    once -> Out.line("$name runs once, to its end: there is nothing to stop")
+                    supervisorPid(name) == null -> Out.line("$name is not running")
+                    else -> {
+                        stop(name)
+                        Out.line("✔ $name: stopped (until the next build or restart)")
+                        Notify.event("service", "info", "Stopped $name", "By hand, until the next build or restart", "service:$name", quiet = true)
+                    }
+                }
+                0
+            }
+            "start", "restart" -> {
+                if (action == "start" && !once && running(name)) {
+                    Out.line("$name is running already")
+                    return 0
+                }
+                // As at boot: the view, and Seraph's /etc with the network's DNS servers of now.
+                writeView()
+                Etc.write(data)
+                val ok = start(name, unit)
+                val done = if (once) "Ran $name" else if (action == "restart") "Restarted $name" else "Started $name"
+                if (ok) Notify.event("service", "info", done, if (System.getenv("SERAPH_RETRY") == "1") "Tried again: it did not start at boot" else "By hand", "service:$name", quiet = true)
+                if (ok) 0 else 1
+            }
+            "retry" -> {
+                retryLater(name)
+                Out.line("$name: tried again after 30 seconds, a minute and a half and 4 minutes, until it starts")
+                0
+            }
+            else -> throw Stop("no such thing to do with a service: $action (start, stop, restart, retry)")
+        }
+    }
+
     private fun startAll(names: List<String>, specs: Map<String, JSONObject>): Int {
-        val broken = mutableSetOf<String>()
+        val failed = mutableSetOf<String>()
         for (name in names) {
             val unit = specs.getValue(name)
-            val missing = unit.strings("requires").filter { it in broken }
+            val missing = unit.strings("requires").filter { it in failed }
             val ok = if (missing.isNotEmpty()) {
                 Out.line("✘ $name: not started, as ${missing.joinToString(", ")} did not start")
                 false
@@ -140,9 +243,10 @@ class Units(private val data: File) {
                     false
                 }
             }
-            if (!ok) broken += name
+            if (!ok) failed += name
         }
-        return broken.size
+        broken = failed.toList()
+        return failed.size
     }
 
     // --- One unit.
@@ -150,12 +254,14 @@ class Units(private val data: File) {
     private fun start(name: String, unit: JSONObject): Boolean {
         val unitDir = File(dir, name).apply { mkdirs() }
         if (supervisorPid(name) != null) stop(name)
+        // Started anew: a failure told before is the past.
+        File(unitDir, "failing").delete()
         for (state in unit.strings("stateDirectories")) File(varDir, "lib/$state").mkdirs()
         // Its runtime folders start empty, as systemd makes them.
         for (runtime in unit.strings("runtimeDirectories")) File(runDir, runtime).apply { deleteRecursively(); mkdirs() }
         writeScripts(name, unit, unitDir)
         File(unitDir, "spec.json").writeText(unit.toString())
-        return if (oneshot(unit)) runOnce(name, unitDir) else launch(name, unit, unitDir)
+        return if (oneshot(unit)) runOnce(name, unitDir, unit) else launch(name, unit, unitDir)
     }
 
     /** A simple unit, under its loop; told about at once if it stops at once (a wrong command, a missing file). */
@@ -164,11 +270,16 @@ class Units(private val data: File) {
         val log = File(unitDir, "log")
         val devNull = File("/dev/null")
         val optional = { file: String -> File(unitDir, file).takeIf { it.isFile }?.path.orEmpty() }
+        // Its loop tells the app when it stops by itself, and when it runs again (unless its notifications are off).
+        val notify = Notify.module?.takeIf { notifies(unit) }?.let { File(it, "notify.sh").path }.orEmpty()
+        if (!background.isFile) writeView()
+        // Below the apps on the screen (see BACKGROUND), its loop and so all it starts.
         ProcessBuilder(
+            busybox, "sh", background.path, busybox, nice(unit),
             busybox, "setsid", "sh", "-c", SUPERVISOR, MARK + name, busybox, view.path, log.path, unitDir.path, name,
             unit.optString("restart", "no"), seconds(unit.optString("restartSec", "0.1")),
-            File(unitDir, "start.sh").path, optional("post.sh"), optional("stop.sh"),
-        ).directory(unitDir).redirectInput(devNull).redirectOutput(devNull).redirectError(devNull).start()
+            File(unitDir, "start.sh").path, optional("post.sh"), optional("stop.sh"), notify,
+        ).directory(unitDir).redirectInput(devNull).redirectOutput(devNull).redirectError(devNull).apply { unitEnvironment(environment()) }.start()
         Thread.sleep(1500)
         val main = pid(File(unitDir, "main.pid"))
         if (running(name) && main != null && alive(main)) {
@@ -176,15 +287,36 @@ class Units(private val data: File) {
             return true
         }
         Out.line("✘ $name: it stopped at once; the end of its log (${log.path}):")
-        tail(log).forEach { Out.line("    $it") }
+        val end = tail(log)
+        end.forEach { Out.line("    $it") }
+        if (notifies(unit)) Notify.event("service", "error", "$name did not start", end.lastOrNull { it.isNotBlank() }.orEmpty(), "service:$name", quiet = quietFailures)
         return false
     }
 
+    /**
+     * What a unit's processes get besides their own environment: the module's folder (SERAPH_MODULE: its engine, for
+     * services.snapclient's sound) and its notify.sh (SERAPH_NOTIFY: `sh "$SERAPH_NOTIFY" <kind> <level> <title>
+     * [text]` tells the app something, as a notification). Not the run that started it: its own events are its own.
+     */
+    private fun unitEnvironment(env: MutableMap<String, String>) {
+        listOf("SERAPH_RUN", "SERAPH_KIND", "SERAPH_BY", "SERAPH_QUIET").forEach { env.remove(it) }
+        Notify.module?.let {
+            env["SERAPH_MODULE"] = it.path
+            env["SERAPH_NOTIFY"] = File(it, "notify.sh").path
+        }
+    }
+
+    private fun notifies(unit: JSONObject) = unit.optBoolean("notifications", true)
+
+    /** Its nice (serviceConfig.Nice; 10, below the apps, by default). */
+    private fun nice(unit: JSONObject) = unit.optInt("nice", 10).coerceIn(-20, 19).toString()
+
     /** A oneshot, to its end; what it says is shown (and kept in its log). */
-    private fun runOnce(name: String, unitDir: File): Boolean {
+    private fun runOnce(name: String, unitDir: File, unit: JSONObject): Boolean {
         val log = File(unitDir, "log")
-        val process = ProcessBuilder(busybox(), "sh", view.path, File(unitDir, "start.sh").path)
-            .directory(unitDir).redirectErrorStream(true).redirectInput(File("/dev/null")).start()
+        if (!background.isFile) writeView()
+        val process = ProcessBuilder(busybox(), "sh", background.path, busybox(), nice(unit), busybox(), "sh", view.path, File(unitDir, "start.sh").path)
+            .directory(unitDir).redirectErrorStream(true).redirectInput(File("/dev/null")).apply { unitEnvironment(environment()) }.start()
         val reader = Thread {
             runCatching {
                 log.appendText("${Out.date(System.currentTimeMillis())} $name\n")
@@ -199,7 +331,13 @@ class Units(private val data: File) {
         reader.join(2000)
         val ok = done && process.exitValue() == 0
         File(unitDir, "status").writeText(if (ok) OK else "failed")
-        if (ok) Out.line("✔ $name: done") else Out.line("✘ $name: ${if (done) "failed (${process.exitValue()})" else "did not end in $ONESHOT_MINUTES minutes"}; its log: ${log.path}")
+        if (ok) {
+            Out.line("✔ $name: done")
+        } else {
+            val why = if (done) "failed (${process.exitValue()})" else "did not end in $ONESHOT_MINUTES minutes"
+            Out.line("✘ $name: $why; its log: ${log.path}")
+            if (notifies(unit)) Notify.event("service", "error", "$name $why", unit.optString("description"), "service:$name", quiet = quietFailures)
+        }
         return ok
     }
 
@@ -348,6 +486,7 @@ class Units(private val data: File) {
     fun writeView() {
         dir.mkdirs()
         view.writeText(VIEW.replace("@BUSYBOX@", busybox()).replace("@DATA@", data.path))
+        background.writeText(BACKGROUND)
     }
 
     /**
@@ -423,14 +562,34 @@ class Units(private val data: File) {
         """.trimIndent() + "\n"
 
         /**
+         * Runs a command below the apps on the screen: in Android's system-background cpuset (its background cores),
+         * at the nice given (absolute: busybox's renice without -n), with the lowest share of the storage's time of
+         * the normal ones. What it starts keeps all three. Arguments: busybox, nice, then the command.
+         */
+        private val BACKGROUND = """
+            # Runs a command below the apps on the screen (written by the engine; see Units.kt).
+            b=${'$'}1 nice=${'$'}2
+            shift 2
+            for c in /dev/cpuset/system-background/cgroup.procs /dev/cpuset/system-background/tasks; do
+              [ -w "${'$'}c" ] && echo ${'$'}${'$'} > "${'$'}c" 2> /dev/null && break
+            done
+            "${'$'}b" renice "${'$'}nice" -p ${'$'}${'$'} > /dev/null 2>&1
+            /system/bin/ionice -c 2 -n 7 -p ${'$'}${'$'} > /dev/null 2>&1
+            exec "${'$'}@"
+        """.trimIndent() + "\n"
+
+        /**
          * Keeps a simple unit running: its start.sh in the view, its post.sh once it has started, and again as its
          * Restart says (after RestartSec); a TERM runs its stop.sh, then stops it. Its log is set aside past 1 MB.
-         * Arguments: busybox, view.sh, log, unit folder, name, restart, seconds, start.sh, post.sh, stop.sh.
+         * With notify.sh, it tells the app when the unit stops by itself (once, until it has run again for a minute)
+         * and when it runs again.
+         * Arguments: busybox, view.sh, log, unit folder, name, restart, seconds, start.sh, post.sh, stop.sh, notify.sh.
          */
         private val SUPERVISOR = """
-            b=${'$'}1 view=${'$'}2 log=${'$'}3 unit=${'$'}4 name=${'$'}5 restart=${'$'}6 delay=${'$'}7 start=${'$'}8 post=${'$'}9 stop=${'$'}{10}
+            b=${'$'}1 view=${'$'}2 log=${'$'}3 unit=${'$'}4 name=${'$'}5 restart=${'$'}6 delay=${'$'}7 start=${'$'}8 post=${'$'}9 stop=${'$'}{10} notify=${'$'}{11}
             echo ${'$'}${'$'} > "${'$'}unit/supervisor.pid"
             child=
+            tell() { [ -n "${'$'}notify" ] && "${'$'}b" sh "${'$'}notify" service "${'$'}@" "service:${'$'}name" < /dev/null > /dev/null 2>&1; }
             stopping() {
               [ -n "${'$'}stop" ] && "${'$'}b" sh "${'$'}view" "${'$'}stop" >> "${'$'}log" 2>&1 < /dev/null
               [ -n "${'$'}child" ] && kill ${'$'}child 2> /dev/null && wait ${'$'}child
@@ -444,15 +603,24 @@ class Units(private val data: File) {
               "${'$'}b" sh "${'$'}view" "${'$'}start" >> "${'$'}log" 2>&1 < /dev/null &
               child=${'$'}!
               echo ${'$'}child > "${'$'}unit/main.pid"
+              if [ -f "${'$'}unit/failing" ]; then
+                ( sleep 60; kill -0 ${'$'}child 2> /dev/null && rm "${'$'}unit/failing" 2> /dev/null && tell ok "${'$'}name runs again" "It had stopped by itself" ) < /dev/null > /dev/null 2>&1 &
+              fi
               [ -n "${'$'}post" ] && "${'$'}b" sh "${'$'}view" "${'$'}post" >> "${'$'}log" 2>&1 < /dev/null
               wait ${'$'}child
               code=${'$'}?
               echo "${'$'}(date '+%F %T') ${'$'}name: stopped (${'$'}code)" >> "${'$'}log"
+              again=
               case ${'$'}restart in
-                always) ;;
-                on-failure) [ ${'$'}code -ne 0 ] || break ;;
-                *) break ;;
+                always) again=1 ;;
+                on-failure) [ ${'$'}code -ne 0 ] && again=1 ;;
               esac
+              if { [ ${'$'}code -ne 0 ] || [ "${'$'}restart" = always ]; } && [ ! -f "${'$'}unit/failing" ]; then
+                : > "${'$'}unit/failing"
+                if [ -n "${'$'}again" ]; then tell error "${'$'}name stopped" "Exit status ${'$'}code; it starts again in ${'$'}{delay%.000} s"
+                else tell error "${'$'}name stopped" "Exit status ${'$'}code"; fi
+              fi
+              [ -n "${'$'}again" ] || break
               sleep "${'$'}delay" &
               wait ${'$'}!
             done

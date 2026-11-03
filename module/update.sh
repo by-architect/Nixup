@@ -16,6 +16,12 @@ MODE=${2:-check}
 . "$MODDIR/common.sh"
 
 [ -f "$PROFILE" ] || { log "No build yet: nothing to update"; exit 0; }
+# The engine tells what it found and did (see Updates.kt); a check that fails is told here.
+case "$MODE" in
+  check) run_open update "Update check" ;;
+  now) run_open update "Update"; event update start "Updating the config's apps"; resumable update update.sh now "$@" ;;
+  auto) run_open update "Automatic update"; resumable update update.sh auto ;;
+esac
 log "== Repositories"
 engine index --force "$PROFILE" || log "Looking for updates with the indexes there are"
 

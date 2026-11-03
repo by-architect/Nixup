@@ -2,6 +2,9 @@
     <string name="app_name">Seraph</string>
     <string name="tab_build">Build</string>
     <string name="tab_updates">Updates</string>
+    <string name="tab_backups">Backups</string>
+    <string name="tab_services">Services</string>
+    <string name="tab_logs">Logs</string>
     <string name="config">Config</string>
     <string name="source_none">None yet: Pick file takes your configuration.nix or flake.nix, wherever it is (New makes one); Type it takes a flake\'s address, like github:you/phone.</string>
     <string name="source_file">%1$s</string>
@@ -15,6 +18,7 @@
     <string name="type_source_hint">github:you/phone, or /storage/emulated/0/…/flake.nix (#name picks a flake\'s configuration)</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
     <string name="source_invalid">Not one Seraph can build: a .nix file\'s full path, or a flake\'s address like github:you/phone (each may end in #name).</string>
     <string name="not_a_phone_file">That file is not on the phone\'s storage or an SD card (a cloud drive\'s?): copy it there and pick it again.</string>
     <string name="not_nix">Pick a .nix file: your configuration.nix, or a flake.nix.</string>
@@ -30,13 +34,34 @@
     <string name="build_here">Build this config</string>
     <string name="no_build_yet">No build yet.</string>
     <string name="build">Build</string>
+    <string name="dry_run">Dry run</string>
+    <string name="upgrade">Upgrade</string>
     <string name="open_folder">Open its folder</string>
     <string name="open_folder_with">Open the config\'s folder with</string>
     <string name="building">Building…</string>
+    <string name="dry_running">Seeing what a build would change (nothing changes)…</string>
+    <string name="upgrading">Upgrading…</string>
+    <string name="upgrade_title">Build with everything at its newest?</string>
+    <string name="upgrade_message">The app lists and releases are fetched again, a flake\'s inputs go to their newest (its flake.lock is updated), and a configuration.nix alone gets the newest nixpkgs; then the config is built, as Build does.</string>
     <string name="done">✔ Done</string>
     <string name="failed">✘ Failed (exit %1$d)</string>
     <string name="no_root">✘ No root: the phone has no su (is Magisk installed?)</string>
     <string name="no_folder_app">No app here opens folders: install a file manager.</string>
+
+    <!-- Generations. -->
+    <string name="generations">Generations</string>
+    <string name="no_generations">No generations yet: the first build makes the first.</string>
+    <string name="generation_item">%1$s  ·  %2$s%3$s\n%4$s</string>
+    <string name="generation_current">  (current)</string>
+    <string name="generation_title">Generation %1$s</string>
+    <string name="generation_message">Built %1$s, from %2$s.\n\nSwitching to it applies its settings, apps and services again (its apps at their newest versions); it becomes the newest generation. A dry run says first what would change.</string>
+    <string name="generation_from_pc">%1$s, on %2$s</string>
+    <string name="switch_to">Switch to it</string>
+    <string name="switching">Switching to generation %1$s…</string>
+    <string name="generation_dry">Seeing what generation %1$s would change (nothing changes)…</string>
+    <string name="unknown">unknown</string>
+
+    <!-- Updates. -->
     <string name="check_updates">Check for updates</string>
     <string name="update_all">Update all</string>
     <string name="update">Update</string>
@@ -50,9 +75,104 @@
     <string name="up_to_date">Everything is up to date.</string>
     <string name="size_unknown">size unknown</string>
     <string name="update_line">%1$s  %2$s → %3$s  (%4$s, from %5$s)</string>
-    <string name="channel_progress">Installing and updating</string>
-    <string name="channel_results">Updates</string>
+    <string name="channel_progress">Going on now</string>
+    <string name="channel_builds">Builds and the config</string>
+    <string name="channel_updates">App updates</string>
+    <string name="channel_backups">Backups</string>
+    <string name="channel_services">Services</string>
+    <string name="channel_connections">Connections (Tailscale)</string>
     <string name="progress_count">%1$d of %2$d</string>
+
+    <!-- Backups. -->
+    <string name="backups_none">No backups: the last build has none.\n\nSet a repository and its password in the config, then build:\n  android.backup.repository = \"/storage/emulated/0/Backup\";\n  android.backup.passwordFile = ./backup-password;\nThe phone then backs up the apps and folders the config names by itself, and here any app (its APK, its data) or folder can be backed up and brought back.</string>
+    <string name="backups_repository">Repository: %1$s</string>
+    <string name="backups_waiting">Automatic backups wait: %1$s. They try again at the next check (every 15 minutes).</string>
+    <string name="backups_locked">The phone was not unlocked since it started: apps\' data is out of reach until then.</string>
+    <string name="backup_all">Back up all</string>
+    <string name="backup_pick">Back up…</string>
+    <string name="refresh">Refresh</string>
+    <string name="backups_apps">The config\'s apps</string>
+    <string name="backups_folders">The config\'s folders</string>
+    <string name="backups_other">Other backups</string>
+    <string name="backups_nothing">The config backs up no apps or folders yet (android.backup.apps, android.backup.folders): Back up… backs up any of them by hand.</string>
+    <string name="backup">Back up</string>
+    <string name="restore">Restore</string>
+    <string name="backed_up_never">never backed up</string>
+    <string name="backed_up_last">last %1$s</string>
+    <string name="backup_due">due: %1$s</string>
+    <string name="backup_not_due">%1$s</string>
+    <plurals name="backup_count">
+        <item quantity="one">%d backup</item>
+        <item quantity="other">%d backups</item>
+    </plurals>
+    <string name="no_backups_yet">no backups</string>
+    <string name="not_installed">not installed</string>
+    <string name="reading_backups">Reading the backups…</string>
+    <string name="backups_unreadable">The backups cannot be read: %1$s</string>
+    <string name="pick_what">Back up</string>
+    <string name="pick_apps_item">Apps…</string>
+    <string name="pick_folder_item">A folder…</string>
+    <string name="pick_apps">Apps to back up</string>
+    <string name="pick_parts">What to back up of them</string>
+    <string name="no_apps">No apps to back up.</string>
+    <string name="not_a_folder">That folder is not on the phone\'s storage or an SD card.</string>
+    <string name="backup_folder_title">Back up %1$s?</string>
+    <string name="backup_folder_message">Its files go into the repository; a backup of it later stores only what changed.</string>
+    <string name="backing_up">Backing up…</string>
+    <string name="restoring">Restoring…</string>
+    <string name="restore_which">Restore %1$s from</string>
+    <string name="restore_parts">What to bring back</string>
+    <string name="restore_confirm_title">Restore %1$s from %2$s?</string>
+    <string name="restore_confirm_apk">Its APK is installed: version %1$s.</string>
+    <string name="restore_confirm_data">What it has now of %1$s is replaced by the backup\'s; the app is stopped first.</string>
+    <string name="restore_folder_into">Into %1$s itself: the backup\'s files replace those there; the others stay</string>
+    <string name="restore_folder_new">Into a new folder: %1$s</string>
+    <string name="restored_suffix">restored %1$s</string>
+    <string name="snapshot_item">%1$s  ·  %2$s</string>
+    <string name="snapshot_version">version %1$s</string>
+    <string name="snapshot_newer">  ·  newer than the installed one</string>
+    <string name="part_apk">The app (its APK)</string>
+    <string name="part_data">Its data</string>
+    <string name="part_deviceData">Its device data (what it reads before the first unlock)</string>
+    <string name="part_storage">Its files in Android/data</string>
+    <string name="part_media">Its files in Android/media</string>
+    <string name="part_obb">Its files in Android/obb (game data)</string>
+    <string name="parts_unknown">The backup does not say what it has.</string>
+    <string name="part_short_data">its data</string>
+    <string name="part_short_deviceData">its device data</string>
+    <string name="part_short_storage">Android/data</string>
+    <string name="part_short_media">Android/media</string>
+    <string name="part_short_obb">Android/obb</string>
+    <string name="backups_count_newest">%1$s, the newest from %2$s</string>
+
+    <!-- Services. -->
+    <string name="services_none">No services: the config\'s services (services.tailscale, services.openssh, systemd.services, …) run here after a build.</string>
+    <string name="services_note">A start, stop or restart lasts until the next build or restart of the phone, which start the services as the config says.</string>
+    <string name="service_restart">Restart</string>
+    <string name="service_stop">Stop</string>
+    <string name="service_start">Start</string>
+    <string name="service_run">Run again</string>
+    <string name="service_log">Log</string>
+    <string name="service_state_since">%1$s since %2$s</string>
+    <string name="state_running">● running</string>
+    <string name="state_restarting">◌ restarting</string>
+    <string name="state_stopped">○ stopped</string>
+    <string name="state_done">✔ done</string>
+    <string name="state_failed">✘ failed</string>
+    <string name="state_not_run">○ not run</string>
+    <string name="state_not_wanted">, nothing wants it</string>
+    <string name="service_acting">%1$s: %2$s…</string>
+
+    <!-- The menu. -->
+    <string name="menu_notifications">Notifications</string>
+    <string name="menu_free_space">Free up space</string>
+    <string name="menu_support">What this phone supports</string>
+    <string name="menu_about">About</string>
+    <string name="reading">Reading…</string>
+    <string name="log_empty">The log is empty.</string>
+    <string name="about_message">App %1$s · module %2$s\n\nMakes the phone match its configuration.nix, as NixOS does: its apps, their settings, the phone\'s settings, backups and services.</string>
+    <string name="about_source">Source</string>
+    <string name="module_missing">not installed</string>
 
     <!-- The terminal. -->
     <string name="terminal">Terminal</string>
@@ -64,4 +184,82 @@
     </plurals>
     <string name="terminal_close">Close session %1$d? What runs in it stops.</string>
     <string name="terminal_close_yes">Close</string>
+    <!-- Logs tab -->
+    <string name="logs_all">All</string>
+    <string name="logs_builds">Builds</string>
+    <string name="logs_updates">Updates</string>
+    <string name="logs_backups">Backups</string>
+    <string name="logs_services">Services</string>
+    <string name="logs_problems">Problems</string>
+    <string name="logs_refresh">Refresh</string>
+    <string name="logs_files">Log files</string>
+    <string name="logs_none">Nothing yet: builds, updates, backups and the services\' news show here as they happen.</string>
+    <string name="logs_none_here">Nothing of this kind.</string>
+    <string name="logs_fine">No problems in the last day.</string>
+    <plurals name="logs_problems_today">
+        <item quantity="one">%d problem in the last day: Problems shows it.</item>
+        <item quantity="other">%d problems in the last day: Problems shows them.</item>
+    </plurals>
+    <string name="logs_today">Today</string>
+    <string name="logs_yesterday">Yesterday</string>
+    <string name="logs_running">running</string>
+    <string name="logs_broken_off">broken off</string>
+    <string name="logs_when">When: %1$s</string>
+    <string name="logs_by">Started by: %1$s</string>
+    <string name="logs_took">Took: %1$s</string>
+    <string name="logs_kind">Kind: %1$s</string>
+    <string name="logs_show_log">Show log</string>
+    <string name="logs_module_log">Builds, updates and backups (apply.log)</string>
+    <string name="logs_module_log_old">The same, older (apply.log.old)</string>
+    <string name="logs_service_log">Service: %1$s</string>
+    <string name="logs_file_item">%1$s\n%2$s · changed %3$s</string>
+    <string name="copy">Copy</string>
+    <string name="kind_build">Build</string>
+    <string name="kind_update">Updates</string>
+    <string name="kind_backup">Backup</string>
+    <string name="kind_service">Service</string>
+    <string name="kind_connection">Connection</string>
+    <string name="kind_git">Git</string>
+    <string name="kind_other">Other</string>
+    <string name="by_app">you, in the app</string>
+    <string name="by_job">the phone, by itself</string>
+    <string name="by_boot">the phone\'s start</string>
+    <string name="by_action">Magisk\'s Action button</string>
+    <string name="by_shell">the terminal</string>
+    <string name="by_resume">the phone, picking up what a restart broke off</string>
+    <string name="by_remote">%1$s, from a computer</string>
+
+    <!-- The config from a git repository -->
+    <string name="git_source">Git</string>
+    <string name="git_title">Config from a git repository</string>
+    <string name="git_repository_hint">Repository, like you/phone</string>
+    <string name="git_branch_hint">Branch (empty: default)</string>
+    <string name="git_dir_hint">Folder of flake.nix (empty: top)</string>
+    <string name="git_name_hint">Configuration (#name; empty: phone\'s)</string>
+    <string name="git_token_hint">Token (private repositories)</string>
+    <string name="git_note">The repository: https://github.com/you/phone, github:you/phone or you/phone (GitHub), or any git address. It is cloned into Seraph\'s own folder (/data/adb/seraph/git); the terminal can change files there. A token is kept where only root reads it, as Nix\'s for the same site.</string>
+    <string name="git_clone">Clone</string>
+    <string name="git_invalid">Not a repository address: like https://github.com/you/phone or you/phone, with no spaces or quotes; the other fields take letters, digits and . _ / -.</string>
+    <string name="git_replace_title">Replace the clone?</string>
+    <string name="git_replace_message">The clone of %1$s goes, with anything changed in it on this phone.</string>
+    <string name="git_status">Git: %1$s, %2$s at %3$s</string>
+    <plurals name="git_status_changes">
+        <item quantity="one">%1$s; %2$d file changed here</item>
+        <item quantity="other">%1$s; %2$d files changed here</item>
+    </plurals>
+    <string name="git_status_pulled">%1$s · pulled %2$s</string>
+    <string name="git_pull">Pull</string>
+    <string name="git_pull_build">Pull and build</string>
+    <string name="git_reclone">Reclone</string>
+    <string name="git_reclone_title">Clone again?</string>
+    <string name="git_reclone_message">The clone is made again from %1$s, as the repository has it: what was changed in it on this phone goes.</string>
+    <string name="git_cloning">Cloning %1$s…</string>
+    <string name="git_pulling">Pulling…</string>
+    <string name="git_token_failed">The token could not be kept.</string>
+
+    <!-- Free up space -->
+    <string name="free_space_title">Free up space?</string>
+    <string name="free_space_message">Removes the Nix packages Seraph keeps that the last build does not use (older generations\' ones, a service turned off). Going back to an older generation fetches its packages again.</string>
+    <string name="free_space">Free up space</string>
+    <string name="freeing_space">Freeing up space…</string>
 </resources>

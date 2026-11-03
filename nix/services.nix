@@ -21,7 +21,9 @@ let
   keyFile = secretFiles.path config "services.tailscale.authKeyFile" cfg.authKeyFile;
 
   socket = "/run/tailscale/tailscaled.sock";
-  params = lib.concatStringsSep "&" (lib.mapAttrsToList (key: value:
+  # `tailscale set`'s flags: the config's, and the peer relay's port.
+  setFlags = cfg.extraSetFlags ++ lib.optional (cfg.relayServerPort != null) "--relay-server-port=${toString cfg.relayServerPort}";
+  params =lib.concatStringsSep "&" (lib.mapAttrsToList (key: value:
     "${key}=${if builtins.isBool value then lib.boolToString value else toString value}"
   ) (lib.filterAttrs (_: value: value != null) (removeAttrs cfg.authKeyParameters [ "_module" ])));
   # Its name on the tailnet: the config's, or the phone's device name as the tailnet takes names.
@@ -99,9 +101,10 @@ in
       description = ''
         An auth key (from the admin console: Settings, Keys), to log in without a link: a file from
         the config's folder (./tailscale.key), or the key itself read from elsewhere
-        (hostConfig.tailscale.key, tskey-…), which each build puts on the phone as a file readable by
-        root alone, never in the profile or Nix's store; or, as a string, the full path of a file
-        already on the phone. (On NixOS it is a file only; the key's text is Seraph's.)
+        (hostConfig.tailscale.key, tskey-…), or a file a module shared with NixOS makes with
+        pkgs.writeText (by its text), which each build puts on the phone as a file readable by root
+        alone, never in the profile or Nix's store; or, as a string, the full path of a file already
+        on the phone. (On NixOS it is a file only; the key's text is Seraph's.)
       '';
     };
 
@@ -152,6 +155,17 @@ in
       default = [ ];
       example = [ "--no-logs-no-support" ];
       description = "More flags for tailscaled.";
+    };
+
+    relayServerPort = mkOption {
+      type = types.nullOr (types.either types.port (types.enum [ "" ]));
+      default = null;
+      example = 40000;
+      description = ''
+        The UDP port of a peer relay (other devices of the tailnet reach each other through this one),
+        as on NixOS: a port turns it on (with `tailscale set` at each build), "" turns it off, null
+        leaves it unmanaged (a port set before may stay: "" first, to be sure it is off).
+      '';
     };
   };
 
@@ -206,13 +220,56 @@ in
         # and the link to log in with is in its status.
         ts up --reset --timeout=20s --hostname="''${host:-android}" "''${login[@]}" ${lib.escapeShellArgs cfg.extraUpFlags} \
           || [ "$state" = NeedsLogin ]
-        ${lib.optionalString (cfg.extraSetFlags != [ ]) "ts set ${lib.escapeShellArgs cfg.extraSetFlags}"}
+        ${lib.optionalString (setFlags != [ ]) "ts set ${lib.escapeShellArgs setFlags}"}
         status=$(ts status --json --peers=false)
         case $(echo "$status" | jq -r .BackendState) in
           Running) echo "Tailscale: running as $(echo "$status" | jq -r '.Self.DNSName | rtrimstr(".")') ($(echo "$status" | jq -r '.Self.TailscaleIPs[0]'))" ;;
           NeedsLogin) echo "! Tailscale: waiting for its login: open $(echo "$status" | jq -r .AuthURL) (on any device) and log in" ;;
           *) echo "Tailscale: $(echo "$status" | jq -r .BackendState)" ;;
         esac
+      '';
+    };
+
+    # Seraph's own: tells, in a notification, when Tailscale connects or its connection drops (and
+    # when it needs a login), from what tailscaled says every 20 seconds. A change counts once it
+    # holds for two looks in a row, so a switch between Wi-Fi and mobile data tells nothing; its
+    # first state after a start is told only when it needs a login.
+    systemd.services.tailscaled-watch = {
+      description = "Tells when Tailscale connects or drops";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "tailscaled-up.service" ];
+      wants = [ "tailscaled.service" ];
+      path = [ cfg.package pkgs.jq ];
+      serviceConfig = {
+        Restart = "always";
+        RestartSec = 30;
+      };
+      script = ''
+        ts() { tailscale --socket=${socket} "$@"; }
+        # (It runs with bash -e: a notification that cannot go out stops nothing.)
+        tell() { if [ -n "$SERAPH_NOTIFY" ]; then sh "$SERAPH_NOTIFY" connection "$1" "$2" "$3" connection:tailscale || true; fi; }
+        told= seen= times=0
+        while :; do
+          status=$(ts status --json --peers=false 2> /dev/null) || status=
+          state=$(printf '%s' "$status" | jq -r '.BackendState // "NoState"' 2> /dev/null) || state=
+          online=$(printf '%s' "$status" | jq -r '.Self.Online // false' 2> /dev/null) || online=false
+          case "$state" in
+            "") now=down why="tailscaled does not answer" ;;
+            Running) if [ "$online" = true ]; then now=up why=; else now=down why="No connection to Tailscale's servers (is the phone online?)"; fi ;;
+            NeedsLogin | NeedsMachineAuth) now=login why="Tailscale is waiting for its login (the Services tab: tailscaled-up's log has the link)" ;;
+            *) now=down why="Tailscale is $state" ;;
+          esac
+          if [ "$now" = "$seen" ]; then times=$((times + 1)); else seen=$now times=1; fi
+          if [ "$times" = 2 ] && [ "$now" != "$told" ]; then
+            case "$now" in
+              up) [ -n "$told" ] && tell ok "Tailscale connected" "As $(printf '%s' "$status" | jq -r '.Self.DNSName | rtrimstr(".")') ($(printf '%s' "$status" | jq -r '.Self.TailscaleIPs[0]'))" ;;
+              login) tell warn "Tailscale needs a login" "$why" ;;
+              down) [ -n "$told" ] && tell warn "Tailscale connection dropped" "$why" ;;
+            esac
+            told=$now
+          fi
+          sleep 20
+        done
       '';
     };
 

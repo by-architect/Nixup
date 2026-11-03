@@ -1,6 +1,7 @@
 # Logos's config: a POCO X3 NFC on crDroid (Android 16, based on LineageOS), as it is set up now
 # (read from the phone on 2026-11-02). It builds as it is, with no flake:
-#   on the phone   Seraph app: Config, pick this file, then Build
+#   on the phone   Seraph app: Config, pick this file, then Build (or Git: clone the repository
+#                  it is in; Pull and build brings its new commits)
 #   on a PC        nix run github:by-architect/Seraph -- switch --file ./configuration.nix
 #
 # As a start for another phone it builds there too: what that phone does not have (an app given
@@ -382,8 +383,9 @@
   # ==== 4. Backups =============================================================================
   # Each app's APK and data, and folders, backed up by the phone itself into a restic repository
   # (encrypted, each file stored once). An app is backed up after it was used, a build that installs
-  # it brings its data back, and an app not on any list comes back from its backup. By hand:
-  # su -c seraph-backup (list, status, now, restore <app>, restic ...). Off while repository is null.
+  # it brings its data back, and an app not on any list comes back from its backup. By hand, any app
+  # (its APK, its data) or folder: the app's Backups tab, or su -c seraph-backup (list, status, now,
+  # restore, restic ...). Off while repository is null.
   android.backup = {
     repository = null;                            # "/storage/<card>/Backup", "sftp:me@pc:/backup/phone", ...
     passwordFile = null;                          # ./backup-password: keep a copy off the phone
@@ -396,7 +398,7 @@
       data = true;                                # false: the APK alone
       include = [ "data" "deviceData" "storage" ];   # also "media", "obb" (Android/media, Android/obb)
       when = "auto";                              # "auto": after use; "schedule"; "manual"
-      autoRestore = true;                         # data back when a build installs it
+      autoRestore = false;                        # true (a new phone): data back when a build installs it, and backed-up apps reinstalled; never an app removed here
     };
     schedule = "daily";                           # "hourly", "daily", "weekly", "6h", ...
     quietTime = "10m";                            # "auto": this long in the background first
@@ -406,7 +408,9 @@
 
   # ==== 5. Scripts and services ================================================================
   # Services with NixOS's names and options, run by root from Nix packages, which the phone fetches
-  # from cache.nixos.org (nixos-unstable) and runs where /nix exists. Logs: /data/adb/seraph/units.
+  # from cache.nixos.org (nixos-unstable) and runs where /nix exists. Logs: the app's Logs tab
+  # (/data/adb/seraph/units). A service that stops by itself or fails is told in a notification, and
+  # so is Tailscale's connection; the SSH server and adb, the phone's security, never are.
 
   services.tailscale = {
     enable = true;                                # Tailscale run by root, next to the Tailscale app (no VPN slot)
@@ -415,7 +419,8 @@
     interfaceName = "userspace-networking";       # the only mode on a phone
     authKeyFile = "/data/adb/seraph/secrets/tailscale.key";   # secret: auth key, logs in without a link
     # (or ./tailscale.key: a file next to this one; or the key itself, read from elsewhere, like
-    #  hostConfig.tailscale.key from a JSON of secrets: each build puts either on the phone, root-only)
+    #  hostConfig.tailscale.key from a JSON of secrets; or pkgs.writeText "key" …, as a module shared
+    #  with NixOS makes it: each build puts any of them on the phone, root-only)
     authKeyParameters = {                         # with an OAuth client secret as the key:
       ephemeral = null;                           #   gone from the tailnet when offline
       preauthorized = null;                       #   needs no approval
@@ -424,6 +429,7 @@
     extraUpFlags = [ ];                           # more `tailscale up` flags, like "--ssh"
     extraSetFlags = [ ];                          # `tailscale set` flags, like "--advertise-exit-node"
     extraDaemonFlags = [ ];                       # more tailscaled flags
+    relayServerPort = null;                       # peer relay's UDP port, like 40000; "": off; null: unmanaged
     permitCertUid = null;                         # user that may fetch TLS certificates
     disableTaildrop = false;                      # true: no sending files
     disableUpstreamLogging = false;               # true: no logs to Tailscale
@@ -434,10 +440,10 @@
   services.syncthing = {
     enable = false;                               # true: Syncthing, run by root
     package = pkgs.syncthing;                     # which build
-    cert = null;                                  # secret: ./syncthing/cert.pem, a fixed device ID
+    cert = null;                                  # secret: ./syncthing/cert.pem, a fixed device ID (or the PEM, or pkgs.writeText's file)
     key = null;                                   # secret: ./syncthing/key.pem, with cert
     guiPasswordFile = null;                       # secret: the GUI's password
-    guiAddress = "unix:///run/syncthing/gui.sock";   # GUI for root only; "127.0.0.1:8384": a browser
+    guiAddress = "unix:///run/syncthing/gui.sock";   # GUI for root only (or its path alone); "127.0.0.1:8384": a browser
     overrideDevices = true;                       # remove devices not listed here
     overrideFolders = true;                       # remove folders not listed here
     settings = {
@@ -468,7 +474,38 @@
     dataDir = "/var/lib/syncthing";               # its files (fixed here)
     configDir = "/var/lib/syncthing";
     databaseDir = "/var/lib/syncthing";
-    relay.enable = false;                         # relay server: not on a phone
+    relay.enable = false;                         # relay server: not on a phone (its other options, as on NixOS, are taken unused)
+  };
+
+  # Snapcast, multi-room audio in sync. snapserver as NixOS's; snapclient (NixOS has none) plays a
+  # server's stream through Android's audio, as music. nixpkgs' snapcast comes with PipeWire,
+  # PulseAudio and Avahi: about 780 MB on the phone.
+  services.snapserver = {
+    enable = false;                               # true: serve streams to the network's clients
+    package = pkgs.snapcast;                      # which build
+    settings = {                                  # snapserver.conf's sections and keys, as on NixOS
+      stream.source = [ "pipe:///run/snapserver/snapfifo?name=default" ];   # its streams: pipe, librespot, airplay, tcp, ...
+      stream.sampleformat = "48000:16:2";         # rate:bits:channels
+      stream.codec = "flac";                      # flac, ogg, opus, pcm
+      stream.buffer = 1000;                       # ms the clients keep: the delay heard, and what covers a slow network
+      tcp-streaming.port = 1704;                  # where clients connect
+      tcp-control.enabled = true;                 # control (JSON-RPC) on 1705
+      http.enabled = true;                        # Snapweb, a player and control page, on 1780
+    };
+    openFirewall = false;                         # nothing to open on a phone
+  };
+
+  services.snapclient = {
+    enable = false;                               # true: play a snapserver's stream on the phone (speaker, headphones, Bluetooth)
+    package = pkgs.snapcast;                      # which build
+    host = "192.168.1.10";                        # the server's name or address (a phone cannot look for one); or "ws://server:1780"
+    port = 1704;                                  # its tcp-streaming.port
+    hostID = null;                                # its ID on the server; null: networking.hostName, or the device name
+    instance = 1;                                 # another number for a second client
+    latency = 0;                                  # ms to play earlier, on top of Android's own (measured): a Bluetooth speaker's
+    sampleFormat = "48000:16:2";                  # what it plays (the stream is resampled to it)
+    mixer = "software";                           # the server's volume for it; "none": Android's alone
+    extraFlags = [ ];                             # more snapclient flags
   };
 
   # adb, Android's debugging bridge: on, over the network too (from each boot on), and the computers it lets in
@@ -560,6 +597,7 @@
     preStart = ''test -d "$SHARE"'';              # commands before each start
     postStart = "echo 'web-share: port 8080'";    # commands once started
     restartTriggers = [ ];                        # values whose change restarts it
+    notifications = true;                         # Seraph's own: tell when it stops by itself, fails, or runs again
     serviceConfig = {
       Type = "simple";                            # keeps running ("oneshot": runs once)
       ExecStart = "${pkgs.darkhttpd}/bin/darkhttpd $SHARE --addr 127.0.0.1 --port 8080";   # what it runs (or script)
@@ -569,6 +607,7 @@
       StateDirectory = "web-share";               # /var/lib/web-share, kept
       RuntimeDirectory = "web-share";             # /run/web-share, gone when it stops
       Environment = [ "TZ=Europe/Istanbul" ];     # more variables, "NAME=value"
+      Nice = 10;                                  # priority: -20 first … 19 last; services run below the apps on the screen (10, on the background cores)
     };
   };
 

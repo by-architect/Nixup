@@ -22,7 +22,15 @@ case "$dark" in
   *) fail "darkMode is '$dark', not true, false or null" ;;
 esac
 
-night() { cmd uimode night < /dev/null | sed -n 's/^Night mode: //p'; }
+# Android's answer, asked again (3 times, a second apart) when it gives none: a phone short of
+# memory can drop one now and then.
+night() {
+  for try in 1 2 3; do
+    answer=$(cmd uimode night < /dev/null 2>&1 | sed -n 's/^Night mode: //p')
+    [ -n "$answer" ] && { echo "$answer"; return 0; }
+    [ "$try" = 3 ] || sleep 1
+  done
+}
 
 if [ -z "$want" ]; then
   # Not in the config (any more): back to what it was before the module.

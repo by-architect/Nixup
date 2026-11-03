@@ -71,17 +71,28 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
         return steps
     }
 
+    /** The updates there are, as [list] finds them, told to the app (the Updates tab's check). */
+    fun check(): Int {
+        val steps = list()
+        if (steps.isEmpty()) Notify.event("update", "ok", "Apps up to date", "The config's ${allIds().size} apps were checked")
+        else Notify.event("update", "info", if (steps.size == 1) "1 update is available" else "${steps.size} updates are available", steps.joinToString(", ") { "${it.name} ${it.version}" })
+        return 0
+    }
+
     /** Installs the updates of the apps named, or all of them; with [auto], those of the repositories that update by themselves. */
     fun update(ids: List<String>, auto: Boolean): Int = Installer.locked(data) {
         val steps = list()
         if (auto) {
             val told = steps.filter { !autoUpdate(it.repo) }
             if (told.isNotEmpty()) {
-                Notify.available(
+                Notify.event(
+                    "update", "info",
                     if (told.size == 1) "1 update is available" else "${told.size} updates are available",
                     told.joinToString(", ") { "${it.name} ${it.version}" },
                 )
                 Out.line("Only told, not installed (their repository's autoupdatePackages is false): ${told.joinToString(", ") { it.id }}")
+            } else if (steps.none { autoUpdate(it.repo) }) {
+                Notify.event("update", "ok", "Apps up to date", "The config's ${allIds().size} apps were checked", quiet = true)
             }
         }
         for (id in ids) if (steps.none { it.id == id }) Out.line("$id has no update (or is not one of the config's apps)")

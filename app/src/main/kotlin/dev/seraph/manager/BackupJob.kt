@@ -11,13 +11,15 @@ import android.util.Log
 /**
  * The backups' check (android.backup): every 15 minutes, with the battery not low, the module's backup.sh runs as
  * root in auto mode and backs up the apps and folders that are due (an app left in the background for a while, a
- * schedule that came round); without android.backup in the last build it does nothing. The job only starts it, as
+ * schedule that came round), after picking up what a restart broke off (resume.sh: a backup, a restore, a build or an
+ * update); without android.backup in the last build it does nothing more. The job only starts them, as
  * UpdateJob does, so a long backup does not hit the time a job may take.
  */
 class BackupJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         Thread {
-            Root.run(Root.MODULE + "setsid sh \$d/backup.sh job auto < /dev/null > /dev/null 2>&1 &")
+            // First what a restart broke off (a backup, a build, ...: the module's resume.sh), then what is due.
+            Root.run(Root.MODULE + "setsid sh -c 'sh \$0/resume.sh job; sh \$0/backup.sh job auto' \$d < /dev/null > /dev/null 2>&1 &")
             jobFinished(params, false)
         }.start()
         return true

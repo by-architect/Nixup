@@ -225,6 +225,16 @@ let
   '';
 in
 {
+  # NixOS's older names, which it still takes (with a warning that names the new one).
+  imports = [
+    (lib.mkRemovedOptionModule [ "services" "syncthing" "useInotify" ] "Syncthing watches folders itself now (fsWatcherEnabled, a folder's setting).")
+    (lib.mkRenamedOptionModule [ "services" "syncthing" "extraOptions" ] [ "services" "syncthing" "settings" ])
+    (lib.mkRenamedOptionModule [ "services" "syncthing" "folders" ] [ "services" "syncthing" "settings" "folders" ])
+    (lib.mkRenamedOptionModule [ "services" "syncthing" "devices" ] [ "services" "syncthing" "settings" "devices" ])
+    (lib.mkRenamedOptionModule [ "services" "syncthing" "options" ] [ "services" "syncthing" "settings" "options" ])
+  ] ++ map (option: lib.mkRenamedOptionModule [ "services" "syncthing" "declarative" option ] [ "services" "syncthing" option ])
+    [ "cert" "key" "devices" "folders" "overrideDevices" "overrideFolders" "extraOptions" ];
+
   options.services.syncthing = {
     enable = lib.mkEnableOption ''
       Syncthing, as NixOS's services.syncthing: run by root, from its Nix package, keeping the
@@ -239,8 +249,10 @@ in
       description = ''
         The cert.pem file (with key: the phone's identity, its device ID), copied into Syncthing's
         folder: a file from the config's folder (./syncthing/cert.pem), which each build puts on the
-        phone, readable by root alone and never in the profile or Nix's store; or, as a string, the
-        full path of one already on the phone. null: Syncthing makes one of its own on its first
+        phone, readable by root alone and never in the profile or Nix's store; the PEM itself
+        (-----BEGIN …, read from a JSON file of secrets), or a file made with pkgs.writeText, as a
+        module shared with NixOS makes one, which each build writes to such a file; or, as a string,
+        the full path of one already on the phone. null: Syncthing makes one of its own on its first
         start, and keeps it.
       '';
     };
@@ -249,7 +261,7 @@ in
       type = secretFiles.type;
       default = null;
       example = lib.literalExpression "./syncthing/key.pem";
-      description = "The key.pem file, with cert (a file from the config's folder, or a full path on the phone).";
+      description = "The key.pem file, with cert (a file from the config's folder, the PEM itself, pkgs.writeText's file, or a full path on the phone).";
     };
 
     guiPasswordFile = mkOption {
@@ -320,10 +332,13 @@ in
       type = types.str;
       default = "unix:///run/syncthing/gui.sock";
       example = "127.0.0.1:8384";
+      # A socket's path alone is taken as NixOS takes it, as unix://<path>.
+      apply = address: if lib.hasPrefix "/" address then "unix://${address}" else address;
       description = ''
         Where its GUI and REST API answer: a socket only root can reach, by default (NixOS's default,
         127.0.0.1:8384, is reachable by every app on a phone, and the GUI has no password unless
-        guiPasswordFile or settings.gui sets one), or host:port, for a browser on the phone.
+        guiPasswordFile or settings.gui sets one), or host:port, for a browser on the phone. A socket
+        is unix:///<its path>, or its path alone, as on NixOS.
       '';
     };
 
@@ -385,7 +400,23 @@ in
       description = "A proxy for Syncthing's connections (all_proxy), as on NixOS.";
     };
 
-    relay.enable = lib.mkEnableOption "a Syncthing relay server, as on NixOS. Not on the phone";
+    # NixOS's relay server (strelaysrv), with all its options, so a module shared with NixOS that
+    # sets them builds: the phone runs none (relay.enable is refused), and takes the rest unused.
+    relay = {
+      enable = lib.mkEnableOption "a Syncthing relay server, as on NixOS. Not on the phone";
+      cert = mkOption { type = types.nullOr types.str; default = null; description = "As on NixOS: the relay's cert.pem (unused here)."; };
+      key = mkOption { type = types.nullOr types.str; default = null; description = "As on NixOS: the relay's key.pem (unused here)."; };
+      token = mkOption { type = types.nullOr types.path; default = null; description = "As on NixOS: the file with a private relay's token (unused here)."; };
+      listenAddress = mkOption { type = types.str; default = ""; description = "As on NixOS: the address for relay traffic (unused here)."; };
+      port = mkOption { type = types.port; default = 22067; description = "As on NixOS: the port for relay traffic (unused here)."; };
+      statusListenAddress = mkOption { type = types.nullOr types.str; default = ""; description = "As on NixOS: the address of the status API (unused here)."; };
+      statusPort = mkOption { type = types.nullOr types.port; default = 22070; description = "As on NixOS: the port of the status API (unused here)."; };
+      pools = mkOption { type = types.nullOr (types.listOf types.str); default = null; description = "As on NixOS: the relay pools to join (unused here)."; };
+      providedBy = mkOption { type = types.str; default = ""; description = "As on NixOS: who provides the relay (unused here)."; };
+      globalRateBps = mkOption { type = types.nullOr types.ints.positive; default = null; description = "As on NixOS: the whole relay's rate limit (unused here)."; };
+      perSessionRateBps = mkOption { type = types.nullOr types.ints.positive; default = null; description = "As on NixOS: each session's rate limit (unused here)."; };
+      extraOptions = mkOption { type = types.listOf types.str; default = [ ]; description = "As on NixOS: more flags for strelaysrv (unused here)."; };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -451,6 +482,15 @@ in
       {
         assertion = encrypted == [ ];
         message = "services.syncthing.settings.folders: encryptionPasswordFile (${lib.concatStringsSep ", " encrypted}) is not on the phone yet.";
+      }
+      # NixOS's own two, so a config that builds here builds on NixOS too.
+      {
+        assertion = !(cfg.overrideFolders && anyAutoAccept);
+        message = "services.syncthing.overrideFolders would remove the folders a device's autoAcceptFolders takes: set overrideFolders = false (as on NixOS).";
+      }
+      {
+        assertion = (cfg.settings.gui or { }) ? password -> cfg.guiPasswordFile == null;
+        message = "services.syncthing: give the GUI's password once, in settings.gui.password or in guiPasswordFile (as on NixOS).";
       }
     ] ++ map (option: {
       assertion = option.unused;

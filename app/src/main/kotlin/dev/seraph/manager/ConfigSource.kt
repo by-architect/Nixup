@@ -23,17 +23,31 @@ object ConfigSource {
     fun pathOf(uri: Uri): String? {
         val id = documentId(uri) ?: return null
         return when (uri.authority) {
-            STORAGE -> {
-                val volume = id.substringBefore(':')
-                val inside = id.substringAfter(':', "")
-                when (volume) {
-                    "primary" -> "$PHONE_STORAGE/$inside"
-                    "home" -> "$PHONE_STORAGE/Documents/$inside"
-                    else -> "/storage/$volume/$inside"
-                }
-            }
+            STORAGE -> storagePath(id)
             DOWNLOADS -> if (id.startsWith("raw:")) id.removePrefix("raw:") else null
             else -> null
+        }
+    }
+
+    /** The path of a folder the system's folder picker gave (a tree), on the phone's storage or an SD card; null for another. */
+    fun treePath(uri: Uri): String? {
+        if (uri.authority != STORAGE) return null
+        val id = try {
+            DocumentsContract.getTreeDocumentId(uri)
+        } catch (e: IllegalArgumentException) {
+            return null
+        }
+        return storagePath(id).trimEnd('/')
+    }
+
+    /** A document of the phone's storage (primary:Download/x) as its path. */
+    private fun storagePath(id: String): String {
+        val volume = id.substringBefore(':')
+        val inside = id.substringAfter(':', "")
+        return when (volume) {
+            "primary" -> "$PHONE_STORAGE/$inside"
+            "home" -> "$PHONE_STORAGE/Documents/$inside"
+            else -> "/storage/$volume/$inside"
         }
     }
 

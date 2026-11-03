@@ -16,41 +16,60 @@ import java.time.OffsetDateTime
  * folder of its APKs), data (/data/user/0/<app>), deviceData (/data/user_de/0/<app>), storage, media and obb (its
  * folders in Android/ of the shared storage); caches are left out. So each app's snapshots are one group of restic's
  * (host and path), which restic's forget keeps as android.backup.keep says, and each snapshot is tagged with the app
- * and the version code it was made of. While its files are read the app's processes are stopped (SIGSTOP, then
- * SIGCONT), so the copy is whole; when it was running, a first pass reads it unstopped and the stopped pass only reads
- * what changed since, so that takes a moment.
+ * and the version code it was made of. An app whose processes are all idle (cached, as Android keeps an app that
+ * left the screen) has them stopped while its files are read (SIGSTOP, then SIGCONT), so the copy is whole; one in
+ * use (on the screen, or with a service running) is read as it is, without stopping it: a stopped process that the
+ * system calls would hold the system up, and the whole phone with it.
  *
- * A build restores the data of the apps it installs from the newest snapshot of a version not newer than the one
- * installed, never over data the app already has (see [planRestore]), and installs from their snapshots the apps
- * backed up with their APK that are not on the phone (autoRestore).
+ * Before a backup, what it needs is checked ([preflight]): the repository's storage there (an SD card in) and room
+ * on it, and the phone not short of memory or hot; an automatic one that cannot run now waits for the next check.
+ *
+ * With autoRestore (off unless the config turns it on), a build restores the data of the apps it installs from the
+ * newest snapshot of a version not newer than the one installed, never over data the app already has (see
+ * [planRestore]), and installs from their snapshots the apps backed up with their APK that are not on the phone; an
+ * app this phone backed up and that was removed since stays removed: it comes back only by hand.
+ *
+ * By hand (seraph-backup, the app's Backups tab), any installed app or folder can be backed up too, with the parts
+ * named, and an app's APK and any of its data parts, or a folder, brought back from any of its snapshots.
  */
-class Backup private constructor(private val data: File, private val cfg: JSONObject) {
-    class Settings(val apk: Boolean, val data: Boolean, val include: List<String>, val `when`: String, val autoRestore: Boolean)
+class Backup private constructor(
+    private val data: File,
+    private val cfg: JSONObject,
+    /** What was backed up when, and the lock: the module's data, or a test profile's own folder (SERAPH_PROFILE). */
+    private val dir: File = File(data, "backup"),
+) {
+    class Settings(val apk: Boolean, val data: Boolean, val include: List<String>, val `when`: String, val autoRestore: Boolean) {
+        /** What a backup with these settings takes: apk, then the data parts. */
+        val parts: List<String> get() = (if (apk) listOf("apk") else emptyList()) + (if (data) include else emptyList())
+    }
 
     class Snapshot(val id: String, val shortId: String, val time: Long, val tags: List<String>, val paths: List<String>) {
         val app: String? get() = tags.firstOrNull { it.startsWith("app:") }?.removePrefix("app:")
         val versionCode: Long? get() = tags.firstOrNull { it.startsWith("versionCode:") }?.removePrefix("versionCode:")?.toLongOrNull()
+        val versionName: String? get() = tags.firstOrNull { it.startsWith("versionName:") }?.removePrefix("versionName:")
+        /** The parts it has (apk, data, ...), as its tags say; null for one made before they were tagged (see [partsOf]). */
+        val parts: List<String>? get() = tags.filter { it.startsWith("part:") }.map { it.removePrefix("part:") }.ifEmpty { null }
         val warm: Boolean get() = WARM in tags
         val date: String get() = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ROOT).format(java.util.Date(time))
     }
 
     val apps: Map<String, Settings> = cfg.optJSONObject("apps")?.let { json ->
-        json.keys().asSequence().associateWith { id ->
-            val app = json.getJSONObject(id)
-            Settings(
-                app.optBoolean("apk", true), app.optBoolean("data", true),
-                app.optJSONArray("include")?.strings() ?: listOf("data", "deviceData", "storage"),
-                app.optString("when", "auto"), app.optBoolean("autoRestore", true),
-            )
-        }
+        json.keys().asSequence().associateWith { id -> settingsOf(json.getJSONObject(id)) }
     } ?: emptyMap()
+    /** What an app the config does not back up is backed up with, when it is named by hand: android.backup.defaults. */
+    private val defaults = settingsOf(cfg.optJSONObject("defaults") ?: JSONObject())
     private val folders = cfg.optJSONArray("folders")?.strings() ?: emptyList()
     private val repository = cfg.getString("repository")
     private val host = cfg.optString("host").takeIf { it.isNotEmpty() && it != "null" } ?: Device.settings("global")["device_name"] ?: "phone"
     private val schedule = cfg.optLong("schedule", 86400) * 1000
     private val quietTime = cfg.optLong("quietTime", 600) * 1000
 
-    private val dir = File(data, "backup")
+    private fun settingsOf(app: JSONObject) = Settings(
+        app.optBoolean("apk", true), app.optBoolean("data", true),
+        app.optJSONArray("include")?.strings() ?: listOf("data", "deviceData", "storage"),
+        app.optString("when", "auto"), app.optBoolean("autoRestore", false),
+    )
+
     private val stateFile = File(dir, "state.json")
     private val frozenFile = File(dir, "frozen")
     private val tmp = File(data, "tmp")
@@ -65,6 +84,14 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
             val card = "/mnt/media_rw/${m.groupValues[1]}"
             if (m.groupValues[1] != "self" && File(card).isDirectory) return card + m.groupValues[2]
         }
+        return path
+    }
+
+    /** A folder as the phone names it ([real] the other way): /data/media/0/DCIM is /storage/emulated/0/DCIM; the config's own name, when it is one of its folders. */
+    private fun shown(path: String): String {
+        folders.firstOrNull { real(it) == path }?.let { return it }
+        Regex("^/data/media/(\\d+)(/.*)?$").find(path)?.let { return "/storage/emulated/${it.groupValues[1]}${it.groupValues[2]}" }
+        Regex("^/mnt/media_rw/([^/]+)(/.*)?$").find(path)?.let { return "/storage/${it.groupValues[1]}${it.groupValues[2]}" }
         return path
     }
 
@@ -86,6 +113,8 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
             "HOME" to "/var/lib/seraph-backup",
             "TMPDIR" to "${tmp.path}/restic",
             "RESTIC_PROGRESS_FPS" to "0.2",
+            // Less memory at its peak (Go's collector runs twice as often), for the apps of the phone.
+            "GOGC" to "50",
         )
         script.writeText(buildString {
             append("set -e\n")
@@ -115,7 +144,11 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
     /** Makes the repository, when there is none yet and initialize is on; false when it cannot be had. */
     private fun ready(): Boolean {
         val (status, _) = restic("cat", "config", say = {})
-        if (status == 0) return true
+        if (status == 0) {
+            // The locks of a backup a restart (or a kill) broke off, which would hold up forget.
+            restic("unlock", say = {})
+            return true
+        }
         if (status != NO_REPOSITORY) {
             Out.line("✘ Backups: the repository $repository cannot be opened (restic exit $status); is it there, and the password right?")
             restic("cat", "config")
@@ -186,6 +219,9 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
             .getOrDefault(false)
     }
 
+    /** Whether a process is idle as Android keeps it: cached (oom_score_adj 900 and up), not on the screen or serving. */
+    private fun cached(pid: Int) = runCatching { File("/proc/$pid/oom_score_adj").readText().trim().toInt() >= CACHED_ADJ }.getOrDefault(true)
+
     private fun <T> stopped(pids: List<Int>, work: () -> T): T {
         if (pids.isEmpty()) return work()
         dir.mkdirs()
@@ -232,6 +268,10 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
             Out.line("  $id is not installed: passed over")
             return true
         }
+        if (settings.data && hidden(id)) {
+            Out.line("✘ $id: its data folder is out of sight here (an app's view of the phone, which hides the other apps' data): not backed up")
+            return false
+        }
         val parts = LinkedHashMap<String, String>()
         if (settings.apk) apkDir(id)?.let { parts["apk"] = it }
         if (settings.data) for (part in settings.include) partPath(part, id).takeIf { File(it).isDirectory }?.let { parts[part] = it }
@@ -240,18 +280,21 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
             return true
         }
         val setup = binds(id, parts)
-        val tags = listOf(APP_TAG, "app:$id", "versionCode:${installed.versionCode}")
+        // Its version, and the parts it has, so a restore can say what it brings back (a comma would split a tag).
+        val tags = listOf(APP_TAG, "app:$id", "versionCode:${installed.versionCode}") +
+            listOfNotNull(installed.versionName.trim().ifEmpty { null }?.let { "versionName:" + it.replace(',', '.') }) +
+            parts.keys.map { "part:$it" }
+        // Stopped while it is read only when all its processes are idle; an app in use is read as it is.
         val pids = Device.uid(id)?.takeIf { it >= 10000 }?.let { pidsOf(it) } ?: emptyList()
-        // A running app is read once as it is, so the stopped pass only reads what changed in between.
-        val warm = if (pids.isNotEmpty()) backup(setup, listOf("/backup/$id"), tags + WARM, excludes(id)) else null
-        val result = stopped(pids) { backup(setup, listOf("/backup/$id"), tags, excludes(id)) }
-        warm?.snapshot?.let { restic("forget", it, say = {}) }
+        val idle = pids.all { cached(it) }
+        if (!idle) Out.line("  $id is in use: read as it is, without stopping it")
+        val result = stopped(if (idle) pids else emptyList()) { backup(setup, listOf("/backup/$id"), tags, excludes(id)) }
         if (result == null) {
             Out.line("✘ Could not back up $id")
             return false
         }
         state().apply {
-            put(id, JSONObject().put("time", System.currentTimeMillis()).put("versionCode", installed.versionCode))
+            put(id, JSONObject().put("time", System.currentTimeMillis()).put("versionCode", installed.versionCode).put("size", sizeOf(parts.values)))
         }.let { saveState() }
         Out.line(
             if (result.skipped) "✔ $id: nothing changed since its last backup"
@@ -272,6 +315,7 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
             return false
         }
         folderState().put(folder, System.currentTimeMillis())
+        folderSizes().put(folder, sizeOf(listOf(path)))
         saveState()
         Out.line(if (result.skipped) "✔ $folder: nothing changed since its last backup" else "✔ Backed up $folder (${Out.size(result.added)} new)")
         return true
@@ -280,24 +324,39 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
     /**
      * Backs up the apps and folders named ([only]; none: all of the config's), or with [auto] those that are due:
      * an "auto" app once it was left in the background for quietTime (and at least once a schedule), a "schedule"
-     * one once a schedule, any but a "manual" one after it was updated, and the folders once a schedule.
+     * one once a schedule, any but a "manual" one after it was updated, and the folders once a schedule. One named
+     * by hand need not be the config's: any installed app (with android.backup.defaults) or folder of the phone.
+     * [parts] (apk, data, deviceData, storage, media, obb) is what to take of each app instead of its settings.
      */
-    fun run(only: List<String>, auto: Boolean): Int = locked {
-        if (!Device.unlocked()) throw Stop("the phone was not unlocked since it started: the apps' data is out of reach until then")
+    fun run(only: List<String>, auto: Boolean, parts: List<String>? = null): Int = locked {
+        if (!Device.unlocked()) {
+            // The job comes back every 15 minutes: it waits quietly.
+            if (auto) {
+                Out.line("Backups: waiting for the phone's first unlock since it started (the apps' data is out of reach until then)")
+                return@locked 0
+            }
+            throw Stop("the phone was not unlocked since it started: the apps' data is out of reach until then")
+        }
         thawLeftovers()
         if (auto && cfg.optBoolean("onlyWhileCharging") && !Device.charging()) {
             Out.line("Backups: only while charging, and the phone is not")
             return@locked 0
         }
-        val unknown = only.filter { it !in apps && it !in folders }
-        if (unknown.isNotEmpty()) throw Stop("not backed up by the config: ${unknown.joinToString(", ")} (android.backup.apps, android.apps.<app>.backup, android.backup.folders)")
+        parts?.let { checkParts(it, PARTS) }
+        val named = only.map { if (it.length > 1) it.trimEnd('/') else it }
+        val unknown = named.filter { it !in apps && !it.startsWith("/") && Device.versionCode(it) == null }
+        if (unknown.isNotEmpty()) throw Stop("neither an installed app nor a folder (a full path): ${unknown.joinToString(", ")}")
+        val take = { settings: Settings ->
+            if (parts == null) settings
+            else Settings("apk" in parts, parts.any { it != "apk" }, parts.filter { it != "apk" }, settings.`when`, settings.autoRestore)
+        }
         val dueApps = when {
-            only.isNotEmpty() -> apps.filterKeys { it in only }
+            named.isNotEmpty() -> named.filter { !it.startsWith("/") }.associateWith { take(apps[it] ?: defaults) }
             auto -> dueApps()
-            else -> apps
+            else -> apps.mapValues { take(it.value) }
         }
         val dueFolders = when {
-            only.isNotEmpty() -> folders.filter { it in only }
+            named.isNotEmpty() -> named.filter { it.startsWith("/") }
             auto -> folders.filter { System.currentTimeMillis() - folderState().optLong(it) >= schedule }
             else -> folders
         }
@@ -305,16 +364,118 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
             if (!auto) Out.line("Backups: nothing to back up")
             return@locked 0
         }
+        // What the backup needs, there before it starts: an automatic one waits for the next check, one by hand says why.
+        preflight(dueApps, dueFolders, auto)?.let { why ->
+            if (!auto) throw Stop("the backup cannot run now: $why", TEMPORARY)
+            waiting(why)
+            return@locked 0
+        }
+        if (loadState().has("waiting")) {
+            loadState().remove("waiting")
+            saveState()
+        }
+        // Told to the app: when it starts, and how many succeeded and failed (an automatic one only when something was due).
+        val what = listOf(count(dueApps.size, "app"), count(dueFolders.size, "folder")).filter { !it.startsWith("0 ") }.joinToString(" and ")
+        val label = if (auto) "Automatic backup" else "Backup"
+        Notify.event("backup", "start", "$label: backing up $what", (dueApps.keys + dueFolders).joinToString(", "))
         if (!ready()) {
-            if (auto) Notify.done("Backups failed", "The repository $repository cannot be opened", failed = true)
+            Notify.event("backup", "error", "$label failed", "The repository $repository cannot be opened")
             return@locked 1
         }
-        Out.line("Backing up ${listOf(count(dueApps.size, "app"), count(dueFolders.size, "folder")).filter { !it.startsWith("0 ") }.joinToString(" and ")} into $repository")
-        val failed = dueApps.count { (id, settings) -> !backupApp(id, settings) } + dueFolders.count { !backupFolder(it) }
+        Out.line("Backing up $what into $repository")
+        val failedApps = dueApps.filter { (id, settings) -> !backupApp(id, settings) }.keys
+        val failedFolders = dueFolders.filter { !backupFolder(it) }
+        val failed = failedApps.size + failedFolders.size
+        val succeeded = dueApps.size + dueFolders.size - failed
         forget()
         handOverRepository()
-        if (failed > 0 && auto) Notify.done("Backups failed", "${count(failed, "backup")} could not be made (see seraph-backup log)", failed = true)
+        when {
+            failed == 0 -> Notify.event("backup", "ok", "$label finished: $succeeded succeeded", (dueApps.keys + dueFolders).joinToString(", "))
+            else -> Notify.event(
+                "backup", if (succeeded == 0) "error" else "warn", "$label finished: $succeeded succeeded, $failed failed",
+                "Failed: ${(failedApps + failedFolders).joinToString(", ")} (the Logs tab has why)",
+            )
+        }
         if (failed > 0) 1 else 0
+    }
+
+    /**
+     * What keeps a backup of [apps] and [folders] from running now, or null: the repository's storage not there (an SD
+     * card taken out) or without room for what is new (what was never backed up, and what grew since its last backup,
+     * with some room always kept free); and for an automatic one, the phone short of memory or hot, unless it has been
+     * waiting 6 hours already.
+     */
+    private fun preflight(apps: Map<String, Settings>, folders: List<String>, auto: Boolean): String? {
+        if (repository.startsWith("/")) {
+            // An SD card's (or USB storage's) repository: its card must be in.
+            Regex("^/storage/([^/]+)/").find(repository)?.groupValues?.get(1)?.takeIf { it != "emulated" && it != "self" }?.let { card ->
+                if (!File("/mnt/media_rw/$card").isDirectory) return "the storage of the repository ($card, an SD card or USB storage) is not there"
+            }
+            val there = generateSequence(File(repo)) { it.parentFile }.firstOrNull { it.exists() } ?: return "the repository's folder is not there"
+            val stat = runCatching { android.os.StatFs(there.path) }.getOrNull() ?: return null
+            val free = stat.availableBytes
+            val keep = maxOf(256L shl 20, stat.totalBytes / 50)
+            val need = apps.entries.sumOf { (id, settings) -> grown(id, settings) } + folders.sumOf { grownFolder(it) }
+            if (free < need + keep) {
+                return "the repository's storage has ${Out.size(free)} free; this backup needs about ${Out.size(need)}, and ${Out.size(keep)} stays free"
+            }
+        }
+        if (!auto) return null
+        val since = loadState().optJSONObject("waiting")?.optLong("since") ?: 0L
+        if (since > 0 && System.currentTimeMillis() - since > 6 * HOUR) return null
+        val memory = runCatching {
+            File("/proc/meminfo").readLines().associate { line -> line.substringBefore(':') to (line.substringAfter(':').trim().substringBefore(' ').toLongOrNull() ?: 0L) }
+        }.getOrNull()
+        val total = memory?.get("MemTotal") ?: 0L
+        val available = memory?.get("MemAvailable") ?: total
+        if (total > 0 && available < total / 20) return "the phone is short of memory (${Out.size(available * 1024)} free)"
+        val thermal = Regex("Thermal Status: (\\d+)").find(Device.run("dumpsys", "thermalservice").second)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        if (thermal >= 3) return "the phone is hot (thermal status $thermal)"
+        return null
+    }
+
+    /** What is new in [id] since its last backup, about: what it has now less what it had then (all of it, the first time). */
+    private fun grown(id: String, settings: Settings): Long {
+        if (Device.versionCode(id) == null) return 0
+        val paths = (if (settings.apk) listOfNotNull(apkDir(id)) else emptyList()) +
+            (if (settings.data) settings.include.map { partPath(it, id) }.filter { File(it).isDirectory } else emptyList())
+        val now = sizeOf(paths)
+        val then = state().optJSONObject(id)?.optLong("size", -1L) ?: -1L
+        return if (then < 0) now else maxOf(0L, now - then)
+    }
+
+    private fun grownFolder(folder: String): Long {
+        val path = real(folder)
+        if (!File(path).isDirectory) return 0
+        val now = sizeOf(listOf(path))
+        val then = folderSizes().optLong(folder, -1L)
+        return if (then < 0) now else maxOf(0L, now - then)
+    }
+
+    /** The size of [paths] on disk, in bytes. */
+    private fun sizeOf(paths: Collection<String>): Long {
+        if (paths.isEmpty()) return 0
+        return Device.run("du", "-sk", *paths.toTypedArray()).second.lineSequence()
+            .sumOf { it.substringBefore('\t').trim().toLongOrNull() ?: 0L } * 1024
+    }
+
+    /**
+     * An automatic backup waits: kept in the state (the Backups tab says it), and told when the reason is new; a full
+     * or missing storage, which needs the user, is told in a notification too (once a day at most).
+     */
+    private fun waiting(why: String) {
+        val now = System.currentTimeMillis()
+        val before = loadState().optJSONObject("waiting")
+        val storage = why.contains("storage")
+        val told = before?.optLong("told") ?: 0L
+        val tell = storage && (before?.optString("reason") != why || now - told > DAY)
+        loadState().put(
+            "waiting",
+            JSONObject().put("reason", why).put("since", before?.optLong("since")?.takeIf { it > 0 } ?: now).put("told", if (tell) now else told),
+        )
+        saveState()
+        Out.line("Automatic backup waits: $why")
+        if (before?.optString("reason") != why || tell) Notify.event("backup", "warn", "Automatic backup waits", "${why.replaceFirstChar { it.uppercase() }}; it tries again at the next check", quiet = !tell)
     }
 
     private fun dueApps(): Map<String, Settings> {
@@ -370,6 +531,28 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
         return 0
     }
 
+    /** The same as [status], for the app's Backups tab: and what an app named by hand is backed up with (defaults). */
+    fun statusJson(): JSONObject {
+        val usage = Device.usage(System.currentTimeMillis() - 7 * DAY)
+        val appList = JSONArray()
+        for ((id, settings) in apps) {
+            val (due, reason) = why(id, settings, usage)
+            appList.put(
+                JSONObject().put("id", id).put("when", settings.`when`).put("parts", JSONArray(settings.parts))
+                    .put("last", state().optJSONObject(id)?.optLong("time") ?: 0L).put("due", due).put("reason", reason),
+            )
+        }
+        val folderList = JSONArray()
+        for (folder in folders) {
+            val last = folderState().optLong(folder)
+            folderList.put(JSONObject().put("path", folder).put("last", last).put("due", System.currentTimeMillis() - last >= schedule))
+        }
+        return JSONObject().put("configured", true).put("repository", repository).put("host", host)
+            .put("defaults", JSONArray(defaults.parts)).put("apps", appList).put("folders", folderList)
+            .put("unlocked", Device.unlocked())
+            .put("waiting", loadState().optJSONObject("waiting")?.optString("reason").orEmpty())
+    }
+
     /** The backups android.backup.keep does not keep, of every app and folder; and once a week the space they took. */
     private fun forget() {
         val keep = cfg.optJSONObject("keep") ?: JSONObject()
@@ -411,8 +594,11 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
      */
     fun planRestore(installing: Map<String, Long?>, listed: Set<String>) {
         val candidates = apps.filter { it.value.autoRestore }
-        val fresh = candidates.filterKeys { it in installing }
-        val missing = candidates.filter { (id, settings) -> id !in listed && id !in installing && settings.apk && Device.versionCode(id) == null }
+        // An app this phone backed up and that is not on it now was removed: it comes back only by hand.
+        val removed = candidates.keys.filter { state().has(it) && Device.versionCode(it) == null }.toSet()
+        if (removed.isNotEmpty()) Out.line("Backups: not brought back by themselves, as they were removed since this phone backed them up (the Backups tab restores them): ${removed.joinToString(", ")}")
+        val fresh = candidates.filterKeys { it in installing && it !in removed }
+        val missing = candidates.filter { (id, settings) -> id !in removed && id !in listed && id !in installing && settings.apk && Device.versionCode(id) == null }
         if (fresh.isEmpty() && missing.isEmpty()) return
         val all = try {
             snapshots()
@@ -450,6 +636,12 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
         failed
     }
 
+    /**
+     * Whether the installed [id]'s own data folder, which Android makes at its install, is out of sight: so it is in
+     * an app's view of the phone (a root shell an app started), where Android hides the other apps' data folders.
+     */
+    private fun hidden(id: String): Boolean = !File(partPath("data", id)).isDirectory && Device.uid(id) != null
+
     /** An app's data has nothing but what Android makes at its install (cache and code_cache, empty). */
     private fun hasData(id: String): Boolean = listOf("data", "deviceData").any { part ->
         File(partPath(part, id)).listFiles().orEmpty().any { it.name !in listOf("cache", "code_cache") || it.list().orEmpty().isNotEmpty() }
@@ -460,17 +652,26 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
      * when it has none yet. The app is stopped first, and what comes back is made its own (its uid, and the groups and
      * SELinux labels of the folders it goes into).
      */
-    fun restoreData(id: String, snapshot: Snapshot, overwrite: Boolean): Boolean {
-        val settings = apps[id]
+    fun restoreData(id: String, snapshot: Snapshot, overwrite: Boolean, only: List<String>? = null): Boolean {
         val uid = Device.uid(id) ?: run {
             Out.line("✘ $id is not installed: its data cannot come back")
+            return false
+        }
+        if (hidden(id)) {
+            Out.line("✘ $id: its data folder is out of sight here (an app's view of the phone, which hides the other apps' data): its data cannot come back")
             return false
         }
         if (!overwrite && hasData(id)) {
             Out.line("  $id has data already: left as it is (seraph-backup restore $id brings the backup's over it)")
             return true
         }
-        val parts = (settings?.include ?: listOf("data", "deviceData", "storage", "media", "obb")).associateWith { partPath(it, id) }
+        // [only], else the config's parts of it; of those, the ones the backup has: a part it has not got is not emptied.
+        val has = snapshot.parts
+        val parts = (only ?: apps[id]?.include ?: DATA_PARTS).filter { it != "apk" && (has == null || it in has) }.associateWith { partPath(it, id) }
+        if (parts.isEmpty()) {
+            Out.line("  The backup of $id from ${snapshot.date} has none of its data")
+            return true
+        }
         Device.run("am", "force-stop", "--user", "0", id)
         if (overwrite) {
             // What the backup has instead; caches stay (they are not in it).
@@ -555,32 +756,144 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
         }
     }
 
-    /** seraph-backup restore: [id]'s data from its newest backup (or [snapshotId]) over what it has. */
-    fun restoreNow(id: String, snapshotId: String?): Int = locked {
-        if (Device.versionCode(id) == null) throw Stop("$id is not installed: install it first (a build installs it from its backup when its APK is there)")
+    /**
+     * seraph-backup restore <app>: from its newest backup of a version not newer than the one installed (or
+     * [snapshotId]), its data over what it has, and its APK when it is not installed. With [parts], the parts named:
+     * apk installs it from the backup (when it is not installed, or an older version is), and each data part replaces
+     * what the app has of it. Every check comes first: when one fails, nothing has changed.
+     */
+    fun restoreNow(id: String, snapshotId: String?, parts: List<String>? = null): Int = locked {
+        if (!Device.unlocked()) throw Stop("the phone was not unlocked since it started: the apps' data is out of reach until then")
+        parts?.let { checkParts(it, PARTS) }
         val installed = Device.versionCode(id)
-        val all = snapshots(id)
-        val snapshot = if (snapshotId != null) all.firstOrNull { it.id.startsWith(snapshotId) && !it.warm } ?: throw Stop("$id has no backup $snapshotId (seraph-backup list $id)")
-        else newest(all, id, installed) ?: throw Stop("$id has no backup of a version not newer than the one installed (seraph-backup list $id)")
-        if (snapshot.versionCode != null && installed != null && snapshot.versionCode!! > installed) {
-            throw Stop("that backup is of a newer version of $id (${snapshot.versionCode}) than the one installed ($installed): update the app first")
+        val all = snapshots(id).filter { !it.warm }
+        val snapshot = if (snapshotId != null) all.firstOrNull { it.id.startsWith(snapshotId) } ?: throw Stop("$id has no backup $snapshotId (seraph-backup list $id)")
+        else newest(all, id, installed) ?: throw Stop(
+            if (all.isEmpty()) "$id has no backups (seraph-backup list)" else "$id has no backup of a version not newer than the one installed (seraph-backup list $id)",
+        )
+        val has = partsOf(id, snapshot)
+        val wanted = parts ?: (listOf("apk").filter { installed == null } + (apps[id]?.include ?: DATA_PARTS))
+        val missing = wanted.filter { it !in has }
+        if (parts != null && missing.isNotEmpty()) {
+            throw Stop("the backup of $id from ${snapshot.date} has no ${missing.joinToString(", ")} (it has ${has.joinToString(", ").ifEmpty { "nothing" }})")
         }
-        if (restoreData(id, snapshot, overwrite = true)) 0 else 1
+        val take = wanted.filter { it in has }
+        val dataParts = take.filter { it != "apk" }
+        val backed = snapshot.versionCode
+        val withApk = "apk" in take
+        val installs = withApk && (installed == null || backed == null || backed > installed)
+        if (take.isEmpty()) throw Stop("the backup of $id from ${snapshot.date} has none of that (it has ${has.joinToString(", ").ifEmpty { "nothing" }})")
+        if (withApk && installed != null && backed != null && backed < installed) {
+            throw Stop("the installed $id (version $installed) is newer than its backup's ($backed), and Android installs no older version over a newer one: uninstall it first, then restore it with its APK and data")
+        }
+        if (dataParts.isNotEmpty()) {
+            if (installed != null && hidden(id)) throw Stop("$id: its data folder is out of sight here (an app's view of the phone, which hides the other apps' data)")
+            if (installed == null && !installs) {
+                throw Stop(if ("apk" in has) "$id is not installed: restore its APK too (apk), or install it first" else "$id is not installed, and this backup has no APK of it: install it first")
+            }
+            val after = if (installs) backed else installed
+            if (backed != null && after != null && backed > after) {
+                throw Stop("that backup is of a newer version of $id ($backed) than the one installed ($after): update the app first, or restore its APK too")
+            }
+        }
+        if (withApk && !installs) Out.line("  $id is at its backup's version already: its APK is not installed again")
+        if (installs && !installFrom(id, snapshot)) return@locked 1
+        if (dataParts.isNotEmpty() && !restoreData(id, snapshot, overwrite = true, only = dataParts)) return@locked 1
+        0
+    }
+
+    /**
+     * seraph-backup restore <folder>: its files from its newest backup (or [snapshotId]) back into it, over the ones
+     * there that the backup has (the others stay); or, with [to], into that folder, which is new. On the shared storage
+     * they become the storage's own (its owner and SELinux label), and Android's media store is told about them.
+     */
+    fun restoreFolder(folder: String, snapshotId: String?, to: String?): Int = locked {
+        if (!Device.unlocked()) throw Stop("the phone was not unlocked since it started: the shared storage is out of reach until then")
+        val source = real(folder.trimEnd('/'))
+        val all = snapshots().filter { !it.warm && it.app == null && source in it.paths }
+        val snapshot = (if (snapshotId != null) all.firstOrNull { it.id.startsWith(snapshotId) } else all.lastOrNull())
+            ?: throw Stop("there is no backup${snapshotId?.let { " $it" } ?: ""} of $folder (seraph-backup list $folder)")
+        val target = File(to?.let { real(it.trimEnd('/')) } ?: source)
+        if (to != null && !target.path.startsWith("/")) throw Stop("$to is not a full path")
+        if (to != null && target.list()?.isNotEmpty() == true) throw Stop("$to is there already, with files in it: name a new folder")
+        // The folder it goes into, or the nearest one above it there is, says whose the files become.
+        val like = generateSequence(target) { it.parentFile }.first { it.isDirectory }
+        val stat = Os.stat(like.path)
+        val label = Device.run("stat", "-c", "%C", like.path).second.trim()
+        target.mkdirs()
+        Out.line("Restoring ${shown(source)} from ${snapshot.date} into ${shown(target.path)}")
+        val (status, _) = inView("exec restic restore ${quote("${snapshot.id}:$source")} --target ${quote(target.path)}")
+        // An SD card's file system has no owners or labels; the phone's storage has.
+        if (target.path.startsWith("/data/media/")) {
+            Device.run("chown", "-R", "${stat.st_uid}:${stat.st_gid}", target.path)
+            if (label.startsWith("u:")) Device.run("chcon", "-R", label, target.path)
+        }
+        scan(shown(target.path))
+        if (status != 0) {
+            Out.line("✘ Could not restore ${shown(source)} (restic exit $status)")
+            return@locked 1
+        }
+        Out.line("✔ Restored ${shown(source)} from ${snapshot.date}" + (to?.let { " into $it" } ?: ""))
+        0
+    }
+
+    /** Tells Android's media store about the files in [folder] (its /storage path), so galleries and players see them. */
+    private fun scan(folder: String) {
+        if (!folder.startsWith("/storage/")) return
+        val uri = "file://" + java.net.URI(null, null, folder, null).rawPath
+        Device.run("am", "broadcast", "-f", "0x01000000", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", uri)
+    }
+
+    /** The parts [snapshot] of [id] has: as its tags say, or for one made before they were tagged, as restic lists its folder. */
+    fun partsOf(id: String, snapshot: Snapshot): List<String> = snapshot.parts ?: run {
+        val (status, out) = restic("ls", "--json", snapshot.id, "/backup/$id", say = {})
+        if (status != 0) throw Stop("the backup ${snapshot.shortId} of $id cannot be read (restic exit $status)")
+        val prefix = "/backup/$id/"
+        out.lineSequence().mapNotNull { runCatching { JSONObject(it).optString("path") }.getOrNull() }
+            .filter { it.startsWith(prefix) && '/' !in it.removePrefix(prefix) }.map { it.removePrefix(prefix) }
+            .filter { it in PARTS }.distinct().sortedBy { PARTS.indexOf(it) }.toList()
+    }
+
+    /** The parts of one backup of [id], for the app's restore. */
+    fun partsJson(id: String, snapshotId: String): JSONObject {
+        val snapshot = snapshots(id).firstOrNull { !it.warm && it.id.startsWith(snapshotId) } ?: throw Stop("$id has no backup $snapshotId (seraph-backup list $id)")
+        return JSONObject().put("parts", JSONArray(partsOf(id, snapshot)))
+    }
+
+    private fun checkParts(parts: List<String>, allowed: List<String>) {
+        val wrong = parts.filter { it !in allowed }
+        if (parts.isEmpty() || wrong.isNotEmpty()) throw Stop("parts: ${wrong.joinToString(", ").ifEmpty { "none named" }}: name some of ${allowed.joinToString(", ")}")
     }
 
     /** seraph-backup list: the backups, of one app or folder or all. */
     fun list(what: String?): Int {
-        val all = snapshots().filter { !it.warm }
-        val shown = if (what == null) all else all.filter { it.app == what || real(what) in it.paths }
-        if (shown.isEmpty()) {
+        val found = listed(what)
+        if (found.isEmpty()) {
             Out.line("No backups${what?.let { " of $it" } ?: ""} in $repository")
             return 0
         }
-        for (s in shown) {
-            val name = s.app?.let { "$it (version ${s.versionCode ?: "?"})" } ?: s.paths.joinToString(", ")
+        for (s in found) {
+            val version = listOfNotNull(s.versionName, s.versionCode?.let { "($it)" }).joinToString(" ").ifEmpty { "?" }
+            val name = s.app?.let { "$it, version $version" + (s.parts?.let { parts -> ": ${parts.joinToString(", ")}" } ?: "") }
+                ?: s.paths.joinToString(", ") { shown(it) }
             Out.line("${s.shortId}  ${s.date}  $name")
         }
         return 0
+    }
+
+    /** The same as [list], for the app's Backups tab. */
+    fun listJson(what: String?): JSONObject = JSONObject().put("configured", true).put("repository", repository).put(
+        "snapshots",
+        JSONArray(listed(what).map { s ->
+            JSONObject().put("id", s.id).put("short", s.shortId).put("time", s.time).put("app", s.app)
+                .put("versionCode", s.versionCode).put("versionName", s.versionName).put("parts", s.parts?.let { JSONArray(it) })
+                .put("folder", if (s.app == null) s.paths.firstOrNull()?.let { shown(it) } else null)
+        }),
+    )
+
+    private fun listed(what: String?): List<Snapshot> {
+        val all = snapshots().filter { !it.warm }
+        return if (what == null) all else all.filter { it.app == what || real(what.trimEnd('/')) in it.paths }
     }
 
     /** seraph-backup restic: restic itself, with the repository and its password. */
@@ -613,6 +926,8 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
 
     private fun folderState(): JSONObject = loadState().optJSONObject("folders") ?: JSONObject().also { loadState().put("folders", it) }
 
+    private fun folderSizes(): JSONObject = loadState().optJSONObject("folderSizes") ?: JSONObject().also { loadState().put("folderSizes", it) }
+
     private fun saveState() {
         dir.mkdirs()
         stateFile.writeText(loadState().toString())
@@ -637,9 +952,17 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
     private fun count(n: Int, what: String) = if (n == 1) "1 $what" else "$n ${what}s"
 
     companion object {
+        /** An app's parts, as a backup has them: its APKs, then its data. */
+        private val PARTS = listOf("apk", "data", "deviceData", "storage", "media", "obb")
+        private val DATA_PARTS = PARTS - "apk"
         private const val APP_TAG = "seraph-app"
         private const val FOLDER_TAG = "seraph-folder"
         private const val WARM = "seraph-warm"
+        /** An app process's oom_score_adj from which Android keeps it cached: idle, off the screen, serving nothing. */
+        private const val CACHED_ADJ = 900
+        /** The exit status of a backup that cannot run now (its storage, ...), to try again later (EX_TEMPFAIL). */
+        const val TEMPORARY = 75
+        private const val HOUR = 3_600_000L
         private const val PRUNED = "#pruned"
         /** restic's exit status when there is no repository. */
         private const val NO_REPOSITORY = 10
@@ -650,12 +973,22 @@ class Backup private constructor(private val data: File, private val cfg: JSONOb
             .firstOrNull { File(it).canExecute() } ?: "/data/adb/magisk/busybox"
 
         /** The backups of [android] (a profile's android part), or null when it has none. */
-        fun of(data: File, android: JSONObject?): Backup? =
-            android?.optJSONObject("backup")?.let { Backup(data, it) }
+        fun of(data: File, android: JSONObject?): Backup? = android?.optJSONObject("backup")?.let { cfg ->
+            // A test profile (SERAPH_PROFILE) keeps its own record, as with ofLastBuild.
+            val test = System.getenv("SERAPH_PROFILE")?.takeIf { it.isNotEmpty() }?.let { File(it) }
+            if (test != null) Backup(data, cfg, File(test.absoluteFile.parentFile, "backup-state")) else Backup(data, cfg)
+        }
 
-        /** The backups of the last build. */
-        fun ofLastBuild(data: File): Backup? =
-            of(data, runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull())
+        /**
+         * The backups of the last build; or, for one command (tests), of the profile SERAPH_PROFILE names, which keeps
+         * what it backed up when in a folder next to it, so the phone's own backups go on as they were.
+         */
+        fun ofLastBuild(data: File): Backup? {
+            val test = System.getenv("SERAPH_PROFILE")?.takeIf { it.isNotEmpty() }?.let { File(it) }
+            val android = runCatching { JSONObject((test ?: File(data, "profile.json")).readText()).optJSONObject("android") }.getOrNull()
+            val cfg = android?.optJSONObject("backup") ?: return null
+            return if (test != null) Backup(data, cfg, File(test.absoluteFile.parentFile, "backup-state")) else Backup(data, cfg)
+        }
 
         private fun quote(text: String) = "'" + text.replace("'", "'\\''") + "'"
 

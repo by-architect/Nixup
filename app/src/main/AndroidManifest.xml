@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Notifications about installs and updates; the module also grants it when it installs the app. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -9,6 +10,10 @@
     <!-- The terminal's sessions keep running while it is closed, with a notification. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- The Backups tab lists the installed apps to back up by hand, with their names. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <!-- The apps that open a folder (the Files app, file managers), for Open config folder. -->
     <queries>
@@ -19,7 +24,9 @@
     </queries>
 
     <application
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.DeviceDefault.DayNight">
         <activity
             android:name=".MainActivity"
@@ -52,7 +59,7 @@
 
         <!-- What the module's engine (as root) tells: not exported, so no other app can. -->
         <receiver
-            android:name=".UpdatesReceiver"
+            android:name=".EventsReceiver"
             android:exported="false" />
 
         <service

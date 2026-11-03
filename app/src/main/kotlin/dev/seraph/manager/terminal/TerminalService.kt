@@ -109,7 +109,7 @@ class TerminalService : Service(), TerminalSessionClient {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_menu_manage)
+            .setSmallIcon(R.drawable.ic_stat_seraph)
             .setContentTitle(getString(R.string.terminal))
             .setContentText(resources.getQuantityString(R.plurals.terminal_sessions, sessions.size, sessions.size))
             .setOngoing(true)

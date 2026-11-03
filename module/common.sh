@@ -4,6 +4,8 @@ DATA=/data/adb/seraph
 PROFILE=$DATA/profile.json
 LOG=$DATA/apply.log
 BY=${BY:-manual}
+# Who started it, for the engine's events too.
+export SERAPH_BY=$BY
 
 mkdir -p "$DATA/tmp"
 # Keep the log small: past 64 KB the old one is set aside.
@@ -23,7 +25,105 @@ set_status() {
 fail() {
   log "FAILED: $*"
   set_status "✘ $* (log: $LOG)"
+  FAILED=$*
   exit 1
+}
+
+# What happened, for the app: the journal of events (its Logs tab) and its notifications (see
+# notify.sh): event <kind> <level> <title> [text] [key].
+event() { SERAPH_BY=$BY SERAPH_RUN=$RUN sh "$MODDIR/notify.sh" "$@"; }
+
+# A run: one build, update, backup, ... with a log of its own ($DATA/logs/<run>.log: all it says),
+# which its events point to. One that fails (fail, or a step that stops it) is told as "<title>
+# failed", unless it told how it ended itself; one that told nothing (nothing was due) leaves no log.
+# Arguments: its kind (as an event's) and title.
+LOGS=$DATA/logs
+RUN= RUN_LOG= RUN_KIND= RUN_TITLE= FAILED= AT_EXIT= RESUME_NAME=
+run_open() {
+  RUN_KIND=$1 RUN_TITLE=$2
+  run_priority
+  mkdir -p "$LOGS"
+  RUN=$(date +%Y%m%d-%H%M%S)-$1-$$
+  RUN_LOG=$LOGS/$RUN.log
+  # The engine's events belong to it too.
+  export SERAPH_RUN=$RUN SERAPH_KIND=$1 SERAPH_BY=$BY
+  # The newest 60 runs' logs stay.
+  ls -t "$LOGS"/*.log 2> /dev/null | tail -n +60 | while read -r old; do rm -f "$old"; done
+  : > "$RUN_LOG"
+  # Everything said from here on goes to its log too, through tee.
+  pipe=$DATA/tmp/run-$$.pipe
+  rm -f "$pipe"
+  if mkfifo "$pipe" 2> /dev/null; then
+    tee -a "$RUN_LOG" < "$pipe" &
+    exec > "$pipe" 2>&1
+    rm -f "$pipe"
+  fi
+  trap finish EXIT
+}
+
+# How the run ended, told: run_end <level> <title> [text].
+run_end() { event "$RUN_KIND" "$@"; }
+
+# Below the app on the screen, so the phone does not stutter while it runs: what the phone runs by
+# itself (job, boot, resume) on Android's background cores, at the lowest priority and the idle share
+# of the storage; what somebody waits for (the app, adb, ssh) on all cores but the biggest, at nice
+# 10. What the run starts (the engine, Nix, restic, git) keeps it.
+run_priority() {
+  case "$BY" in
+    job | boot | resume) set=background nice=19 io="-c 3" ;;
+    *) set=foreground nice=10 io="-c 2 -n 7" ;;
+  esac
+  for c in "/dev/cpuset/$set/cgroup.procs" "/dev/cpuset/$set/tasks"; do
+    [ -w "$c" ] && echo $$ > "$c" 2> /dev/null && break
+  done
+  [ -n "$BUSYBOX" ] && "$BUSYBOX" renice "$nice" -p $$ > /dev/null 2>&1
+  /system/bin/ionice $io -p $$ > /dev/null 2>&1
+  return 0
+}
+
+# A run that a restart (or a kill) breaks off starts again, from resume.sh: $PENDING/<name> says
+# how (when it began, how often it was picked up, the test profile it had (SERAPH_PROFILE, so a
+# test never goes on with the phone's own), then the script and its arguments, one a line),
+# until the run ends, however it ends. One that cannot run now (status 75: its storage is not
+# there, ...) stays, to run once it can. Arguments: its name, the script, and its arguments without
+# who started it (when it starts again, that is "resume").
+PENDING=$DATA/pending
+resumable() {
+  RESUME_NAME=$1
+  shift
+  mkdir -p "$PENDING"
+  { date +%s; echo "${SERAPH_RESUMED:-0}"; echo "$SERAPH_PROFILE"; printf '%s\n' "$@"; } > "$PENDING/$RESUME_NAME"
+}
+
+# A command for the end, whatever happens (a folder of secrets to remove).
+at_exit() {
+  AT_EXIT="$AT_EXIT
+$1"
+  trap finish EXIT
+}
+
+finish() {
+  status=$?
+  eval "$AT_EXIT"
+  if [ -n "$RESUME_NAME" ]; then
+    if [ "$status" = 75 ]; then
+      # Waiting is no try: its count goes back.
+      [ -n "$SERAPH_RESUMED" ] && sed -i "2s/.*/$((SERAPH_RESUMED - 1))/" "$PENDING/$RESUME_NAME"
+    else
+      rm -f "$PENDING/$RESUME_NAME"
+    fi
+  fi
+  [ -n "$RUN" ] || return 0
+  told=$(grep -F "\"run\":\"$RUN\"" "$DATA/events" 2> /dev/null | grep -v '"level":"start"')
+  # Why it stopped: fail's reason, else the last one its log has (the engine's ✘, a step's FAILED).
+  why=${FAILED:-$(grep -E '^(✘|FAILED: )' "$RUN_LOG" 2> /dev/null | tail -n 1 | sed 's/^✘ *//; s/^FAILED: //')}
+  if [ "$status" = 75 ] && [ -z "$told" ]; then
+    run_end warn "$RUN_TITLE waits" "${why:-it cannot run now}; it starts again once it can"
+  elif [ "$status" != 0 ] && [ -z "$told" ]; then
+    run_end error "$RUN_TITLE failed" "${why:-it stopped (status $status)}"
+  elif [ -z "$told" ] && ! grep -qF "\"run\":\"$RUN\"" "$DATA/events" 2> /dev/null; then
+    rm -f "$RUN_LOG"
+  fi
 }
 
 # Each setting's value from before the module first changed it, given back by
@@ -67,7 +167,8 @@ readable_path() {
   return 1
 }
 
-# The engine, from the app's APK, run as root; what it says is shown and logged.
+# The engine, from the app's APK, run as root; what it says is shown and logged (and goes to the
+# run's log with the rest of what the script says).
 engine() {
   { CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.seraph.manager.engine.Main "$@" 2>&1
     echo $? > "$DATA/tmp/engine.status"; } | tee -a "$LOG"
@@ -100,10 +201,12 @@ new_generation() {
   if [ "$last" -gt 0 ] && [ -z "$(diff -r "$generations/new" "$generations/$last" 2>&1)" ]; then
     rm -rf "$generations/new"
     log "Generation $last (nothing changed)"
+    GENERATION_TOLD="Built: generation $last, nothing changed"
   else
     mv "$generations/new" "$generations/$((last + 1))"
     echo "$((last + 1))" > "$generations/last"
     log "Generation $((last + 1))"
+    GENERATION_TOLD="Built generation $((last + 1))"
   fi
 }
 
@@ -189,6 +292,7 @@ switch_to() {
   log "== Apps"
   sent=
   [ -n "$SECRETS_IN" ] && sent="--secrets=$SECRETS_IN"
+  rm -f "$DATA/tmp/summary"
   case "$2" in
     dry) engine apply "$1" --dry-run $sent ;;
     update) engine apply "$1" --force $sent ;;
@@ -199,9 +303,12 @@ switch_to() {
     2) rm -f "$1"; fail "a check failed (see above); nothing was changed" ;;
     *) rm -f "$1"; fail "stopped partway (see above); build again to carry on" ;;
   esac
+  # What the engine changed (or would change), in one line, for the run's end (see Apply.kt).
+  summary=$(cat "$DATA/tmp/summary" 2> /dev/null)
   if [ "$2" = dry ]; then
     rm -f "$1"
     log "Dry run: nothing was changed"
+    run_end info "Dry run: nothing was changed" "${summary:-It would change nothing}"
     return 0
   fi
   log "== Activating"
@@ -209,6 +316,7 @@ switch_to() {
   keep_packages
   sh "$MODDIR/apply.sh" "$BY" || exit 1
   new_generation
+  run_end ok "$GENERATION_TOLD" "${summary:-Nothing changed}"
   # The app schedules its update check, now that the config may have changed.
   tell_app schedule &
 }
@@ -222,9 +330,30 @@ nix_tokens() {
   return 0
 }
 
-# Tells the app something through its receiver (as the engine does for its
-# notifications): "schedule" makes sure its 6-hourly update check is scheduled.
+# Tells the app something through its receiver (as notify.sh does for events): "schedule" makes
+# sure its update check and backup check are scheduled.
 tell_app() {
-  am broadcast --user current -f 0x20 -n dev.seraph.manager/.UpdatesReceiver \
-    -a dev.seraph.manager.action.UPDATES --es event "$1" < /dev/null > /dev/null 2>&1
+  am broadcast --user current -f 0x20 -n dev.seraph.manager/.EventsReceiver \
+    -a dev.seraph.manager.action.EVENT --es event "$1" < /dev/null > /dev/null 2>&1
+}
+
+# The phone's copy of nixpkgs, as a NixOS channel: nixos-unstable (or the one $DATA/channel names),
+# fetched the first time something needs it (a configuration.nix's Nix packages, git), and again
+# with update. It is kept in Seraph's store, as a root of it: NIXPKGS is its path there.
+NIXPKGS=
+channel() {
+  # (Names of its own: the scripts that call it have their own url and path.)
+  channel_url=$(cat "$DATA/channel" 2> /dev/null)
+  [ -n "$channel_url" ] || channel_url=https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz
+  channel_link=$DATA/channels/nixpkgs
+  if [ ! -d "$channel_link/" ] || [ "$1" = update ]; then
+    log "== nixpkgs ($channel_url)"
+    nix_etc > /dev/null || { log "Nix could not get its /etc (the network's DNS servers): is the phone online?"; return 1; }
+    channel_path=$(nix_run "$MODDIR/bin/nix" --store "$DATA/nix" eval --raw --impure --option tarball-ttl 0 \
+      --expr "builtins.fetchTarball \"$channel_url\"") || return 1
+    mkdir -p "$DATA/channels" "$DATA/nix/nix/var/nix/gcroots"
+    ln -sfn "$channel_path" "$DATA/nix/nix/var/nix/gcroots/seraph-channel"
+    ln -sfn "$DATA/nix$channel_path" "$channel_link"
+  fi
+  NIXPKGS=$(readlink -f "$channel_link")
 }

@@ -70,6 +70,10 @@
 #     settings.devices.laptop.id = "ABCDEFG-…";
 #     settings.folders.documents = { path = "/storage/emulated/0/Documents"; devices = [ "laptop" ]; };
 #   };
+#   services.snapclient = {                          Snapcast's client: a snapserver's stream on the
+#     enable = true;                                 phone's speaker or headphones, in time with the
+#     host = "192.168.1.10";                         other rooms (services.snapserver serves one,
+#   };                                               with NixOS's options)
 #
 #   systemd.services.web = {                         your own service, as on NixOS: programs from
 #     wantedBy = [ "multi-user.target" ];            Nix packages, which the phone fetches from
@@ -101,15 +105,17 @@
 #                                                    (no quotes): each build puts it on the phone,
 #                                                    readable by root alone, never in the profile
 #
-# Built on the phone (the app's Build), or on a PC and applied on the phone over adb or ssh, as
-# nixos-rebuild --target-host: nix run github:by-architect/Seraph -- switch --flake .#phone
+# Built on the phone (the app's Build; its Git clones a repository with this config, and pulls its
+# new commits), or on a PC and applied on the phone over adb or ssh, as nixos-rebuild
+# --target-host: nix run github:by-architect/Seraph -- switch --flake .#phone
 #
 # Nix packages come from nixos-unstable (a flake can give its own nixpkgs); the phone fetches them,
 # and builds nothing.
 #
 # Every option, with what it does: nix/options.nix, nix/system.nix, nix/lineage.nix,
 # nix/app.nix, nix/global.nix, nix/units.nix, nix/services.nix, nix/syncthing.nix,
-# nix/openssh.nix, nix/adb.nix, nix/backup.nix and nix/nixpkgs.nix in the project.
+# nix/snapcast.nix, nix/openssh.nix, nix/adb.nix, nix/backup.nix and nix/nixpkgs.nix in the
+# project.
 { config, lib, pkgs, ... }:
 {
   android.packages.fdroid = with pkgs.fdroid; [

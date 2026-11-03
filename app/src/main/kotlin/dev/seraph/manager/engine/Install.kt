@@ -152,7 +152,7 @@ class Installer(private val data: File) {
                         else -> "Installed ${apps(installed.size)}, updated ${apps(updated.size)}"
                     }
                     val text = (installed + updated).joinToString(", ").ifEmpty { "The new releases were not newer than the apps installed" }
-                    Notify.done(result, text, failed = false)
+                    Notify.installed(result, text, failed = false)
                     return 0
                 }
             }
@@ -161,7 +161,7 @@ class Installer(private val data: File) {
 
     private fun stoppedPartway(finished: Int, total: Int, error: String): Int {
         Out.line("Stopped after $finished of $total apps; again carries on from there (a broken-off download resumes).")
-        Notify.done("Stopped after $finished of ${apps(total)}", error, failed = true)
+        Notify.installed("Stopped after $finished of ${apps(total)}", error, failed = true)
         return 1
     }
 
