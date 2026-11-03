@@ -1,13 +1,15 @@
+# This phone's config as a flake, as /etc/nixos/flake.nix is for NixOS: Seraph's options come
+# from github:by-architect/Seraph, at the version flake.lock pins (a build with update moves
+# it to the newest). With this flake.nix picked in the app's Config, a build reads it;
+# configuration.nix is the config either way.
 {
-  description = "My phone, configured by Seraph";
+  description = "Logos, configured by Seraph";
 
   inputs.seraph.url = "github:by-architect/Seraph";
 
   outputs = { seraph, ... }: {
-    # One phone. More phones are more names: each is built as <this folder>#<name>, on the phone
-    # (the app's Config picks this flake.nix) or on a PC:
-    #   nix run github:by-architect/Seraph -- switch --flake .#phone
-    seraphConfigurations.phone = seraph.lib.seraphSystem {
+    # Named after the phone (its device name): with more phones here, each builds its own.
+    seraphConfigurations.Logos = seraph.lib.seraphSystem {
       modules = [ ./configuration.nix ];
     };
   };
