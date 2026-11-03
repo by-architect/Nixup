@@ -4,3 +4,4 @@ version=0.1.0
 versionCode=1
 author=neo
 description=Makes the phone match its configuration.nix, as NixOS does.
+updateJson=https://github.com/by-architect/Seraph/releases/latest/download/update.json

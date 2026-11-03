@@ -9,11 +9,21 @@
 #   auto             what the phone does every 6 hours: updates the apps of the
 #                    repositories whose android.settings.repo.<repo>.autoupdatePackages
 #                    is true, and only tells about the others in a notification
+#   self             looks for a newer Seraph (its module's update.json, as the Magisk
+#                    app does), which check and auto do too
+#   self-install     installs the newer Seraph, once it is checked (Seraph's module,
+#                    newer, its app signed with the installed app's key): from the next restart
 MODDIR=${0%/*}
 BY=${1:-manual}
 MODE=${2:-check}
 [ $# -ge 2 ] && shift 2
 . "$MODDIR/common.sh"
+
+# Seraph itself, which needs no build.
+case "$MODE" in
+  self) run_open update "Seraph's update check"; engine self-update; exit $? ;;
+  self-install) run_open update "Seraph's update"; event update start "Updating Seraph"; engine self-update --install; exit $? ;;
+esac
 
 [ -f "$PROFILE" ] || { log "No build yet: nothing to update"; exit 0; }
 # The engine tells what it found and did (see Updates.kt); a check that fails is told here.
@@ -34,4 +44,9 @@ case "$MODE" in
 esac
 status=$?
 [ "$MODE" != check ] && [ -f "$PROFILE" ] && new_generation
+# And Seraph itself; one that cannot be checked now (offline, no release yet) only says so.
+if [ "$MODE" != now ]; then
+  log "== Seraph"
+  engine self-update || log "Seraph's own update could not be checked (see above)"
+fi
 exit $status

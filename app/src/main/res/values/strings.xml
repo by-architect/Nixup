@@ -262,4 +262,11 @@
     <string name="free_space_message">Removes the Nix packages Seraph keeps that the last build does not use (older generations\' ones, a service turned off). Going back to an older generation fetches its packages again.</string>
     <string name="free_space">Free up space</string>
     <string name="freeing_space">Freeing up space…</string>
+    <!-- Seraph's own updates -->
+    <string name="seraph_update">Seraph %1$s is out (this phone has %2$s)</string>
+    <string name="seraph_install">Install</string>
+    <string name="seraph_install_title">Install Seraph %1$s?</string>
+    <string name="seraph_install_message">It is downloaded from Seraph\'s releases and checked first: Seraph\'s module, newer, with its app signed by the same key as the app on this phone. The phone uses it from its next restart.</string>
+    <string name="seraph_whats_new">What\'s new</string>
+    <string name="seraph_installing">Installing Seraph %1$s…</string>
 </resources>

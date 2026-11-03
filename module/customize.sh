@@ -36,8 +36,23 @@ ln -sf nix "$MODPATH/bin/nix-instantiate"
 
 # Streamed in, so the installer does not need to read the module's folder.
 ui_print "- Installing the app"
-pm install -r -S "$(stat -c %s "$MODPATH/app.apk")" < "$MODPATH/app.apk" > /dev/null \
-  || ui_print "! The app did not install: install app.apk from the module's folder by hand."
+install_app() { pm install -r -S "$(stat -c %s "$MODPATH/app.apk")" < "$MODPATH/app.apk" 2>&1; }
+said=$(install_app)
+case "$said" in
+  *Success*) ;;
+  *INSTALL_FAILED_UPDATE_INCOMPATIBLE* | *INSTALL_FAILED_VERSION_DOWNGRADE* | *"signatures do not match"*)
+    # The app there is signed with another key (a build of one's own, or a release after one), or
+    # is newer: it goes first. It keeps nothing of its own (Seraph's data is in /data/adb/seraph);
+    # the root solution asks once more to let it use root, as for any app installed anew.
+    ui_print "- The app there is signed with another key, or is newer: replacing it"
+    pm uninstall dev.seraph.manager < /dev/null > /dev/null 2>&1
+    said=$(install_app)
+    ui_print "- Seraph's app is a new app to the root solution now: allow it root again when it asks" ;;
+esac
+case "$said" in
+  *Success*) ;;
+  *) ui_print "! The app did not install ($said): install app.apk from the module's folder by hand." ;;
+esac
 # Its notifications say how installs and updates go.
 pm grant dev.seraph.manager android.permission.POST_NOTIFICATIONS > /dev/null 2>&1
 

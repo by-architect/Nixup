@@ -6,3 +6,9 @@ commit-changes.md
 /local.properties
 /terminal-emulator/build/
 /terminal-view/build/
+# Signing keys never go in the repository: they are in the project's secrets/ folder.
+*.jks
+*.keystore
+*.key
+*.p12
+key.properties

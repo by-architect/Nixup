@@ -1,0 +1,23 @@
+Seraph
+Copyright (C) 2026 neo (github.com/by-architect)
+
+Seraph is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License version 3, as published by the Free Software Foundation (see LICENSE). It
+comes with no warranty.
+
+Seraph contains, or its release zip carries, the following work of others, each under its own
+license:
+
+- terminal-emulator/ and terminal-view/: Termux's terminal emulator and its view, copied from
+  termux-app (https://github.com/termux/termux-app, commit 8629e63).
+  Apache License 2.0: terminal-emulator/LICENSE, terminal-view/LICENSE.
+
+- bin/nix in the Magisk module: Nix (https://github.com/NixOS/nix), as nixpkgs builds it
+  statically for aarch64-linux (nixStatic), unchanged. GNU Lesser General Public License 2.1:
+  licenses/LGPL-2.1.txt. Its version, and where its source is, are in the module's NOTICE.
+
+- nixpkgs/lib in the Magisk module: the library of nixpkgs (https://github.com/NixOS/nixpkgs),
+  unchanged. MIT License: nixpkgs/COPYING in the module.
+
+The Nix packages a config names (Tailscale, Syncthing, restic, ...) are not part of Seraph: the
+phone fetches them from cache.nixos.org, each under its own license.

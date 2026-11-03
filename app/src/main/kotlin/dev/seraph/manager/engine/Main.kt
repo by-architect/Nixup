@@ -34,6 +34,8 @@ import kotlin.system.exitProcess
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
  *                                 android.settings.repo.<repo>.autoupdatePackages is true)
+ *   self-update [--install]       looks for a newer Seraph (the module's update.json), or installs it once it is
+ *                                 checked (Seraph's module, newer, its app signed with the installed app's key)
  *   backup [--auto] [--parts=<parts>] [apps or folders...]
  *                                 backs up the last build's apps and folders (android.backup), all or the ones named,
  *                                 which may be any installed app or folder (with --auto: the ones that are due, as the
@@ -98,6 +100,7 @@ object Main {
                     .optJSONArray("storePaths")?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
                 "updates" -> Updates(data).check()
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
+                "self-update" -> SelfUpdate(data).let { if ("--install" in args) it.install() else it.check() }
                 "backup" -> backups().run(files, auto = "--auto" in args, parts = option(args, "parts")?.split(',')?.filter { it.isNotBlank() })
                 "backups" -> if ("--json" in args) json { Backup.ofLastBuild(data)?.listJson(files.firstOrNull()) } else backups().list(files.firstOrNull())
                 "backup-status" -> if ("--json" in args) json { Backup.ofLastBuild(data)?.statusJson() } else backups().status()
@@ -196,5 +199,5 @@ object Main {
     private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
 }

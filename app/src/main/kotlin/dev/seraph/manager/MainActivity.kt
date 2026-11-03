@@ -60,6 +60,9 @@ class MainActivity : Activity() {
     private lateinit var updatesList: LinearLayout
     private lateinit var updatesOutput: TextView
     private lateinit var updatesScroll: ScrollView
+    private lateinit var seraphUpdate: View
+    private lateinit var seraphUpdateText: TextView
+    private lateinit var seraphUpdateInstall: Button
     private var tab = 0
     private var currentSource: String? = null
     private var builtOn: String? = null
@@ -76,6 +79,9 @@ class MainActivity : Activity() {
         updatesList = findViewById(R.id.updates_list)
         updatesOutput = findViewById(R.id.updates_output)
         updatesScroll = findViewById(R.id.updates_scroll)
+        seraphUpdate = findViewById(R.id.seraph_update)
+        seraphUpdateText = findViewById(R.id.seraph_update_text)
+        seraphUpdateInstall = findViewById(R.id.seraph_update_install)
         tabs = listOf(
             findViewById<Button>(R.id.tab_build) to findViewById(R.id.build_pane),
             findViewById<Button>(R.id.tab_updates) to findViewById(R.id.updates_pane),
@@ -183,6 +189,7 @@ class MainActivity : Activity() {
         gitButtons.forEach { it.isEnabled = !on }
         checkUpdates.isEnabled = !on
         updateAll.isEnabled = !on
+        seraphUpdateInstall.isEnabled = !on
         for (i in 0 until updatesList.childCount) updatesList.getChildAt(i).findViewWithTag<Button>(UPDATE_BUTTON)?.isEnabled = !on
         backups.setRunning(on)
         services.setRunning(on)
@@ -577,9 +584,45 @@ class MainActivity : Activity() {
         runner.run(Root.MODULE + "sh \$d/update.sh app now $apps 2>&1", getString(R.string.updating), updatesOutput, updatesScroll) { loadUpdates() }
     }
 
-    /** The last check's result (updates.json, kept by the module), read as root. */
+    /** The last check's results (updates.json, and seraph-update.json for Seraph itself, kept by the module), read as root. */
     private fun loadUpdates() {
-        runner.read("cat /data/adb/seraph/updates.json 2>/dev/null") { _, said -> showUpdates(said) }
+        runner.read("cat /data/adb/seraph/updates.json 2>/dev/null; echo; echo $SPLIT; cat /data/adb/seraph/seraph-update.json 2>/dev/null") { _, said ->
+            showUpdates(said.substringBefore(SPLIT).trim())
+            showSeraphUpdate(said.substringAfter(SPLIT, "").trim())
+        }
+    }
+
+    /** A newer Seraph, with its Install button: asked first, and installed with the module's update.sh (self-install). */
+    private fun showSeraphUpdate(saved: String) {
+        val json = runCatching { JSONObject(saved) }.getOrNull()
+        val latest = json?.optJSONObject("latest")
+        if (json == null || latest == null || !json.optBoolean("newer")) {
+            seraphUpdate.visibility = View.GONE
+            return
+        }
+        val name = latest.optString("version")
+        seraphUpdateText.text = getString(R.string.seraph_update, name, json.optString("version"))
+        seraphUpdate.visibility = View.VISIBLE
+        seraphUpdateInstall.isEnabled = !runner.running
+        seraphUpdateInstall.setOnClickListener {
+            val dialog = AlertDialog.Builder(this)
+                .setTitle(getString(R.string.seraph_install_title, name))
+                .setMessage(R.string.seraph_install_message)
+                .setPositiveButton(R.string.seraph_install) { _, _ ->
+                    runner.run(Root.MODULE + "sh \$d/update.sh app self-install 2>&1", getString(R.string.seraph_installing, name), updatesOutput, updatesScroll) { loadUpdates() }
+                }
+                .setNegativeButton(R.string.cancel, null)
+            latest.optString("changelog").takeIf { it.startsWith("https://") }?.let { url ->
+                dialog.setNeutralButton(R.string.seraph_whats_new) { _, _ ->
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    } catch (e: ActivityNotFoundException) {
+                        toast(url)
+                    }
+                }
+            }
+            dialog.show()
+        }
     }
 
     private fun showUpdates(saved: String) {
@@ -680,6 +723,8 @@ class MainActivity : Activity() {
         private const val NEW_CONFIG = 2
         private const val PICK_FOLDER = 3
         private const val SOURCE = "https://github.com/by-architect/Seraph"
+        /** Between the two files loadUpdates reads. */
+        private const val SPLIT = "--seraph-update--"
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
 
         /** Each generation, newest first: its number, when it was made, what from and on which PC; and the current one. */
