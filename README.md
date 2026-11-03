@@ -376,6 +376,7 @@ Interrupted: a build cut off by alf once the phone is unlocked andonline. If it'
 Where things live: everything is in /data/adb/seraph: generations, the profile in use, logs and Nix's store. Your config is never flake.lock when you upgrade it.
 
 ## Install And Setup
+WARNING: This project is still in development. Please backup everything. I am not responsible of any data lose experience.
 
 Install
 1. Root the phone with Magisk, KernelSU or APatch. It needs Android 11 or newer, 64-bit ARM.
@@ -383,6 +384,10 @@ Install
 3. Magisk → Modules → Install from storage → pick the zip.
 4. Restart the phone.
 5. Open Seraph, allow root, allow notifications.
+
+Editing config
+You can use template [[https://github.com/by-architect/Seraph/tree/main/templates/default]] for all options, or you can use the command `nix flake init -t github:by-architect/Seraph` directly.
+Edit it on pc or phone. Then use setup instructions following:
 
 Set up on the phone
 1. Build tab → New, which writes a starter configuration.nix; or Pick file, or Git for your repository.
@@ -402,6 +407,7 @@ adb shell su -c "echo /storage/emulated/0/Seraph/configuration.nix > /data/adb/s
 adb shell su -c "sh /data/adb/modules/seraph/build.sh adb"         # add: dry, update
 4. Over ssh instead: seraph-rebuild switch --flake .#phone --target-host phone.
 
+Optional (Good To Know)
 Seraph's commands over adb (as root):
 adb shell su -c seraph-shell                      # root shell with your Nix packages
 adb shell su -c "seraph-backup status"            # backups: list, status, now, restore, restic
@@ -410,3 +416,9 @@ adb shell su -c "sh /data/adb/modules/seraph/units.sh adb list"       # services
 adb shell su -c "sh /data/adb/modules/seraph/update.sh adb check"     # app updates: check, now
 adb shell su -c "tail -n 50 /data/adb/seraph/apply.log"               # the log
 seraph-shell and seraph-backup work after the first restart with the module installed.
+
+## Uninstall
+Uninstalling will revert changes before module installation except backup data and apps those are not installed by nix. (WARNING: Apps which installed with nix will uninstall).
+1. Disable module in magisk (Uninstall is not enabled until disable and reboot)
+2. Reboot
+3. Remove module in magisk
