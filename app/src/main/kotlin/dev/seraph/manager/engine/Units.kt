@@ -52,9 +52,13 @@ class Units(private val data: File) {
         leaving = had.keys.filter { it !in wanted }
         // Changed: its unit, or the scripts the engine makes of it (as NixOS restarts a unit whose unit file changed).
         // Or a secret file it reads (a new auth key): the unit is the same, what it reads is not.
+        // Or Seraph's view itself (a newer Seraph's, with another /home, ...): a unit running in the one before starts
+        // again in the new one (a oneshot that ran is left).
+        val viewChanged = view.isFile && runCatching { view.readText() }.getOrNull() != viewText()
         val changed = wanted.keys.filter { name ->
             had[name]?.let { it.toString() != wanted.getValue(name).toString() || !written(name, wanted.getValue(name)) } == true ||
-                (had[name] != null && reads(wanted.getValue(name), secrets))
+                (had[name] != null && reads(wanted.getValue(name), secrets)) ||
+                (viewChanged && had[name] != null && !oneshot(wanted.getValue(name)) && running(name))
         }
         val start = mutableListOf<String>()
         for (name in active) {
@@ -493,9 +497,11 @@ class Units(private val data: File) {
         ?: throw Stop("there is no busybox (Magisk's or KernelSU's) to run the services with", 1)
 
     /** The view alone (see VIEW), for what runs in it without a build (backups). */
+    private fun viewText() = VIEW.replace("@BUSYBOX@", busybox()).replace("@DATA@", data.path)
+
     fun writeView() {
         dir.mkdirs()
-        view.writeText(VIEW.replace("@BUSYBOX@", busybox()).replace("@DATA@", data.path))
+        view.writeText(viewText())
         background.writeText(BACKGROUND)
     }
 

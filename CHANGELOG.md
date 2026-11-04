@@ -14,6 +14,8 @@ section after the version, and its text is what the Magisk app shows as the upda
 - `terminal.font` and `terminal.colors`, as Nix-on-Droid has them: the app's terminal takes its font (a file
   of a Nix package) and colors from the config each time it opens.
 - Services get Android's time zone, so the dates their programs write are the phone's local time.
+- A newer Seraph whose services' view changed starts the running services again in the new one (sshd saw
+  no /home until it did).
 - Apps from Google Play: `android.packages.playstore = [ "com.whatsapp" ];` installs and updates
   them as Aurora Store would download them, with the split APKs made for the phone; no Play Store
   or GApps needed. A Google account signs in once in the app (⋮ → Google Play account), which then
