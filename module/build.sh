@@ -136,11 +136,11 @@ case "$WHERE" in
         DIR=${file%/*}
         if CLONE=$(clone_of "$DIR"); then
           # A clone the app made (git.sh): built as Nix builds a flake in a git repository, from
-          # the files git tracks (with their changes), and its submodules.
+          # the files git tracks (with their changes), and its submodules when they were cloned too.
           sub=${DIR#"$CLONE"}
           sub=${sub#/}
           query=
-          [ -f "$CLONE/.gitmodules" ] && query=submodules=1
+          [ -f "$CLONE/.gitmodules" ] && grep -qx 'submodules=1' "$DATA/git/clone" 2> /dev/null && query=submodules=1
           [ -n "$sub" ] && query="${query:+$query&}dir=$(address "$sub")"
           FLAKE="git+file://$(address "$CLONE")${query:+?$query}"
           # Nix writes no flake.lock into it: it would `git add` it, with a git it cannot run. Its

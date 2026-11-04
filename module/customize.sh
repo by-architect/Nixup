@@ -36,7 +36,9 @@ ln -sf nix "$MODPATH/bin/nix-instantiate"
 
 # Streamed in, so the installer does not need to read the module's folder.
 ui_print "- Installing the app"
-install_app() { pm install -r -S "$(stat -c %s "$MODPATH/app.apk")" < "$MODPATH/app.apk" 2>&1; }
+# For the phone's owner only: Magisk gives root to the owner's apps (its default), and an app clone,
+# work profile or other user would only be refused it, without asking.
+install_app() { pm install -r --user 0 -S "$(stat -c %s "$MODPATH/app.apk")" < "$MODPATH/app.apk" 2>&1; }
 said=$(install_app)
 case "$said" in
   *Success*) ;;
@@ -53,6 +55,13 @@ case "$said" in
   *Success*) ;;
   *) ui_print "! The app did not install ($said): install app.apk from the module's folder by hand." ;;
 esac
+# Out of the phone's other users (an app clone's, a work profile's), where an earlier install put it.
+for user in $(pm list users 2> /dev/null | sed -n 's/.*UserInfo{\([0-9]*\):.*/\1/p'); do
+  [ "$user" = 0 ] && continue
+  pm list packages --user "$user" dev.seraph.manager 2> /dev/null | grep -qx 'package:dev.seraph.manager' || continue
+  pm uninstall --user "$user" dev.seraph.manager < /dev/null > /dev/null 2>&1 \
+    && ui_print "- Removed the app from user $user (an app clone or work profile): root is the owner's"
+done
 # Its notifications say how installs and updates go.
 pm grant dev.seraph.manager android.permission.POST_NOTIFICATIONS > /dev/null 2>&1
 

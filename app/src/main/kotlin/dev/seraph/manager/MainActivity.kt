@@ -16,6 +16,7 @@ import android.view.MenuItem
 import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -124,8 +125,18 @@ class MainActivity : Activity() {
         padForSystemBars(findViewById(R.id.root))
 
         Notifications.channels(this)
-        UpdateJob.schedule(this)
-        BackupJob.schedule(this)
+        // Magisk gives root to the phone owner's apps: in an app clone, work profile or other user, su is refused
+        // without asking (and the jobs would only fail).
+        if (android.os.Process.myUid() / 100_000 != 0) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.not_owner_title)
+                .setMessage(R.string.not_owner_message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        } else {
+            UpdateJob.schedule(this)
+            BackupJob.schedule(this)
+        }
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
@@ -296,10 +307,14 @@ class MainActivity : Activity() {
         val dir = field(R.string.git_dir_hint, now?.optString("dir").orEmpty())
         val name = field(R.string.git_name_hint, now?.optString("name").orEmpty())
         val token = field(R.string.git_token_hint, secret = true)
+        val submodules = CheckBox(this).apply {
+            setText(R.string.git_submodules)
+            isChecked = now?.optBoolean("submodules") == true
+        }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad / 2, pad, 0)
-            listOf(repository, branch, dir, name, token).forEach { addView(it) }
+            listOf(repository, branch, dir, name, token, submodules).forEach { addView(it) }
             addView(Ui.note(this@MainActivity, getString(R.string.git_note)))
         }
         AlertDialog.Builder(this)
@@ -307,20 +322,20 @@ class MainActivity : Activity() {
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton(R.string.git_clone) { _, _ ->
                 val values = listOf(repository, branch, dir, name).map { it.text.toString().trim() }
-                cloneRepository(values[0], values[1], values[2], values[3], token.text.toString().trim())
+                cloneRepository(values[0], values[1], values[2], values[3], token.text.toString().trim(), submodules.isChecked)
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }
 
-    private fun cloneRepository(url: String, branch: String, dir: String, name: String, token: String) {
+    private fun cloneRepository(url: String, branch: String, dir: String, name: String, token: String, submodules: Boolean) {
         if (!GIT_ADDRESS.matches(url) || listOf(branch, dir, name).any { !GIT_WORD.matches(it) } || (token.isNotEmpty() && !TOKEN.matches(token))) {
             return toast(getString(R.string.git_invalid))
         }
         val clone = {
             val args = listOf("clone", url) + listOfNotNull(
                 branch.takeIf { it.isNotEmpty() }?.let { "--branch=$it" }, dir.takeIf { it.isNotEmpty() }?.let { "--dir=$it" },
-                name.takeIf { it.isNotEmpty() }?.let { "--name=$it" },
+                name.takeIf { it.isNotEmpty() }?.let { "--name=$it" }, "--submodules".takeIf { submodules },
             )
             gitScript(args.joinToString(" ") { ConfigSource.quote(it) }, R.string.git_cloning, url)
         }

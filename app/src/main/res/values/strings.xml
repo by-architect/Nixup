@@ -45,6 +45,8 @@
     <string name="upgrade_message">The app lists and releases are fetched again, a flake\'s inputs go to their newest (its flake.lock is updated), and a configuration.nix alone gets the newest nixpkgs; then the config is built, as Build does.</string>
     <string name="done">✔ Done</string>
     <string name="failed">✘ Failed (exit %1$d)</string>
+    <string name="not_owner_title">Open Seraph in the main user</string>
+    <string name="not_owner_message">This copy of Seraph runs in an app clone, work profile or another user. Magisk gives root only to the phone owner\'s apps, so here it is refused without asking. Open Seraph from the main user\'s home screen (not the clone\'s icon). Reinstalling the module removes this copy.</string>
     <string name="no_root">✘ No root: the phone has no su (is Magisk installed?)</string>
     <string name="no_folder_app">No app here opens folders: install a file manager.</string>
 
@@ -237,6 +239,7 @@
     <string name="git_dir_hint">Folder of flake.nix (empty: top)</string>
     <string name="git_name_hint">Configuration (#name; empty: phone\'s)</string>
     <string name="git_token_hint">Token (private repositories)</string>
+    <string name="git_submodules">Clone its submodules too (private ones use the same token)</string>
     <string name="git_note">The repository: https://github.com/you/phone, github:you/phone or you/phone (GitHub), or any git address. It is cloned into Seraph\'s own folder (/data/adb/seraph/git); the terminal can change files there. A token is kept where only root reads it, as Nix\'s for the same site.</string>
     <string name="git_clone">Clone</string>
     <string name="git_invalid">Not a repository address: like https://github.com/you/phone or you/phone, with no spaces or quotes; the other fields take letters, digits and . _ / -.</string>

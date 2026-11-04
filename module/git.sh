@@ -3,12 +3,13 @@
 # build reads, as /etc/nixos is a clone on many NixOS machines; then brought up to date from the
 # repository (pull: its new commits merged with what was changed here), or cloned again. build.sh
 # builds a flake there as Nix builds one in a git repository: the files git tracks, with their
-# changes, and its submodules. Git is nixpkgs' (gitMinimal), fetched from cache.nixos.org into
+# changes, and its submodules when they were cloned too. Git is nixpkgs' (gitMinimal), fetched from cache.nixos.org into
 # Seraph's store the first time, and run where /nix exists (the services' view).
 # Runs as root. Arguments: who started it (app, shell, ...), then what to do:
-#   clone <address> [--branch=<branch>] [--dir=<folder in it>] [--name=<configuration>]
+#   clone <address> [--branch=<branch>] [--dir=<folder in it>] [--name=<configuration>] [--submodules]
 #                     clones it (and removes a clone made before), and makes its config the one the
-#                     build reads. The address: https://github.com/you/phone, github:you/phone,
+#                     build reads; --submodules: its submodules (the repositories in it) too, which
+#                     its pulls then bring up to date, and the build reads. The address: https://github.com/you/phone, github:you/phone,
 #                     you/phone (GitHub), gitlab:you/phone, or any git address
 #   pull              merges the repository's new commits (local changes are put aside, then back)
 #   reclone           clones the same repository again, from scratch (local changes go)
@@ -25,7 +26,7 @@ CLONES=$DATA/git
 STATE=$CLONES/clone
 GITROOT=$DATA/nix/nix/var/nix/gcroots/seraph-git
 
-# What the clone is (key=value lines: url, branch, dir, name, path, pulled).
+# What the clone is (key=value lines: url, branch, dir, name, submodules, path, pulled).
 value() { sed -n "s/^$1=//p" "$STATE" 2> /dev/null | head -n 1; }
 option() { for arg in $ARGS; do case "$arg" in "--$1="*) printf '%s' "${arg#--$1=}"; return 0 ;; esac; done; }
 
@@ -123,16 +124,16 @@ clone() {
   fresh=$CLONES/.new
   rm -rf "$fresh"
   mkdir -p "$CLONES"
-  log "Cloning $url${branch:+ ($branch)}"
-  git_run clone --filter=blob:none --recurse-submodules --also-filter-submodules ${branch:+--branch "$branch"} -- "$url" "$fresh" \
-    || { rm -rf "$fresh"; fail "$url could not be cloned (git says why above; a private repository needs its token in $DATA/secrets/nix-access-tokens)"; }
+  log "Cloning $url${branch:+ ($branch)}${submodules:+, with its submodules}"
+  git_run clone --filter=blob:none ${submodules:+--recurse-submodules --also-filter-submodules} ${branch:+--branch "$branch"} -- "$url" "$fresh" \
+    || { rm -rf "$fresh"; fail "$url could not be cloned (git says why above; a private repository, or submodule, needs its token in $DATA/secrets/nix-access-tokens)"; }
   src=$(config_in "$fresh" "$dir" "$cname") \
     || { rm -rf "$fresh"; fail "$url${dir:+ ($dir)} has no flake.nix${cname:+ to build #$cname from} or configuration.nix: say its folder"; }
   # Only one clone: the one before goes, with what was changed in it.
   for old in "$CLONES"/*; do [ -d "$old" ] && rm -rf "$old"; done
   mv "$fresh" "$CLONES/$name"
   src=$CLONES/$name${src#"$fresh"}
-  printf '%s\n' "url=$url" "branch=$branch" "dir=$dir" "name=$cname" "path=$CLONES/$name" "pulled=$(date +%s)" > "$STATE"
+  printf '%s\n' "url=$url" "branch=$branch" "dir=$dir" "name=$cname" "submodules=$submodules" "path=$CLONES/$name" "pulled=$(date +%s)" > "$STATE"
   printf '%s\n' "$src" > "$SOURCE"
   rm -f "$DATA/build-from"
   commit=$(git_run -C "$CLONES/$name" log -1 --format='%h %s' 2> /dev/null)
@@ -147,7 +148,8 @@ case "$MODE" in
     for arg; do case "$arg" in --*) ;; *) first=$arg; break ;; esac; done
     [ -n "$first" ] || fail "git.sh clone: which repository?"
     url=$(address_of "$first") || fail "$first: give a repository's address, like https://github.com/you/phone or github:you/phone"
-    branch=$(option branch) dir=$(option dir) cname=$(option name)
+    branch=$(option branch) dir=$(option dir) cname=$(option name) submodules=
+    case " $ARGS " in *" --submodules "*) submodules=1 ;; esac
     dir=${dir#/}
     dir=${dir%/}
     case "$dir" in *..*) fail "--dir: a folder inside the repository" ;; esac
@@ -156,7 +158,7 @@ case "$MODE" in
     git_ready || fail "git is not ready (see above); nothing was changed"
     clone ;;
   reclone)
-    url=$(value url) branch=$(value branch) dir=$(value dir) cname=$(value name)
+    url=$(value url) branch=$(value branch) dir=$(value dir) cname=$(value name) submodules=$(value submodules)
     [ -n "$url" ] || fail "there is no clone to make again: clone a repository first"
     run_open git "Reclone"
     event git start "Cloning ${url#https://} again"
@@ -170,13 +172,20 @@ case "$MODE" in
     git_ready || fail "git is not ready (see above); nothing was changed"
     before=$(git_run -C "$top" rev-parse HEAD)
     log "Pulling $url"
-    if ! git_run -C "$top" pull --no-rebase --autostash --no-edit --recurse-submodules; then
+    recurse=--recurse-submodules=no
+    [ "$(value submodules)" = 1 ] && recurse=--recurse-submodules
+    if ! git_run -C "$top" pull --no-rebase --autostash --no-edit "$recurse"; then
       # A merge that cannot be made goes back to how it was, with the local changes.
       git_run -C "$top" merge --abort > /dev/null 2>&1
       fail "the repository's new commits and the changes made here do not merge (git says where above): nothing was changed; Reclone takes the repository's as they are"
     fi
     after=$(git_run -C "$top" rev-parse HEAD)
     sed -i "s/^pulled=.*/pulled=$(date +%s)/" "$STATE"
+    # Submodules the new commits added (or moved): cloned, at the commits they name.
+    if [ "$(value submodules)" = 1 ] && [ -f "$top/.gitmodules" ]; then
+      git_run -C "$top" submodule update --init --recursive --filter=blob:none \
+        || fail "the submodules could not be brought up to date (git says why above; a private one needs its token)"
+    fi
     if [ "$before" = "$after" ]; then
       run_end info "Already up to date" "${url#https://}: no new commits"
     else
@@ -206,11 +215,11 @@ case "$MODE" in
       *" --json "*)
         esc() { printf '%s' "$1" | tr '\t\n\r' '   ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
         pulled=$(value pulled)
-        printf '{"clone":true,"url":"%s","branch":"%s","dir":"%s","name":"%s","path":"%s","commit":"%s","subject":"%s","time":%s,"changes":%s,"pulled":%s}\n' \
-          "$(esc "$(value url)")" "$(esc "${branch:-$(value branch)}")" "$(esc "$(value dir)")" "$(esc "$(value name)")" "$(esc "$top")" \
+        printf '{"clone":true,"url":"%s","branch":"%s","dir":"%s","name":"%s","submodules":%s,"path":"%s","commit":"%s","subject":"%s","time":%s,"changes":%s,"pulled":%s}\n' \
+          "$(esc "$(value url)")" "$(esc "${branch:-$(value branch)}")" "$(esc "$(value dir)")" "$(esc "$(value name)")" "$([ "$(value submodules)" = 1 ] && echo true || echo false)" "$(esc "$top")" \
           "$(esc "$commit")" "$(esc "$subject")" "${time:-0}" "${changes:-0}" "${pulled:-0}" ;;
       *)
-        echo "Clone of $(value url) in $top"
+        echo "Clone of $(value url) in $top$([ "$(value submodules)" = 1 ] && echo ', with its submodules')"
         echo "Branch ${branch:-$(value branch)}, commit $commit $subject"
         echo "${changes:-0} files changed here; pulled $(date -d "@$(value pulled)" '+%F %T' 2> /dev/null)" ;;
     esac ;;

@@ -4,6 +4,13 @@ What changed in each release of Seraph. The newest comes first. While a release 
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- Cloning a git repository has a "Clone its submodules too" box (off by default); pulls and builds
+  then include them, and a private submodule uses the same token.
+- The app is installed for the phone's owner only, and removed from app clones and work profiles,
+  where Magisk refuses root without asking; opened there, it says so.
+
 ## 0.1.0 (2026-11-03)
 
 The first public release.
