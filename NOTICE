@@ -12,6 +12,11 @@ license:
   termux-app (https://github.com/termux/termux-app, commit 8629e63).
   Apache License 2.0: terminal-emulator/LICENSE, terminal-view/LICENSE.
 
+- nix/terminal.nix: the terminal's options (terminal.font, terminal.colors) and their meaning, from
+  Nix-on-Droid's modules/terminal.nix (https://github.com/nix-community/nix-on-droid).
+  MIT License, Copyright (c) 2019-2020 Alexander Sosedkin and other contributors:
+  licenses/nix-on-droid-MIT.txt.
+
 - bin/nix in the Magisk module: Nix (https://github.com/NixOS/nix), as nixpkgs builds it
   statically for aarch64-linux (nixStatic), unchanged. GNU Lesser General Public License 2.1:
   licenses/LGPL-2.1.txt. Its version, and where its source is, are in the module's NOTICE.

@@ -56,11 +56,12 @@ in
   config.system.build = {
     # needsNixpkgs: whether the config uses Nix packages, which a configuration.nix alone gets from
     # the phone's copy of nixpkgs (fetched the first time one does). Asked without the packages
-    # themselves, which need it: whether a module sets environment.systemPackages, whether a
-    # unit is there, and whether there are backups (restic).
+    # themselves, which need it: whether a module sets environment.systemPackages or the
+    # terminal's font, whether a unit is there, and whether there are backups (restic).
     repos = {
       android = { inherit repos; };
       needsNixpkgs = options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
+        || options.terminal.font.highestPrio < (lib.mkOptionDefault null).priority
         || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { }
         || config.android.backup.repository != null;
     };
@@ -112,15 +113,18 @@ in
             # The view's users and groups (nix/users.nix), and what each session runs first.
             users = config.system.build.users;
             inherit (config.environment) extraInit;
+            # The app's terminal: its font and colors (nix/terminal.nix).
+            terminal = config.system.build.terminal;
             # adb's port and the computers it trusts (nix/adb.nix).
             adb = config.system.build.adb;
             # The secrets' names: the phone checks each is there, and removes one that left.
             secrets = lib.attrNames config.android.secrets;
             # The services (systemd.services, Seraph's own among them) as the engine runs them, and
-            # every store path the phone needs for them and environment.systemPackages: it fetches
-            # those from cache.nixos.org before the build changes anything.
+            # every store path the phone needs for them, environment.systemPackages and the
+            # terminal's font: it fetches those from cache.nixos.org before the build changes anything.
             units = config.system.build.units;
             storePaths = lib.unique (config.system.build.unitStorePaths ++ config.system.build.backupStorePaths
+              ++ config.system.build.terminalStorePaths
               ++ map (package: builtins.unsafeDiscardStringContext "${package}") (config.environment.systemPackages ++ shellPackages));
             # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
             # NixOS has them; none without Nix packages.

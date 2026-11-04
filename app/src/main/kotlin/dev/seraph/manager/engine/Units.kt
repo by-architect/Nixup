@@ -539,8 +539,9 @@ class Units(private val data: File) {
         /**
          * Runs a unit's script ($1) as root in Seraph's view of the phone: a root of its own, in a mount namespace of
          * its own, with Android's own folders as they are, /nix (Seraph's store), Seraph's /etc, /var and /run (the
-         * units' state, which stays) and a /tmp of its own. Each step execs the next, so the script's own process is
-         * the one started.
+         * units' state, which stays), /home (the normal users' homes, Seraph's users folder) and a /tmp of its own,
+         * and Android's time zone as TZ (its offset from UTC, "<+0300>-03:00": glibc does not read Android's zones).
+         * Each step execs the next, so the script's own process is the one started.
          */
         private val VIEW = """
             # Seraph's view of the phone, for its services (written by the engine; see Units.kt).
@@ -553,7 +554,7 @@ class Units(private val data: File) {
               "${'$'}b" mount -t tmpfs -o mode=755 seraph "${'$'}v"
               for e in /*; do
                 n=${'$'}{e#/}
-                case ${'$'}n in nix | etc | var | run | tmp) continue ;; esac
+                case ${'$'}n in nix | etc | var | run | home | tmp) continue ;; esac
                 if [ -L "${'$'}e" ]; then ln -s "${'$'}(readlink "${'$'}e")" "${'$'}v/${'$'}n"
                 elif [ -d "${'$'}e" ]; then mkdir -p "${'$'}v/${'$'}n"; "${'$'}b" mount --rbind "${'$'}e" "${'$'}v/${'$'}n"
                 elif [ -f "${'$'}e" ]; then : > "${'$'}v/${'$'}n"; "${'$'}b" mount --bind "${'$'}e" "${'$'}v/${'$'}n"
@@ -561,12 +562,21 @@ class Units(private val data: File) {
               done
               # /dev holds the view itself: its copy inside the view goes.
               "${'$'}b" umount -l "${'$'}v${'$'}v" 2> /dev/null || true
-              for d in nix:${'$'}data/nix/nix etc:${'$'}data/etc var:${'$'}data/var run:${'$'}data/run; do
+              for d in nix:${'$'}data/nix/nix etc:${'$'}data/etc var:${'$'}data/var run:${'$'}data/run home:${'$'}data/users; do
                 mkdir -p "${'$'}v/${'$'}{d%%:*}" "${'$'}{d#*:}"
                 "${'$'}b" mount --bind "${'$'}{d#*:}" "${'$'}v/${'$'}{d%%:*}"
               done
               mkdir -p "${'$'}v/tmp"
               "${'$'}b" mount -t tmpfs -o mode=1777 tmp "${'$'}v/tmp"
+              if [ -z "${'$'}TZ" ]; then
+                off=${'$'}(/system/bin/date +%z 2> /dev/null)
+                case ${'$'}off in
+                  [+-][0-9][0-9][0-9][0-9])
+                    hm=${'$'}{off#?}
+                    case ${'$'}off in +*) sign=- ;; *) sign=+ ;; esac
+                    export TZ="<${'$'}off>${'$'}sign${'$'}{hm%??}:${'$'}{hm#??}" ;;
+                esac
+              fi
               exec "${'$'}b" chroot "${'$'}v" /system/bin/sh "${'$'}script"
             ' @BUSYBOX@ @DATA@ "${'$'}1"
         """.trimIndent() + "\n"

@@ -1,7 +1,13 @@
 # The users of Seraph's view of the phone, as NixOS's users.users and users.groups: root, and users that log in over
 # SSH (services.openssh) with a shell of their own. They live in the view's /etc/passwd and /etc/group (written by the
-# engine, Etc.kt), not in Android: a user is a Linux uid there, so an Android app's own uid (like Termux's, u0_a355 =
-# 10355) makes a user that shares the app's files, its storage access and its su grant.
+# engine, Etc.kt), not in Android: a user is a Linux uid there, so an Android app's own uid makes a user that shares
+# the app's files, its storage access and its su grant. androidApp names the app and the engine looks its uid up on
+# the phone at each build (an app installed again gets another one): "dev.seraph.manager" makes a user of Seraph's own
+# app, which root solutions let use su once Seraph may, so the user needs no other app.
+#
+# A normal user's home is /home/<name>, as on NixOS: in the view (where its sessions and the services run) /home is
+# Seraph's own /data/adb/seraph/users, there from the start of the phone on, before it is first unlocked (an app's
+# own folders are locked until then).
 #
 # Android checks a process's groups for some of what it may do: network sockets need inet (3003), the shared storage
 # external_storage (1077) or sdcard_rw (1015). users.groups has those, with Android's numbers, for extraGroups.
@@ -21,8 +27,18 @@ let
         default = if name == "root" then 0 else null;
         example = 10355;
         description = ''
-          The user's id. Every user but root needs one: an Android app's own uid (`pm list packages -U` shows them;
-          u0_a355 is 10355) makes a user that shares that app's files and permissions.
+          The user's id. Every user but root needs one, or androidApp: an Android app's own uid (`pm list packages -U`
+          shows them; u0_a355 is 10355) makes a user that shares that app's files and permissions.
+        '';
+      };
+      androidApp = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "dev.seraph.manager";
+        description = ''
+          The Android app whose own uid the user has, looked up on the phone at each build, in place of uid (which
+          changes when the app is installed again). "dev.seraph.manager" is Seraph's own app: the user may use su as
+          Seraph may, and needs no other app.
         '';
       };
       isNormalUser = mkOption {
@@ -54,14 +70,19 @@ let
       };
       home = mkOption {
         type = types.str;
-        default = if name == "root" then "/data/adb/seraph/home" else "/var/empty";
+        default = if name == "root" then "/data/adb/seraph/home" else if config.isNormalUser then "/home/${name}" else "/var/empty";
+        defaultText = lib.literalExpression ''"/home/''${name}" for a normal user, "/var/empty" else (root's: /data/adb/seraph/home)'';
         example = "/data/data/com.termux/files/home";
-        description = "The user's home folder (root's: /data/adb/seraph/home).";
+        description = ''
+          The user's home folder: a normal user's is /home/<name>, Seraph's own (/data/adb/seraph/users/<name>), there
+          from the start of the phone on (root's: /data/adb/seraph/home).
+        '';
       };
       createHome = mkOption {
         type = types.bool;
-        default = false;
-        description = "Make the home folder, owned by the user, when it is not there.";
+        default = config.isNormalUser;
+        defaultText = lib.literalExpression "isNormalUser";
+        description = "Make the home folder, owned by the user, when it is not there (a normal user's is made, as on NixOS).";
       };
       openssh = {
         authorizedKeys = {
@@ -113,21 +134,26 @@ let
   users = config.users.users;
   groups = config.users.groups;
 
+  # A user's uid as /etc/passwd has it: an app's, as the engine fills it in on the phone (Etc.kt).
+  hasUid = user: user.uid != null || user.androidApp != null;
+  uidText = user: if user.androidApp != null then "@app:${user.androidApp}@" else toString user.uid;
+
   # A user's own group, when users.groups has none of that name: its uid as the gid.
-  ownGroups = lib.mapAttrs' (_: user: lib.nameValuePair user.group { gid = user.uid; members = [ ]; })
-    (lib.filterAttrs (_: user: user.uid != null && !(groups ? ${user.group})) users);
+  ownGroups = lib.mapAttrs' (_: user: lib.nameValuePair user.group { gid = uidText user; members = [ ]; })
+    (lib.filterAttrs (_: user: hasUid user && !(groups ? ${user.group})) users);
   allGroups = lib.mapAttrs (name: group: { inherit (group) gid members; }) groups // ownGroups;
   gidOf = name: allGroups.${name}.gid or null;
   members = name: lib.unique (allGroups.${name}.members
     ++ lib.attrNames (lib.filterAttrs (_: user: lib.elem name user.extraGroups) users));
 
   passwdLine = user: lib.concatStringsSep ":" [
-    user.name "x" (toString user.uid) (toString (gidOf user.group)) user.description user.home "/etc/seraph/login"
+    user.name "x" (uidText user) (toString (gidOf user.group)) user.description user.home "/etc/seraph/login"
   ];
   groupLine = name: group: "${name}:x:${toString group.gid}:${lib.concatStringsSep "," (members name)}";
 
   userList = lib.attrValues users;
-  missingUid = map (user: user.name) (lib.filter (user: user.uid == null) userList);
+  missingUid = map (user: user.name) (lib.filter (user: !hasUid user) userList);
+  bothUids = map (user: user.name) (lib.filter (user: user.uid != null && user.androidApp != null && user.name != "root") userList);
   unknownGroups = lib.concatMap (user: map (group: "${user.name}: ${group}")
     (lib.filter (group: !(allGroups ? ${group})) ([ user.group ] ++ user.extraGroups))) userList;
 in
@@ -169,18 +195,26 @@ in
 
     # The view's /etc/passwd and /etc/group (the engine writes them), and the homes to make.
     system.build.users = {
-      passwd = lib.concatMapStrings (user: passwdLine user + "\n") (lib.sortOn (user: user.uid) (lib.filter (user: user.uid != null) userList))
+      passwd = lib.concatMapStrings (user: passwdLine user + "\n")
+        (lib.sortOn (user: if user.uid != null then user.uid else 1000000) (lib.filter hasUid userList))
         + "sshd:x:74:74:sshd privilege separation:/var/empty:/system/bin/false\n";
       group = lib.concatStrings (lib.mapAttrsToList (name: group: groupLine name group + "\n")
         (lib.filterAttrs (_: group: group.gid != null) allGroups));
-      homes = map (user: { path = user.home; inherit (user) uid; gid = gidOf user.group; })
-        (lib.filter (user: user.createHome && user.uid != null) userList);
+      # An app's uid as text the engine fills in ("@app:<package>@"), else a number.
+      homes = map (user: { path = user.home; uid = uidText user; gid = toString (gidOf user.group); })
+        (lib.filter (user: user.createHome && hasUid user) userList);
+      # The users of apps, which must be on the phone (or installed by the build).
+      apps = map (user: { inherit (user) name; app = user.androidApp; }) (lib.filter (user: user.androidApp != null) userList);
     };
 
     assertions = [
       {
         assertion = missingUid == [ ];
-        message = "users.users: ${lib.concatStringsSep ", " missingUid} needs a uid (an Android app's own, like 10355 for u0_a355, shares that app's files).";
+        message = "users.users: ${lib.concatStringsSep ", " missingUid} needs a uid, or androidApp (an Android app's own uid: \"dev.seraph.manager\", Seraph's, may use su as Seraph may).";
+      }
+      {
+        assertion = bothUids == [ ];
+        message = "users.users: ${lib.concatStringsSep ", " bothUids} has both uid and androidApp: give one.";
       }
       {
         assertion = unknownGroups == [ ];

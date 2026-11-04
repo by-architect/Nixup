@@ -6,6 +6,14 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- `users.users.<name>.androidApp`: a user with the uid of an app, looked up on the phone at each build (an app
+  installed again gets another one). `androidApp = "dev.seraph.manager"` is Seraph's own: an SSH login that
+  may use su as Seraph may, with no other app (no Termux).
+- A normal user's home is `/home/<name>` (Seraph's own folder), made by the build and there from the phone's
+  start on, before it is first unlocked.
+- `terminal.font` and `terminal.colors`, as Nix-on-Droid has them: the app's terminal takes its font (a file
+  of a Nix package) and colors from the config each time it opens.
+- Services get Android's time zone, so the dates their programs write are the phone's local time.
 - Apps from Google Play: `android.packages.playstore = [ "com.whatsapp" ];` installs and updates
   them as Aurora Store would download them, with the split APKs made for the phone; no Play Store
   or GApps needed. A Google account signs in once in the app (⋮ → Google Play account), which then

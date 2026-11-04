@@ -138,6 +138,17 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         units.plan(android.optJSONObject("units"), problems, secrets.changing)
         val adb = Adb(data)
         adb.plan(android.optJSONObject("adb"), problems)
+        // The users of apps (users.users.<name>.androidApp) take their app's uid: the app is here, or this build installs it.
+        android.optJSONObject("users")?.optJSONArray("apps")?.let { list ->
+            val installing = toInstall.map { it.id }.toSet() - leaving
+            for (i in 0 until list.length()) {
+                val user = list.getJSONObject(i)
+                val app = user.getString("app")
+                if (app in leaving || (app !in installing && Device.uid(app) == null)) {
+                    problems += "users.users.${user.getString("name")}.androidApp: $app is not on the phone (nor installed by this build)"
+                }
+            }
+        }
         // The data of the apps it installs, and the apps backed up with their APK that are not here, from backups.
         val backup = Backup.of(data, android)
         backup?.planRestore(toInstall.associate { it.id to it.code }, ids.toSet() + debloated)

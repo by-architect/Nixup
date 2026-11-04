@@ -197,13 +197,23 @@ Programs from nixpkgs for the phone's shell, as NixOS's `environment.systemPacka
 ```nix
 { pkgs, ... }: {
   environment.systemPackages = with pkgs; [ htop rsync git vim python3 ];
+
+  # The terminal's look, with Nix-on-Droid's options:
+  terminal.font = "${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf";
+  terminal.colors = { background = "#000000"; foreground = "#FFFFFF"; cursor = "#FFFFFF"; };
+
+  # A user that logs in over SSH, with no other app needed (it can use su like Seraph):
+  users.users.niobe = { isNormalUser = true; androidApp = "dev.seraph.manager"; };
 }
 ```
 
 - Packages are downloaded from cache.nixos.org; nothing is compiled on the phone.
 - They are for the shell and services, not phone apps (apps come from repositories, above).
-- The **terminal** (the icon in Seraph's top bar) is a root shell with these packages. The same shell:
-  `su -c seraph-shell` from adb, or `ssh` with `services.openssh`.
+- The **terminal** (the icon in Seraph's top bar) is built into the app (no Termux needed): a root shell with
+  these packages. The same shell: `su -c seraph-shell` from adb, or `ssh` with `services.openssh`.
+- `terminal.font` must be a file from a Nix package; `terminal.colors` takes `background`, `foreground`,
+  `cursor` and `color0` to `color15`.
+- A normal user's home is `/home/<name>`, ready right after the phone starts.
 
 </details>
 
@@ -422,5 +432,5 @@ backups, and apps you installed yourself.
 
 ## License
 
-[GPL-3.0](LICENSE). Seraph includes Termux's terminal code (Apache 2.0), ships Nix (LGPL 2.1) and uses Aurora
-OSS's gplayapi (GPL-3.0) for Google Play; see [NOTICE](NOTICE).
+[GPL-3.0](LICENSE). Seraph includes Termux's terminal code (Apache 2.0) and Nix-on-Droid's terminal options
+(MIT), ships Nix (LGPL 2.1) and uses Aurora OSS's gplayapi (GPL-3.0) for Google Play; see [NOTICE](NOTICE).
