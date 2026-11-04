@@ -22,6 +22,9 @@ section after the version, and its text is what the Magisk app shows as the upda
   its own temporary profile.
 - Fixed: a flake with no `seraphConfigurations` now says so instead of failing with no reason.
 - Tailscale says when its auth key is refused, instead of an empty login link.
+- Fixed: a service runs again when a secret file it reads changes (a new Tailscale auth key, an
+  ssh host key); before, only a change to the service itself restarted it, so a new key waited
+  for a restart.
 
 ## 0.1.0 (2026-11-03)
 

@@ -37,7 +37,8 @@ class Units(private val data: File) {
     /** Whether the plan changes anything. */
     val changes get() = toStop.isNotEmpty() || toStart.isNotEmpty() || leaving.isNotEmpty() || legacy.exists()
 
-    fun plan(units: JSONObject?, problems: MutableList<String>) {
+    /** [secrets]: the files of the secrets the build changes; a unit that names one runs again, as with a changed unit. */
+    fun plan(units: JSONObject?, problems: MutableList<String>, secrets: List<String> = emptyList()) {
         wanted = units?.let { json -> json.keys().asSequence().associateWith { json.getJSONObject(it) } } ?: emptyMap()
         val had = applied()
         val active = active(wanted)
@@ -50,8 +51,10 @@ class Units(private val data: File) {
         }
         leaving = had.keys.filter { it !in wanted }
         // Changed: its unit, or the scripts the engine makes of it (as NixOS restarts a unit whose unit file changed).
+        // Or a secret file it reads (a new auth key): the unit is the same, what it reads is not.
         val changed = wanted.keys.filter { name ->
-            had[name]?.let { it.toString() != wanted.getValue(name).toString() || !written(name, wanted.getValue(name)) } == true
+            had[name]?.let { it.toString() != wanted.getValue(name).toString() || !written(name, wanted.getValue(name)) } == true ||
+                (had[name] != null && reads(wanted.getValue(name), secrets))
         }
         val start = mutableListOf<String>()
         for (name in active) {
@@ -70,6 +73,13 @@ class Units(private val data: File) {
         toStart = order(start, wanted)
         toStop = order((had.keys.filter { it in wanted && it !in active } + changed).filter { supervisorPid(it) != null }.distinct(), had).reversed()
         report(had, active, changed)
+    }
+
+    /** Whether [unit] names one of [files] (JSON writes / as \/). */
+    private fun reads(unit: JSONObject, files: List<String>): Boolean {
+        if (files.isEmpty()) return false
+        val text = unit.toString().replace("\\/", "/")
+        return files.any { text.contains(it) }
     }
 
     private fun report(had: Map<String, JSONObject>, active: Set<String>, changed: List<String>) {

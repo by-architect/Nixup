@@ -135,7 +135,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         val secrets = Secrets(data, incoming)
         secrets.plan(android.optJSONArray("secrets"), problems)
         val units = Units(data)
-        units.plan(android.optJSONObject("units"), problems)
+        units.plan(android.optJSONObject("units"), problems, secrets.changing)
         val adb = Adb(data)
         adb.plan(android.optJSONObject("adb"), problems)
         // The data of the apps it installs, and the apps backed up with their APK that are not here, from backups.

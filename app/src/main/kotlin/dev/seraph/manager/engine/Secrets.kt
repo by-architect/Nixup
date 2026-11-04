@@ -23,6 +23,9 @@ class Secrets(data: File, private val incoming: File?) {
     /** Whether the plan changes anything. */
     val changes get() = sending.isNotEmpty() || leaving.isNotEmpty()
 
+    /** The files of the secrets this build changes (new, changed or removed): the units that read them run again. */
+    val changing: List<String> get() = (sending + leaving).map { File(dir, it).path }
+
     fun plan(names: JSONArray?, problems: MutableList<String>) {
         wanted = names?.let { list -> (0 until list.length()).map { list.getString(it) } } ?: emptyList()
         val missing = wanted.filter { sent(it) == null && !File(dir, it).isFile }
