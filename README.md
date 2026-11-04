@@ -80,7 +80,7 @@ in once: Seraph app → ⋮ → **Google Play account** → **Sign in** (Google'
 token** gives the account's token, to copy or save to Downloads, for a config on a PC. Or sign in on a PC:
 
 ```sh
-nix run github:by-architect/Seraph#seraph-play-login     # opens Google's page, then saves ./google-play.token
+nix run github:by-architect/Seraph#seraph-play-login     # a sign-in window opens; then it saves ./google-play.token
 ```
 
 A build whose config lists apps from Google Play checks the account first: with none, or a token Google
