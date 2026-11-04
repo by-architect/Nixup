@@ -14,6 +14,8 @@
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+    <!-- Google's sign-in page, for the Google Play account (the engine, as root, reaches the network by itself). -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- The apps that open a folder (the Files app, file managers), for Open config folder. -->
     <queries>
@@ -46,6 +48,14 @@
             android:label="@string/terminal"
             android:launchMode="singleTask"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Google's sign-in page, for the account Google Play's apps come with. -->
+        <activity
+            android:name=".GoogleSignInActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode"
+            android:exported="false"
+            android:label="@string/google_sign_in_title"
             android:windowSoftInputMode="adjustResize" />
 
         <service

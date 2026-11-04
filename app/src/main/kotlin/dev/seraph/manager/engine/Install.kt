@@ -8,9 +8,9 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Installing apps, from F-Droid repositories and from releases, for builds and updates alike: the space check, then
- * the APKs downloaded one by one, each installed as soon as it is downloaded and checked while the next one
- * downloads, with notifications.
+ * Installing apps, from F-Droid repositories, from releases and from Google Play, for builds and updates alike: the
+ * space check, then the APKs downloaded one by one, each installed as soon as it is downloaded and checked while the
+ * next one downloads, with notifications.
  *
  * The apps it installed (not the ones that were on the phone before), from anywhere, are listed in owned: a build
  * removes them again, keeping their data, when they leave the config, and so does the module's removal (restore).
@@ -26,7 +26,7 @@ class Installer(private val data: File) {
      * [learn] remembers its version code.
      */
     class Step(
-        /** Where it comes from: a repository's name, or obtainium. */
+        /** Where it comes from: a repository's name, obtainium, or playstore. */
         val repo: String,
         val id: String,
         /** The app's name, for messages and notifications. */
@@ -49,10 +49,24 @@ class Installer(private val data: File) {
         val installers: List<String>,
         val fromRelease: Boolean = false,
         val learn: (Long) -> Unit = {},
+        /**
+         * The files of an app that comes in several (a base APK and its split APKs, as Google Play's), asked for when it
+         * is its turn, since where they are does not last; the base APK first. Null: the one APK at [url].
+         */
+        val parts: (() -> List<Part>)? = null,
+        /**
+         * A shared library one of the config's apps needs (as Chrome needs Trichrome), installed before it: Android
+         * lists it by its name and version, not as an app, and it is not the module's to remove.
+         */
+        val library: Boolean = false,
     )
 
+    /** One file of an app in several, with what it must be. */
+    class Part(val name: String, val url: String, val size: Long, val sha256: String?)
+
     private sealed class Ready {
-        class Apk(val number: Int, val step: Step, val file: File) : Ready()
+        /** An app's APKs, downloaded and checked: one, or a base APK and its splits. */
+        class Apk(val number: Int, val step: Step, val files: List<File>) : Ready()
         class Failed(val error: String) : Ready()
         object Done : Ready()
     }
@@ -100,19 +114,33 @@ class Installer(private val data: File) {
                 for ((i, step) in steps.withIndex()) {
                     if (stop.get()) return@Thread
                     val label = "[${i + 1}/$total]"
+                    val parts = step.parts?.invoke()
+                        ?: listOf(Part("${step.id}.apk", step.url, step.size, step.sha256))
+                    if (parts.isEmpty()) throw IllegalStateException("${step.listedBy} names no files for ${step.id} ${step.version}")
                     // An APK checked against its checksum before can wait in the cache; one without a checksum is fetched again.
-                    val file = File(cache, "${step.sha256 ?: Net.sha256(step.url.toByteArray())}.apk")
-                    if (step.sha256 == null) file.delete()
-                    if (!file.isFile) {
-                        Out.line("$label Downloading ${step.id} ${step.version} (${Out.size(step.size)})")
-                        Notify.progress(title, "Downloading ${step.name} ${step.version} (${Out.size(step.size)})", i, total)
-                        Net.fetch(step.url, file, step.size, step.sha256, step.listedBy, Out.progress(label, step.size))
+                    val files = parts.map { part ->
+                        File(cache, "${part.sha256 ?: Net.sha256(part.url.toByteArray())}.apk").also { if (part.sha256 == null) it.delete() }
+                    }
+                    if (files.any { !it.isFile }) {
+                        val size = if (parts.any { it.size < 0 }) -1 else parts.sumOf { it.size }
+                        val count = if (parts.size > 1) ", ${parts.size} files" else ""
+                        Out.line("$label Downloading ${step.id} ${step.version} (${Out.size(size)}$count)")
+                        Notify.progress(title, "Downloading ${step.name} ${step.version} (${Out.size(size)})", i, total)
+                        // One progress for all of an app's files: those done, and the one downloading.
+                        val progress = Out.progress(label, size)
+                        var done = 0L
+                        for ((part, file) in parts.zip(files)) {
+                            if (!file.isFile) Net.fetch(part.url, file, part.size, part.sha256, step.listedBy) { progress(done + it) }
+                            done += part.size
+                        }
                     }
                     Out.line(
-                        "$label ✔ Downloaded ${step.id}; " +
-                            if (step.sha256 != null) "its checksum matches ${step.listedBy}" else "nothing lists its checksum: its package and key are checked",
+                        "$label ✔ Downloaded ${step.id}; " + when {
+                            parts.all { it.sha256 != null } -> "${if (parts.size > 1) "their checksums match" else "its checksum matches"} ${step.listedBy}"
+                            else -> "nothing lists its checksum: its package and key are checked"
+                        },
                     )
-                    ready.put(Ready.Apk(i + 1, step, file))
+                    ready.put(Ready.Apk(i + 1, step, files))
                 }
                 ready.put(Ready.Done)
             } catch (e: Exception) {
@@ -129,7 +157,7 @@ class Installer(private val data: File) {
                 is Ready.Apk -> {
                     Notify.progress(title, "Installing ${item.step.name} ${item.step.version}", item.number - 1, total)
                     val outcome = install(item, total)
-                    item.file.delete()
+                    item.files.forEach { it.delete() }
                     when (outcome) {
                         is Outcome.Failed -> {
                             stop.set(true)
@@ -168,7 +196,8 @@ class Installer(private val data: File) {
     private fun install(item: Ready.Apk, total: Int): Outcome {
         val step = item.step
         val label = "[${item.number}/$total]"
-        val apk = Device.archive(item.file)
+        // The base APK says what the app is; its splits are checked by pm, which takes them only with its package and key.
+        val apk = Device.archive(item.files.first())
         if (apk == null) {
             // An F-Droid APK is known from the signed index (pm still holds an update to the installed app's key); a release's is not.
             if (step.fromRelease) return Outcome.Failed("cannot read the downloaded APK of ${step.id} here, so it cannot be checked: not installed")
@@ -191,7 +220,15 @@ class Installer(private val data: File) {
         }
         val updater = Device.firstInstalled(step.installers)
         Out.line("$label Installing ${step.id} ${step.version}" + (updater?.let { " (later updates by $it)" } ?: ""))
-        Device.install(item.file, updater)?.let { return Outcome.Failed("pm could not install ${step.id}: $it") }
+        val said = if (item.files.size == 1) Device.install(item.files.single(), updater) else Device.installAll(item.files, updater)
+        said?.let { return Outcome.Failed("pm could not install ${step.id}: $it") }
+        if (step.library) {
+            // The version the app needs it at, as Google Play names it (the one Android lists the library by).
+            val version = step.code ?: apk?.versionCode
+            if (version == null || !Device.hasLibrary(step.id, version)) return Outcome.Failed("the library ${step.id} ${step.version} is not on the phone after installing")
+            Out.line("$label ✔ Installed the library ${step.id} ${step.version}")
+            return Outcome.Installed
+        }
         val wanted = apk?.versionCode ?: step.code ?: return Outcome.Failed("the version code of ${step.id} is not known")
         val now = Device.versionCode(step.id)
         if (now != wanted) return Outcome.Failed("${step.id} is at version code $now after installing, not $wanted")

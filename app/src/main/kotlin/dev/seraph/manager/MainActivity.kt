@@ -28,8 +28,8 @@ import org.json.JSONObject
 import java.util.Locale
 
 /**
- * Five tabs, and a menu with the terminal (see [TerminalActivity]), the notifications' settings, freeing up space,
- * what the phone supports, and about.
+ * Five tabs, and a menu with the terminal (see [TerminalActivity]), the Google Play account (see [GoogleSignInActivity]),
+ * the notifications' settings, freeing up space, what the phone supports, and about.
  * Build: the config to build (see [ConfigSource]): a file picked wherever the user keeps it, a new one made from the
  * module's default, a git repository cloned onto the phone (pulled, cloned again: the module's git.sh), or a flake's
  * address typed in; built with the module's build.sh (as root), or only tried (a dry run), or built with everything at
@@ -216,6 +216,7 @@ class MainActivity : Activity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.menu_terminal -> startActivity(Intent(this, TerminalActivity::class.java))
+            R.id.menu_play_account -> playAccount()
             R.id.menu_notifications -> startActivity(
                 Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName),
             )
@@ -507,8 +508,9 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        val uri = data?.data
-        if (resultCode != RESULT_OK || uri == null) return
+        if (resultCode != RESULT_OK || data == null) return
+        if (requestCode == PLAY_SIGN_IN) return playSignedIn(data)
+        val uri = data.data ?: return
         when (requestCode) {
             PICK_FILE -> savePicked(uri)
             NEW_CONFIG -> writeNew(uri)
@@ -590,6 +592,56 @@ class MainActivity : Activity() {
     }
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+
+    // --- The Google Play account, which android.packages.playstore's apps come with (see GoogleSignInActivity).
+
+    /** Who is signed in to Google Play on the phone (the module keeps the account where root alone reads it), with Sign in and Sign out. */
+    private fun playAccount() {
+        runner.read("head -n 1 $PLAY_ACCOUNT 2>/dev/null") { exit, said ->
+            if (exit == null) return@read toast(getString(R.string.no_root))
+            val email = said.trim().takeIf { it.contains('@') }
+            val dialog = AlertDialog.Builder(this).setTitle(R.string.menu_play_account).setNegativeButton(R.string.close, null)
+            if (email == null) {
+                dialog.setMessage(R.string.play_account_none).setPositiveButton(R.string.play_sign_in) { _, _ -> signInToPlay() }
+            } else {
+                dialog.setMessage(getString(R.string.play_account_signed_in, email))
+                    .setPositiveButton(R.string.play_sign_in_other) { _, _ -> signInToPlay() }
+                    .setNeutralButton(R.string.play_sign_out) { _, _ -> signOutOfPlay(email) }
+            }
+            dialog.show()
+        }
+    }
+
+    private fun signInToPlay() = startForResult(Intent(this, GoogleSignInActivity::class.java), PLAY_SIGN_IN)
+
+    /** The sign-in page's token goes to the engine through its input (never in a command), which keeps the account's lasting one. */
+    private fun playSignedIn(data: Intent) {
+        val email = data.getStringExtra(GoogleSignInActivity.EXTRA_EMAIL).orEmpty()
+        val token = data.getStringExtra(GoogleSignInActivity.EXTRA_TOKEN) ?: return
+        val waiting = Toast.makeText(this, R.string.play_signing_in, Toast.LENGTH_LONG).apply { show() }
+        runner.read(Root.ENGINE + "playstore-login 2>&1", input = "$email\n$token\n") { exit, said ->
+            waiting.cancel()
+            val text = when (exit) {
+                0 -> Runner.lastLine(said).removePrefix("✔ ")
+                null -> getString(R.string.no_root)
+                else -> getString(R.string.play_sign_in_failed, Runner.lastLine(said))
+            }
+            AlertDialog.Builder(this).setTitle(R.string.menu_play_account).setMessage(text).setPositiveButton(R.string.close, null).show()
+        }
+    }
+
+    private fun signOutOfPlay(email: String) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.play_sign_out_title)
+            .setMessage(getString(R.string.play_sign_out_message, email))
+            .setPositiveButton(R.string.play_sign_out) { _, _ ->
+                runner.read(Root.ENGINE + "playstore-logout 2>&1") { exit, said ->
+                    toast(if (exit == null) getString(R.string.no_root) else Runner.lastLine(said).removePrefix("✔ "))
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
 
     // --- Updates.
 
@@ -737,6 +789,9 @@ class MainActivity : Activity() {
         private const val PICK_FILE = 1
         private const val NEW_CONFIG = 2
         private const val PICK_FOLDER = 3
+        private const val PLAY_SIGN_IN = 4
+        /** The Google Play account signed in on the phone: its email address, then its token (the engine's playstore-login writes it). */
+        private const val PLAY_ACCOUNT = "/data/adb/seraph/secrets/google-play"
         private const val SOURCE = "https://github.com/by-architect/Seraph"
         /** Between the two files loadUpdates reads. */
         private const val SPLIT = "--seraph-update--"

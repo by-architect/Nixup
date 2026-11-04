@@ -10,7 +10,8 @@ import kotlin.system.exitProcess
  * Commands:
  *   index [--force] <file>        brings the indexes of the repositories in <file> (android.repos) up to date
  *                                 (once a day, or now with --force), and when it is a profile, the releases of its
- *                                 apps from releases (android.packages.obtainium) too
+ *                                 apps from releases (android.packages.obtainium) and what Google Play has of its
+ *                                 apps from there (android.packages.playstore) too
  *   apply <profile> [--dry-run] [--force] [--secrets=<folder>]
  *                                 makes the apps, their settings, the debloat, the system settings, the secrets and the
  *                                 services match the profile (with --dry-run: only plans and checks; with --force, the
@@ -36,6 +37,11 @@ import kotlin.system.exitProcess
  *                                 android.settings.repo.<repo>.autoupdatePackages is true)
  *   self-update [--install]       looks for a newer Seraph (the module's update.json), or installs it once it is
  *                                 checked (Seraph's module, newer, its app signed with the installed app's key)
+ *   playstore-login               signs the phone in to Google Play with an account: reads its email address and the
+ *                                 oauth_token of Google's sign-in page, one a line (the app's Google Play account)
+ *   playstore-logout              signs it out again: Google Play's apps then come with no account
+ *   playstore <apps...> [--files] what Google Play has of the apps for this phone (version, size, libraries) and what a
+ *                                 build would do with each; with --files, where their files are now
  *   backup [--auto] [--parts=<parts>] [apps or folders...]
  *                                 backs up the last build's apps and folders (android.backup), all or the ones named,
  *                                 which may be any installed app or folder (with --auto: the ones that are due, as the
@@ -101,6 +107,9 @@ object Main {
                 "updates" -> Updates(data).check()
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
                 "self-update" -> SelfUpdate(data).let { if ("--install" in args) it.install() else it.check() }
+                "playstore-login" -> PlayStore.login(data, System.`in`)
+                "playstore-logout" -> PlayStore.logout(data)
+                "playstore" -> PlayStore.show(data, files, files = "--files" in args)
                 "backup" -> backups().run(files, auto = "--auto" in args, parts = option(args, "parts")?.split(',')?.filter { it.isNotBlank() })
                 "backups" -> if ("--json" in args) json { Backup.ofLastBuild(data)?.listJson(files.firstOrNull()) } else backups().list(files.firstOrNull())
                 "backup-status" -> if ("--json" in args) json { Backup.ofLastBuild(data)?.statusJson() } else backups().status()
@@ -140,11 +149,13 @@ object Main {
     }
 
     /**
-     * Each repository's index, one after another, then the releases of the apps from releases (a profile has them;
-     * the repositories a build evaluates first do not); one that cannot be had does not keep the others from coming.
+     * Each repository's index, one after another, then the releases of the apps from releases and what Google Play has
+     * of its apps (a profile has them; the repositories a build evaluates first do not); one that cannot be had does not
+     * keep the others from coming.
      */
     private fun index(file: File, force: Boolean): Int {
         val json = JSONObject(file.readText())
+        val android = json.optJSONObject("android")
         var failed = 0
         for (repo in FDroid.of(json, data).values) {
             try {
@@ -155,13 +166,19 @@ object Main {
             }
         }
         val releases = Releases(data)
-        for (app in json.optJSONObject("android")?.let { Releases.apps(it) } ?: emptyList()) {
+        for (app in android?.let { Releases.apps(it) } ?: emptyList()) {
             try {
                 releases.refresh(app, force)
             } catch (e: Exception) {
                 Out.line("✘ ${Releases.NAME}: ${app.id}: ${e.message}")
                 failed++
             }
+        }
+        try {
+            android?.let { PlayStore(data, it).refresh(PlayStore.apps(it), force) }
+        } catch (e: Exception) {
+            Out.line("✘ ${PlayStore.NAME}: ${e.message}")
+            failed++
         }
         return if (failed == 0) 0 else 1
     }
@@ -199,5 +216,5 @@ object Main {
     private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
 }

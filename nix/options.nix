@@ -102,16 +102,19 @@ let
   isReleasesApp = app: builtins.isAttrs app && !(app ? _id) && app ? url;
   idOf = app: if builtins.isString app then app else if app ? _id then app._id else app.id;
 
-  # Lists of android.packages that are not F-Droid repositories: apps from their releases, and pkgs,
-  # which is refused below with where Nix packages go (environment.systemPackages, as on NixOS).
-  builtinSources = [ "obtainium" "pkgs" ];
+  # Lists of android.packages that are not F-Droid repositories: apps from their releases, apps from
+  # Google Play (nix/playstore.nix), and pkgs, which is refused below with where Nix packages go
+  # (environment.systemPackages, as on NixOS).
+  builtinSources = [ "obtainium" "playstore" "pkgs" ];
 
   repos = config.android.repos;
   packages = config.android.packages;
   ids = lib.mapAttrs (_: map idOf) packages;
   allIds = lib.concatLists (lib.attrValues ids);
   unknownRepos = lib.filter (name: !(repos ? ${name}) && !(lib.elem name builtinSources)) (lib.attrNames packages)
-    ++ lib.filter (name: !(repos ? ${name}) && name != "obtainium") (lib.attrNames config.android.settings.repo);
+    ++ lib.filter (name: !(repos ? ${name}) && !(lib.elem name [ "obtainium" "playstore" ])) (lib.attrNames config.android.settings.repo);
+  # Google Play's apps go by their package names: an app from releases ({ id; url; }) is not one of them.
+  playstoreNotNames = map (app: app.id or "an attribute set") (lib.filter (app: builtins.isAttrs app && !(app ? _id)) (packages.playstore or [ ]));
   releasesApps = packages.obtainium or [ ];
   notReleasesApps = map idOf (lib.filter (app: !isReleasesApp app) releasesApps);
   misplacedReleasesApps = lib.concatLists (lib.mapAttrsToList (repo: list:
@@ -154,7 +157,7 @@ let
   check = assertion: message: { inherit assertion message; };
 in
 {
-  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./services.nix ./syncthing.nix ./snapcast.nix ./users.nix ./openssh.nix ./adb.nix ./backup.nix ./secrets.nix ./renamed.nix ./build.nix ];
+  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./services.nix ./syncthing.nix ./snapcast.nix ./users.nix ./openssh.nix ./adb.nix ./backup.nix ./playstore.nix ./secrets.nix ./renamed.nix ./build.nix ];
 
   options = {
     assertions = mkOption {
@@ -195,14 +198,17 @@ in
         {
           fdroid = with pkgs.fdroid; [ com.byarchitect.dejavu ];
           obtainium = [ { id = "dev.imranr.obtainium"; url = "https://github.com/ImranR98/Obtainium"; apkFilter = "^(?!.*fdroid)"; } ];
+          playstore = [ "com.whatsapp" ];
         }
       '';
       description = ''
         Apps installed from each repository (android.packages.<repo>): names from
         pkgs.<repo>, or package names as strings (a name with a Nix keyword in it,
         like "in.example.app", needs one). android.packages.obtainium takes apps from
-        their own releases instead, as Obtainium does: { id = …; url = …; }. An app can
-        come from one source only. An app that came with the phone is removed with
+        their own releases instead, as Obtainium does: { id = …; url = …; }; and
+        android.packages.playstore apps from Google Play, as Aurora Store does, by their
+        package names as strings (android.playstore has the account). An app can come
+        from one source only. An app that came with the phone is removed with
         android.apps.<app>.debloat = true. Nix packages (from nixpkgs) are
         environment.systemPackages, as on NixOS.
       '';
@@ -224,8 +230,9 @@ in
       default = { };
       description = ''
         Settings of each repository's apps, by the repository's name
-        (android.settings.repo.<repo>), and of the apps from their releases
-        (android.settings.repo.obtainium). The phone's own settings are the other groups of
+        (android.settings.repo.<repo>), of the apps from their releases
+        (android.settings.repo.obtainium) and of those from Google Play
+        (android.settings.repo.playstore). The phone's own settings are the other groups of
         android.settings (nix/system.nix, nix/lineage.nix).
       '';
     };
@@ -272,6 +279,8 @@ in
     (check (badReleaseUrls == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " badReleaseUrls} needs an https:// url of its repository, like https://github.com/<owner>/<repo>.")
     (check (badSigners == [ ]) "android.packages.obtainium: the signer of ${lib.concatStringsSep ", " badSigners} is not a SHA-256 (64 hex digits).")
     (check (lib.elem "obtainium" (lib.attrNames repos) == false) "android.repos.obtainium: that name is taken by android.packages.obtainium (apps from their own releases); name the repository otherwise.")
+    (check (lib.elem "playstore" (lib.attrNames repos) == false) "android.repos.playstore: that name is taken by android.packages.playstore (apps from Google Play); name the repository otherwise.")
+    (check (playstoreNotNames == [ ]) "android.packages.playstore: ${lib.concatStringsSep ", " playstoreNotNames}: Google Play's apps go by their package names, in quotes, like \"com.whatsapp\" (apps from releases go in android.packages.obtainium).")
     (check (lib.elem "pkgs" (lib.attrNames repos) == false) "android.repos.pkgs: that name is nixpkgs' own (pkgs.pkgs); name the repository otherwise.")
     (check (!(packages ? pkgs)) "android.packages.pkgs: Nix packages (from nixpkgs) go in environment.systemPackages, as on NixOS; they are not on the phone yet.")
     (check (badRepoNames == [ ]) "android.repos: ${lib.concatStringsSep ", " badRepoNames} is not a name like byarchitect (a letter, then letters and digits).")
