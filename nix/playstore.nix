@@ -4,11 +4,12 @@
 #   android.packages.playstore = [ "com.whatsapp" "org.telegram.messenger" ];
 #   android.playstore.account = "you@gmail.com";
 # The phone checks in with Google Play as itself (its Android, processor, screen, languages), so
-# Play gives it the split APKs made for it. With a Google account, the apps are that account's
-# downloads, and the paid apps it bought come too; with none, Play gives the free apps alone, as to
-# a phone signed in to no account. The account signs in once on the phone, on Google's own page in
-# the Seraph app (⋮ → Google Play account), which keeps its token where root alone reads it; or
-# tokenFile gives the token, so a phone needs no sign-in. The engine does the rest (PlayStore.kt).
+# Play gives it the split APKs made for it, as a Google account's downloads (the paid apps it bought
+# come too). The account signs in once on the phone, on Google's own page in the Seraph app (⋮ →
+# Google Play account), which keeps its token where root alone reads it; or tokenFile gives the token
+# (seraph-play-login makes one on a PC), so a phone needs no sign-in. A build that lists apps here
+# checks the account first: with none, or one whose token Google refuses, it stops before changing
+# anything and says to sign in. The engine does the rest (PlayStore.kt).
 { config, lib, ... }:
 let
   inherit (lib) mkOption types;
@@ -24,9 +25,9 @@ in
       description = ''
         The Google account the apps of android.packages.playstore are downloaded with, by its email
         address: signed in once on the phone (the Seraph app: ⋮ → Google Play account), or with its
-        tokenFile. null: the account signed in on the phone, if any; else none, which gets the free apps
-        alone. Better an account of its own for this: Google may block an account that downloads with an
-        unofficial client, as Aurora Store's own FAQ warns.
+        tokenFile. null: the account signed in on the phone (a build stops when there is none). Better an
+        account of its own for this: Google may block an account that downloads with an unofficial
+        client, as Aurora Store's own FAQ warns.
       '';
     };
 
@@ -37,8 +38,10 @@ in
       description = ''
         The account's token (an AAS token, aas_et/…) in a file: one from the config's folder (a path,
         without quotes), which each build puts on the phone readable by root alone, or the full path of one
-        on the phone. The phone then needs no sign-in. The token acts as the account itself: keep it out of
-        any repository others can read.
+        on the phone; or the token itself, as text from a file of secrets. The phone then needs no sign-in.
+        seraph-play-login makes one on a PC (nix run github:by-architect/Seraph#seraph-play-login), and the
+        Seraph app shows the one it signed in with (⋮ → Google Play account → Show token). The token acts
+        as the account itself: keep it out of any repository others can read.
       '';
     };
   };

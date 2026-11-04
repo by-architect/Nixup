@@ -29,6 +29,13 @@
         program = "${self}/rebuild/seraph-rebuild";
         meta.description = "Build a phone's Seraph config here and apply it on the phone";
       };
+      # A Google Play account's token for the config (android.playstore.tokenFile), signed in here:
+      # nix run github:by-architect/Seraph#seraph-play-login
+      seraph-play-login = {
+        type = "app";
+        program = "${self}/rebuild/seraph-play-login";
+        meta.description = "Sign in to Google Play here and get the account's token for a phone's Seraph config";
+      };
       default = seraph-rebuild;
     });
 

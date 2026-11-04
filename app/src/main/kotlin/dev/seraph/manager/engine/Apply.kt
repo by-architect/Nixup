@@ -79,7 +79,12 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         }
         if (fromPlay.isNotEmpty()) {
             val play = PlayStore(data, android)
-            try {
+            // The account first: without one Google takes, no app of the list can come.
+            val signIn = play.signInProblem()
+            if (signIn != null) {
+                problems += signIn
+                Notify.event("build", "error", "Sign in to Google Play", "Seraph app: ⋮ → Google Play account. $signIn")
+            } else try {
                 play.refresh(fromPlay, force)
                 for (id in fromPlay) {
                     when (val plan = play.plan(id, Device.installed(id))) {

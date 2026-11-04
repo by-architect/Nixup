@@ -64,16 +64,16 @@
     }
   ];
 
-  # Apps from Google Play, by package name in quotes, downloaded as Aurora Store does: with the
-  # Google account signed in on the phone (Seraph app: ⋮ → Google Play account), else with none
-  # (free apps only).
+  # Apps from Google Play, by package name in quotes, downloaded as Aurora Store does, with the
+  # Google account signed in on the phone (Seraph app: ⋮ → Google Play account): a build that lists
+  # some stops until one is. No Play Store or GApps needed.
   android.packages.playstore = [
     # "com.whatsapp"                              # WhatsApp: messenger
   ];
 
   android.playstore = {
     account = null;                               # "you@gmail.com": builds stop if another one is signed in
-    tokenFile = null;                             # ./google-play.token: its token, so no sign-in is needed (secret)
+    tokenFile = null;                             # ./google-play.token (seraph-play-login on a PC): no sign-in needed (secret)
   };
 
   # Updates of each source's apps: true installs them by itself (every 6 hours, on Wi-Fi), false

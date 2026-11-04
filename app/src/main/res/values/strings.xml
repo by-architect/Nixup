@@ -278,13 +278,21 @@
     <string name="play_offline">Google\'s sign-in page cannot load: this app has no internet. Either the phone is offline, or Network access is off for Seraph (App info, Mobile data and Wi-Fi, Network access). Turn it on, then come back here; once you are signed in it can go off again (the downloads do not need it).</string>
     <string name="play_page_failed">Google\'s sign-in page did not load (%1$s). Is the phone online, and Network access on for Seraph (App info, Mobile data and Wi-Fi)?</string>
     <string name="app_info">App info</string>
-    <string name="play_account_none">No account is signed in: the config\'s apps from Google Play (android.packages.playstore) come with none, which gets the free apps alone.\n\nSigned in, on Google\'s own page, they are that account\'s downloads, and the paid apps it bought come too. The phone keeps its token where root alone reads it. Better an account of its own for this: Google may block an account that downloads with an unofficial client.</string>
-    <string name="play_account_signed_in">Signed in as %1$s: the config\'s apps from Google Play (android.packages.playstore) are its downloads.\n\nSign out takes its token off the phone; Google\'s account page (Security, Your devices) can end its sign-in too.</string>
+    <string name="play_account_none">No account is signed in. A build whose config lists apps from Google Play (android.packages.playstore) stops until one is.\n\nSign in here, on Google\'s own page, or give the config the account\'s token (android.playstore.tokenFile; seraph-play-login makes one on a PC). The phone keeps the token where root alone reads it. Better an account of its own for this: Google may block an account that downloads with an unofficial client.</string>
+    <string name="play_account_signed_in">Signed in as %1$s: the config\'s apps from Google Play (android.packages.playstore) are its downloads.\n\nShow token gives its token, for a config on a PC. Sign out takes it off the phone; Google\'s account page (Security, Your devices) can end its sign-in too.</string>
     <string name="play_sign_in">Sign in</string>
-    <string name="play_sign_in_other">Sign in again</string>
+    <string name="play_show_token">Show token</string>
     <string name="play_sign_out">Sign out</string>
     <string name="play_signing_in">Signing in to Google Play…</string>
     <string name="play_sign_in_failed">Not signed in: %1$s</string>
     <string name="play_sign_out_title">Sign out of Google Play?</string>
-    <string name="play_sign_out_message">The token of %1$s goes from the phone. The apps from Google Play then come with no account (the free ones alone); a config that names this account (android.playstore.account) stops its builds until it signs in again.</string>
+    <string name="play_sign_out_message">The token of %1$s goes from the phone, and a build whose config lists apps from Google Play stops until an account signs in again.</string>
+    <string name="play_token_title">Google Play token</string>
+    <string name="play_token_message">Signed in as %1$s. This is the account\'s token: give it to a config on a PC (android.playstore.tokenFile), and each build puts it on the phone, which then needs no sign-in. Anyone who has it can use the account: keep it private, and delete a saved copy once it is in your config.</string>
+    <string name="play_token_config">In the config, with the token in google-play.token next to it:</string>
+    <string name="play_token_save">Save to Downloads</string>
+    <string name="play_token_saved">Saved: Download/%1$s</string>
+    <string name="play_token_copied">Token copied</string>
+    <string name="play_token_unreadable">The token could not be read: %1$s</string>
+    <string name="play_token_not_saved">The token could not be saved: %1$s</string>
 </resources>

@@ -8,9 +8,7 @@ import com.aurora.gplayapi.device.DeviceProfile
 import com.aurora.gplayapi.device.DeviceRegistry
 import com.aurora.gplayapi.engine.OkHttpEngine
 import com.aurora.gplayapi.model.AppFile
-import com.aurora.gplayapi.session.AnonymousSession
 import com.aurora.gplayapi.session.AuthenticatedSession
-import com.aurora.gplayapi.session.DefaultPlaySessions
 import com.aurora.gplayapi.session.PlaySession
 import com.aurora.gplayapi.session.PlaySessions
 import com.aurora.gplayapi.session.SessionFactory
@@ -36,9 +34,9 @@ import java.util.concurrent.TimeUnit
  * Apps from Google Play (android.packages.playstore), downloaded as Aurora Store downloads them, with Aurora's gplayapi.
  * The phone checks in with Google Play as itself (its Android, processor, screen, features and languages), so Play
  * gives it the split APKs made for it; it signs in with the config's account (android.playstore: its tokenFile, or the
- * account signed in on the phone) or the one signed in on the phone (the app's Google Play account, [login]), and with
- * none it uses Play's anonymous lane, as a phone signed in to no account, which gets the free apps alone. The session is
- * kept in repos/playstore/session.json (without the account's token), so a run checks in again only when it ran out.
+ * account signed in on the phone) or the one signed in on the phone (the app's Google Play account, [login]); with none,
+ * or one whose token Google refuses, a build stops before changing anything ([signInProblem]). The session is kept in
+ * repos/playstore/session.json (without the account's token), so a run checks in again only when it ran out.
  *
  * What Play has of each app (its version, size, signing keys, the libraries it needs) is asked for in one request and
  * kept in repos/playstore/apps.json: a build asks again once it is a day old, an update check (and Upgrade) always.
@@ -65,7 +63,7 @@ class PlayStore(private val data: File, android: JSONObject?) {
 
     private class Credential(val email: String, val token: String)
 
-    /** Who asks Google Play: the account and its token, or null for none (the anonymous lane). Read once a run. */
+    /** Who asks Google Play: the account and its token, or null when no account is signed in (or given). Read once a run. */
     private val credential: Credential? by lazy { credential() }
 
     private fun credential(): Credential? {
@@ -122,20 +120,12 @@ class PlayStore(private val data: File, android: JSONObject?) {
 
     /** The session kept from before, when it is still good for who asks now; else a new one, kept. */
     private suspend fun open(): PlaySession {
-        val who = credential
+        val who = credential ?: throw Stop(NOT_SIGNED_IN)
         val locale = languages.first()
         val more = languages.drop(1)
         val kept = runCatching { JSONObject(sessionFile.readText()) }.getOrNull()
         val stored = kept?.let { runCatching { JSON.decodeFromString(PlaySession.serializer(), it.getString("session")) }.getOrNull() }
             ?.takeIf { it.device.fingerprint == device.fingerprint && it.locale == locale }
-        if (who == null) {
-            // Play's own anonymous sessions last eight hours.
-            if (stored is AnonymousSession && System.currentTimeMillis() - stored.mintedAtMillis < ANONYMOUS_AGE) return stored.copy(additionalLocales = more)
-            val minted = DefaultPlaySessions(engine, device, locale, more).session()
-            save(minted, null)
-            Out.line("Google Play: checked in with no account (as a phone signed in to none, it gets the free apps alone)")
-            return minted
-        }
         if (stored is AuthenticatedSession && stored.email.equals(who.email, ignoreCase = true) && kept?.optString("token") == sha256(who.token) &&
             SessionFactory(engine).validate(stored)
         ) {
@@ -179,6 +169,23 @@ class PlayStore(private val data: File, android: JSONObject?) {
         }
     }
 
+    /**
+     * Why a build cannot sign in to Google Play, checked before anything changes: no account signed in (or given), or one
+     * whose token Google refuses; null when it signs in, or when Google cannot be asked now (offline: what is here is
+     * used, and a download that needs it says so).
+     */
+    fun signInProblem(): String? = try {
+        runBlocking { session() }
+        null
+    } catch (e: Stop) {
+        e.message
+    } catch (e: PlayException.Unauthorized) {
+        "Google refused the token of ${asking ?: "the account"}: sign in again in the Seraph app (⋮ → Google Play account)"
+    } catch (e: Exception) {
+        Out.line("Google Play: cannot check the account now (${e.message}); building with what is here")
+        null
+    }
+
     /** The account that asks, for messages (null: none, or none that can). */
     private val asking: String? get() = runCatching { credential?.email }.getOrNull()
 
@@ -217,7 +224,7 @@ class PlayStore(private val data: File, android: JSONObject?) {
     /** Brings what is here of the apps up to date: those not asked for in a day (or all, [force]d), in one request. */
     fun refresh(ids: List<String>, force: Boolean) {
         if (ids.isEmpty()) return
-        val who = credential?.email ?: ""
+        val who = (credential ?: throw Stop(NOT_SIGNED_IN)).email
         val apps = saved(who)
         val now = System.currentTimeMillis()
         val stale = ids.filter { id -> force || apps.optJSONObject(id)?.let { now - it.getLong("checked") >= FDroid.MAX_AGE } ?: true }
@@ -257,7 +264,7 @@ class PlayStore(private val data: File, android: JSONObject?) {
         }
         dir.mkdirs()
         writePrivate(appsFile, JSONObject().put("as", who).put("apps", apps).toString())
-        Out.line("Google Play: asked about ${apps(stale.size)}, ${if (who.isEmpty()) "with no account" else "as $who"}" +
+        Out.line("Google Play: asked about ${apps(stale.size)}, as $who" +
             (stale.size - found.count { it.packageName in stale }).let { if (it > 0) " ($it not there)" else "" })
     }
 
@@ -397,8 +404,9 @@ class PlayStore(private val data: File, android: JSONObject?) {
         /** This source's name in the config: android.packages.playstore, android.settings.repo.playstore, android.playstore. */
         const val NAME = "playstore"
 
-        /** How long Play's anonymous session lasts. */
-        private const val ANONYMOUS_AGE = 8L * 3600 * 1000
+        /** What a build says when the config lists apps from Google Play and no account is signed in. */
+        const val NOT_SIGNED_IN = "android.packages.playstore lists apps from Google Play, but no Google account is signed in on this phone: " +
+            "sign in in the Seraph app (⋮ → Google Play account), or give the config android.playstore.tokenFile"
 
         private const val LISTED_BY = "Google Play's list of its files"
 

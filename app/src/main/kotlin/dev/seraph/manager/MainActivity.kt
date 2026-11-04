@@ -4,13 +4,20 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.os.PersistableBundle
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -595,7 +602,7 @@ class MainActivity : Activity() {
 
     // --- The Google Play account, which android.packages.playstore's apps come with (see GoogleSignInActivity).
 
-    /** Who is signed in to Google Play on the phone (the module keeps the account where root alone reads it), with Sign in and Sign out. */
+    /** Who is signed in to Google Play on the phone (the module keeps the account where root alone reads it), with Sign in, its token, and Sign out. */
     private fun playAccount() {
         runner.read("head -n 1 $PLAY_ACCOUNT 2>/dev/null") { exit, said ->
             if (exit == null) return@read toast(getString(R.string.no_root))
@@ -605,7 +612,7 @@ class MainActivity : Activity() {
                 dialog.setMessage(R.string.play_account_none).setPositiveButton(R.string.play_sign_in) { _, _ -> signInToPlay() }
             } else {
                 dialog.setMessage(getString(R.string.play_account_signed_in, email))
-                    .setPositiveButton(R.string.play_sign_in_other) { _, _ -> signInToPlay() }
+                    .setPositiveButton(R.string.play_show_token) { _, _ -> readPlayToken(getString(R.string.play_token_title)) }
                     .setNeutralButton(R.string.play_sign_out) { _, _ -> signOutOfPlay(email) }
             }
             dialog.show()
@@ -614,19 +621,87 @@ class MainActivity : Activity() {
 
     private fun signInToPlay() = startForResult(Intent(this, GoogleSignInActivity::class.java), PLAY_SIGN_IN)
 
-    /** The sign-in page's token goes to the engine through its input (never in a command), which keeps the account's lasting one. */
+    /**
+     * The sign-in page's token goes to the engine through its input (never in a command), which keeps the account's
+     * lasting one; signed in, that one is shown, for a config on a PC.
+     */
     private fun playSignedIn(data: Intent) {
         val email = data.getStringExtra(GoogleSignInActivity.EXTRA_EMAIL).orEmpty()
         val token = data.getStringExtra(GoogleSignInActivity.EXTRA_TOKEN) ?: return
         val waiting = Toast.makeText(this, R.string.play_signing_in, Toast.LENGTH_LONG).apply { show() }
         runner.read(Root.ENGINE + "playstore-login 2>&1", input = "$email\n$token\n") { exit, said ->
             waiting.cancel()
-            val text = when (exit) {
-                0 -> Runner.lastLine(said).removePrefix("✔ ")
-                null -> getString(R.string.no_root)
-                else -> getString(R.string.play_sign_in_failed, Runner.lastLine(said))
-            }
+            if (exit == 0) return@read readPlayToken(Runner.lastLine(said).removePrefix("✔ "))
+            val text = if (exit == null) getString(R.string.no_root) else getString(R.string.play_sign_in_failed, Runner.lastLine(said))
             AlertDialog.Builder(this).setTitle(R.string.menu_play_account).setMessage(text).setPositiveButton(R.string.close, null).show()
+        }
+    }
+
+    /** The account the phone keeps (its email address, then its token, which root alone reads), shown under [title]. */
+    private fun readPlayToken(title: String) {
+        runner.read("cat $PLAY_ACCOUNT") { exit, said ->
+            val lines = said.lines().map { it.trim() }
+            if (exit != 0 || lines.size < 2 || !lines[0].contains('@') || lines[1].isEmpty()) {
+                return@read toast(getString(R.string.play_token_unreadable, if (exit == null) getString(R.string.no_root) else Runner.lastLine(said)))
+            }
+            showPlayToken(title, lines[0], lines[1])
+        }
+    }
+
+    /**
+     * The account's token, for a config on a PC (android.playstore.tokenFile, which each build puts on the phone), with the
+     * lines that use it: copied (marked private, so Android's clipboard preview hides it) or saved to Download.
+     */
+    private fun showPlayToken(title: String, email: String, token: String) {
+        val pad = Ui.dp(this, 20)
+        fun code(text: String) = TextView(this).apply {
+            this.text = text
+            typeface = Typeface.MONOSPACE
+            textSize = 12f
+            setTextIsSelectable(true)
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(Ui.note(this@MainActivity, getString(R.string.play_token_message, email)))
+            addView(code(token))
+            addView(Ui.note(this@MainActivity, getString(R.string.play_token_config)))
+            addView(code("android.playstore.account = \"$email\";\nandroid.playstore.tokenFile = ./$PLAY_TOKEN_FILE;"))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton(R.string.copy) { _, _ ->
+                val clip = ClipData.newPlainText(getString(R.string.play_token_title), token)
+                clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+                toast(getString(R.string.play_token_copied))
+            }
+            .setNeutralButton(R.string.play_token_save) { _, _ -> savePlayToken(token) }
+            .setNegativeButton(R.string.close, null)
+            .show()
+    }
+
+    /** The token in Download/google-play.token (Android numbers the name when one is there already). */
+    private fun savePlayToken(token: String) {
+        runner.background {
+            val saved = try {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, PLAY_TOKEN_FILE)
+                    // octet-stream: the name stays as it is (text/plain would add .txt).
+                    put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("no place in Download")
+                contentResolver.openOutputStream(uri, "w")?.use { it.write("$token\n".toByteArray()) } ?: throw IllegalStateException("cannot write it")
+                contentResolver.query(uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: PLAY_TOKEN_FILE
+            } catch (e: Exception) {
+                runOnUiThread { toast(getString(R.string.play_token_not_saved, e.message ?: e.javaClass.simpleName)) }
+                return@background
+            }
+            runOnUiThread { toast(getString(R.string.play_token_saved, saved)) }
         }
     }
 
@@ -792,6 +867,8 @@ class MainActivity : Activity() {
         private const val PLAY_SIGN_IN = 4
         /** The Google Play account signed in on the phone: its email address, then its token (the engine's playstore-login writes it). */
         private const val PLAY_ACCOUNT = "/data/adb/seraph/secrets/google-play"
+        /** The name its token is saved under, and the one the config's lines name (android.playstore.tokenFile). */
+        private const val PLAY_TOKEN_FILE = "google-play.token"
         private const val SOURCE = "https://github.com/by-architect/Seraph"
         /** Between the two files loadUpdates reads. */
         private const val SPLIT = "--seraph-update--"

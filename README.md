@@ -75,15 +75,23 @@ from it) are supported.
 <summary><b>Google Play</b></summary>
 
 Apps from Google Play are downloaded by the phone itself, as Aurora Store does, and installed and updated like
-the other apps. Sign in once with a Google account: Seraph app → ⋮ → **Google Play account** → **Sign in**
-(Google's own sign-in page). Without an account, Google Play still gives the free apps.
+the other apps. No Play Store, Google Play services or GApps are needed on the phone; a Google account is. Sign
+in once: Seraph app → ⋮ → **Google Play account** → **Sign in** (Google's own sign-in page). Then **Show
+token** gives the account's token, to copy or save to Downloads, for a config on a PC. Or sign in on a PC:
+
+```sh
+nix run github:by-architect/Seraph#seraph-play-login     # opens Google's page, then saves ./google-play.token
+```
+
+A build whose config lists apps from Google Play checks the account first: with none, or a token Google
+refuses, it stops before changing anything and says to sign in.
 
 ```nix
 {
   android.packages.playstore = [ "com.whatsapp" "org.telegram.messenger" ];
 
   android.playstore.account = "you@gmail.com";     # optional: builds stop if another account is signed in
-  android.playstore.tokenFile = ./google-play.token; # optional: the account's token, so no sign-in is needed
+  android.playstore.tokenFile = ./google-play.token; # optional: the account's token, so the phone needs no sign-in
 
   android.settings.repo.playstore.autoupdatePackages = true;
 }
@@ -92,7 +100,10 @@ the other apps. Sign in once with a Google account: Seraph app → ⋮ → **Goo
 - The phone tells Google Play what it is (Android version, processor, screen, languages), so it gets the split
   APKs made for it, and each file is checked against the SHA-256 Google Play lists, its signing key against
   Google Play's.
-- The account's token stays on the phone, readable by root only; signing out removes it.
+- The account's token stays on the phone, readable by root only; signing out removes it. Anyone with the token
+  can use the account: keep a copy out of any repository others can read.
+- If the sign-in page says the app has no internet while the phone is online, the Seraph app's network access
+  is off (some ROMs switch it per app): turn it on in its App info; the downloads themselves don't need it.
 - Use a Google account made for this rather than your main one: Google may block accounts that download
   with unofficial clients (Aurora Store's FAQ warns about the same).
 - Not supported yet: apps that need expansion files (OBB, mostly large games); such an app stops the build
