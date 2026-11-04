@@ -10,6 +10,12 @@ section after the version, and its text is what the Magisk app shows as the upda
   then include them, and a private submodule uses the same token.
 - The app is installed for the phone's owner only, and removed from app clones and work profiles,
   where Magisk refuses root without asking; opened there, it says so.
+- Fixed: picking up broken-off runs could start a second build next to one still running, which
+  deleted its new profile, so the build applied but the phone kept the old profile. A run still
+  going is now left alone, a second build, update or backup waits for the first, and each run has
+  its own temporary profile.
+- Fixed: a flake with no `seraphConfigurations` now says so instead of failing with no reason.
+- Tailscale says when its auth key is refused, instead of an empty login link.
 
 ## 0.1.0 (2026-11-03)
 

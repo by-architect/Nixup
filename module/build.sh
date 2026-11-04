@@ -42,6 +42,10 @@ case "$MODE" in
     if [ "$4" = dry ]; then event build start "Trying generation $3"; else event build start "Going back to generation $3"; fi ;;
   gc) run_open build "Freeing up space"; event build start "Freeing up space" ;;
 esac
+# The profile it builds, its own (a dry run next to a build does not touch the build's), until
+# switch_to makes it the phone's.
+NEW=$PROFILE.new-$$
+at_exit 'rm -f "$NEW"'
 # A restart (or a kill) in the middle: it starts again after (see resume.sh).
 case "$MODE" in
   switch | update | again) resumable build build.sh "$MODE" ;;
@@ -53,8 +57,8 @@ case "$MODE" in
   again)
     [ -f "$PROFILE" ] || fail "there is no build to apply again"
     log "== The last build again"
-    cp "$PROFILE" "$PROFILE.new"
-    switch_to "$PROFILE.new" switch
+    cp "$PROFILE" "$NEW"
+    switch_to "$NEW" switch
     exit 0 ;;
   generation)
     n=$3 how=${4:-switch}
@@ -69,8 +73,8 @@ case "$MODE" in
     GEN_LOCK=
     [ -f "$g/flake.lock" ] && GEN_LOCK=$g/flake.lock
     [ -n "$GEN_SOURCE" ] || GEN_SOURCE="generation $n"
-    cp "$g/profile.json" "$PROFILE.new"
-    switch_to "$PROFILE.new" "$how"
+    cp "$g/profile.json" "$NEW"
+    switch_to "$NEW" "$how"
     exit 0 ;;
   gc)
     # As nix-collect-garbage: what no root keeps goes (the last build's packages, nixpkgs and git stay).
@@ -140,7 +144,10 @@ case "$WHERE" in
           sub=${DIR#"$CLONE"}
           sub=${sub#/}
           query=
-          [ -f "$CLONE/.gitmodules" ] && grep -qx 'submodules=1' "$DATA/git/clone" 2> /dev/null && query=submodules=1
+          # (A clone made before that choice, with no submodules= line, always had them.)
+          if [ -f "$CLONE/.gitmodules" ] && { grep -qx 'submodules=1' "$DATA/git/clone" 2> /dev/null || ! grep -q '^submodules=' "$DATA/git/clone" 2> /dev/null; }; then
+            query=submodules=1
+          fi
           [ -n "$sub" ] && query="${query:+$query&}dir=$(address "$sub")"
           FLAKE="git+file://$(address "$CLONE")${query:+?$query}"
           # Nix writes no flake.lock into it: it would `git add` it, with a git it cannot run. Its
@@ -196,7 +203,12 @@ flake_name() {
   [ $# -eq 1 ] && echo "$1" && return 0
   device=$(settings get global device_name < /dev/null)
   for name; do [ "$name" = "$device" ] && echo "$name" && return 0; done
-  log "The flake has $# seraphConfigurations ($*), and none is named after this phone ($device): name one after a # in the app's Config"
+  # Said on stderr: what this says (its stdout) is the name.
+  if [ $# -eq 0 ]; then
+    log "The flake has no seraphConfigurations (one made by a file it imports, from a submodule not cloned? Clone it again with its submodules)" >&2
+  else
+    log "The flake has $# seraphConfigurations ($*), and none is named after this phone ($device): name one after a # in the app's Config" >&2
+  fi
   return 1
 }
 
@@ -263,11 +275,11 @@ profile=$(eval_profile) \
   || fail "the config did not build (Nix says why above); nothing was changed"
 log "Profile: $profile"
 # printf, not echo: Android's echo turns the profile's \\ and \n into other characters.
-printf '%s\n' "$profile" > "$PROFILE.new"
+printf '%s\n' "$profile" > "$NEW"
 
 # The secret files the config's options name (files from its folder, or text): put apart from the
 # profile, in a folder only root can read, for switch_to to put in place, as when a PC sends them.
-if grep -q '"secrets":\["' "$PROFILE.new"; then
+if grep -q '"secrets":\["' "$NEW"; then
   IN=$DATA/incoming
   rm -rf "$IN" && mkdir -p "$IN" && chmod 700 "$IN"
   at_exit 'rm -rf "$IN"'
@@ -279,4 +291,4 @@ if grep -q '"secrets":\["' "$PROFILE.new"; then
   SECRETS_IN=$IN/secrets
 fi
 
-switch_to "$PROFILE.new" "$MODE"
+switch_to "$NEW" "$MODE"

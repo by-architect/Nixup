@@ -29,6 +29,8 @@ online() { nix_etc > /dev/null 2>&1; }
 for name in build update backup-restore backup-now backup-auto; do
   file=$PENDING/$name
   [ -f "$file" ] || continue
+  # Its run is still on (it was not broken off): it is left to end.
+  running_of "$name" > /dev/null && continue
   started=$(sed -n 1p "$file")
   tries=$(sed -n 2p "$file")
   profile=$(sed -n 3p "$file")
@@ -65,7 +67,7 @@ for name in build update backup-restore backup-now backup-auto; do
       done ;;
   esac
   # Its run writes it again, with this try counted, until it ends.
-  rm -f "$file"
+  rm -f "$file" "$file.pid" "$file.by"
   event "$kind" info "Picking up $what a restart broke off" "Started $(date -d "@$started" '+%F %H:%M' 2> /dev/null); try $((tries + 1))"
   SERAPH_PROFILE=$profile SERAPH_RESUMED=$((tries + 1)) sh "$MODDIR/$script" resume "$@" < /dev/null
 done

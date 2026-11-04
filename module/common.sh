@@ -86,13 +86,28 @@ run_priority() {
 # test never goes on with the phone's own), then the script and its arguments, one a line),
 # until the run ends, however it ends. One that cannot run now (status 75: its storage is not
 # there, ...) stays, to run once it can. Arguments: its name, the script, and its arguments without
-# who started it (when it starts again, that is "resume").
+# who started it (when it starts again, that is "resume"). $PENDING/<name>.pid is the run's
+# process while it runs: one of the same name is not started next to it (they would share files),
+# and resume.sh leaves a record whose run still runs.
 PENDING=$DATA/pending
 resumable() {
+  mkdir -p "$PENDING"
+  if running=$(running_of "$1"); then
+    fail "another one is running (process $running, started by $(sed -n 1p "$PENDING/$1.by" 2> /dev/null || echo '?')): wait for it to end"
+  fi
   RESUME_NAME=$1
   shift
-  mkdir -p "$PENDING"
+  echo $$ > "$PENDING/$RESUME_NAME.pid"
+  echo "$BY" > "$PENDING/$RESUME_NAME.by"
   { date +%s; echo "${SERAPH_RESUMED:-0}"; echo "$SERAPH_PROFILE"; printf '%s\n' "$@"; } > "$PENDING/$RESUME_NAME"
+}
+
+# The process of the run of that name still running (a module script's sh), if there is one.
+running_of() {
+  pid=$(cat "$PENDING/$1.pid" 2> /dev/null)
+  [ -n "$pid" ] && [ "$pid" != $$ ] && [ -r "/proc/$pid/cmdline" ] || return 1
+  tr '\0' ' ' < "/proc/$pid/cmdline" | grep -qE '(build|remote|update|backup)\.sh' || return 1
+  echo "$pid"
 }
 
 # A command for the end, whatever happens (a folder of secrets to remove).
@@ -112,6 +127,7 @@ finish() {
     else
       rm -f "$PENDING/$RESUME_NAME"
     fi
+    rm -f "$PENDING/$RESUME_NAME.pid" "$PENDING/$RESUME_NAME.by"
   fi
   [ -n "$RUN" ] || return 0
   told=$(grep -F "\"run\":\"$RUN\"" "$DATA/events" 2> /dev/null | grep -v '"level":"start"')

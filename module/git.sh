@@ -28,6 +28,9 @@ GITROOT=$DATA/nix/nix/var/nix/gcroots/seraph-git
 
 # What the clone is (key=value lines: url, branch, dir, name, submodules, path, pulled).
 value() { sed -n "s/^$1=//p" "$STATE" 2> /dev/null | head -n 1; }
+# Whether its submodules were cloned too: a clone made before the choice (no submodules= line)
+# always had them.
+submodules_of() { grep -q '^submodules=' "$STATE" 2> /dev/null && [ "$(value submodules)" != 1 ] && return 1; return 0; }
 option() { for arg in $ARGS; do case "$arg" in "--$1="*) printf '%s' "${arg#--$1=}"; return 0 ;; esac; done; }
 
 # The address git clones: github:you/phone and you/phone are GitHub's.
@@ -158,7 +161,8 @@ case "$MODE" in
     git_ready || fail "git is not ready (see above); nothing was changed"
     clone ;;
   reclone)
-    url=$(value url) branch=$(value branch) dir=$(value dir) cname=$(value name) submodules=$(value submodules)
+    url=$(value url) branch=$(value branch) dir=$(value dir) cname=$(value name) submodules=
+    submodules_of && submodules=1
     [ -n "$url" ] || fail "there is no clone to make again: clone a repository first"
     run_open git "Reclone"
     event git start "Cloning ${url#https://} again"
@@ -173,7 +177,7 @@ case "$MODE" in
     before=$(git_run -C "$top" rev-parse HEAD)
     log "Pulling $url"
     recurse=--recurse-submodules=no
-    [ "$(value submodules)" = 1 ] && recurse=--recurse-submodules
+    submodules_of && recurse=--recurse-submodules
     if ! git_run -C "$top" pull --no-rebase --autostash --no-edit "$recurse"; then
       # A merge that cannot be made goes back to how it was, with the local changes.
       git_run -C "$top" merge --abort > /dev/null 2>&1
@@ -182,7 +186,7 @@ case "$MODE" in
     after=$(git_run -C "$top" rev-parse HEAD)
     sed -i "s/^pulled=.*/pulled=$(date +%s)/" "$STATE"
     # Submodules the new commits added (or moved): cloned, at the commits they name.
-    if [ "$(value submodules)" = 1 ] && [ -f "$top/.gitmodules" ]; then
+    if submodules_of && [ -f "$top/.gitmodules" ]; then
       git_run -C "$top" submodule update --init --recursive --filter=blob:none \
         || fail "the submodules could not be brought up to date (git says why above; a private one needs its token)"
     fi
@@ -216,10 +220,10 @@ case "$MODE" in
         esc() { printf '%s' "$1" | tr '\t\n\r' '   ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
         pulled=$(value pulled)
         printf '{"clone":true,"url":"%s","branch":"%s","dir":"%s","name":"%s","submodules":%s,"path":"%s","commit":"%s","subject":"%s","time":%s,"changes":%s,"pulled":%s}\n' \
-          "$(esc "$(value url)")" "$(esc "${branch:-$(value branch)}")" "$(esc "$(value dir)")" "$(esc "$(value name)")" "$([ "$(value submodules)" = 1 ] && echo true || echo false)" "$(esc "$top")" \
+          "$(esc "$(value url)")" "$(esc "${branch:-$(value branch)}")" "$(esc "$(value dir)")" "$(esc "$(value name)")" "$(submodules_of && echo true || echo false)" "$(esc "$top")" \
           "$(esc "$commit")" "$(esc "$subject")" "${time:-0}" "${changes:-0}" "${pulled:-0}" ;;
       *)
-        echo "Clone of $(value url) in $top$([ "$(value submodules)" = 1 ] && echo ', with its submodules')"
+        echo "Clone of $(value url) in $top$(submodules_of && echo ', with its submodules')"
         echo "Branch ${branch:-$(value branch)}, commit $commit $subject"
         echo "${changes:-0} files changed here; pulled $(date -d "@$(value pulled)" '+%F %T' 2> /dev/null)" ;;
     esac ;;

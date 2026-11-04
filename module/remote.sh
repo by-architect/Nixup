@@ -45,5 +45,8 @@ else event build start "Applying a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURC
 log "== Built on ${GEN_BUILT_ON:-a PC}: $GEN_SOURCE"
 log "Profile: $(cat "$IN/profile.json")"
 SECRETS_IN=$IN/secrets
-cp "$IN/profile.json" "$PROFILE.new"
-switch_to "$PROFILE.new" "$MODE"
+# Its own (see build.sh), until switch_to makes it the phone's.
+NEW=$PROFILE.new-$$
+at_exit 'rm -f "$NEW"'
+cp "$IN/profile.json" "$NEW"
+switch_to "$NEW" "$MODE"

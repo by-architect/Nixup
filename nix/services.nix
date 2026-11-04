@@ -224,7 +224,11 @@ in
         status=$(ts status --json --peers=false)
         case $(echo "$status" | jq -r .BackendState) in
           Running) echo "Tailscale: running as $(echo "$status" | jq -r '.Self.DNSName | rtrimstr(".")') ($(echo "$status" | jq -r '.Self.TailscaleIPs[0]'))" ;;
-          NeedsLogin) echo "! Tailscale: waiting for its login: open $(echo "$status" | jq -r .AuthURL) (on any device) and log in" ;;
+          NeedsLogin)
+            url=$(echo "$status" | jq -r '.AuthURL // ""')
+            if [ -n "$url" ]; then echo "! Tailscale: waiting for its login: open $url (on any device) and log in"
+            elif [ ''${#login[@]} -gt 0 ]; then echo "! Tailscale: not logged in: the control server refused its auth key (said above); put a new one in its authKeyFile"
+            else echo "! Tailscale: not logged in, and it gave no link to log in with (its log: /data/adb/seraph/units/tailscaled/log)"; fi ;;
           *) echo "Tailscale: $(echo "$status" | jq -r .BackendState)" ;;
         esac
       '';
