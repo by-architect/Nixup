@@ -36,6 +36,12 @@ object Device {
     val OBTAINIUM = listOf("dev.imranr.obtainium", "dev.imranr.obtainium.fdroid")
 
     /**
+     * And of one from Google Play: the Play Store (or microG's companion in its place), which apps that check where they
+     * came from look for, as Aurora Store's root installs name it; else Aurora Store, which can update them.
+     */
+    val PLAYSTORE = listOf("com.android.vending", "com.aurora.store", "com.aurora.store.nightly")
+
+    /**
      * A system context made in this process, as root tools do: for the signing keys of apps and APKs, and the
      * network policy. Where that fails it is null: pm still refuses an update signed with another key.
      */
@@ -52,6 +58,9 @@ object Device {
     }
 
     private val packageManager: PackageManager? get() = context?.packageManager
+
+    /** That system context, for what reads the phone through one itself (Google Play's description of it); null where there is none. */
+    val systemContext: Context? get() = context
 
     /** Whether the phone's user was unlocked since it started (its credential-encrypted storage is there then). */
     fun unlocked(): Boolean = context?.getSystemService(UserManager::class.java)?.let { users -> runCatching { users.isUserUnlocked }.getOrNull() }
@@ -99,6 +108,25 @@ object Device {
         null
     }
 
+    /** The certificate the installed app is signed with now (after a key rotation, the newest), or null when it is not installed or cannot be read here. */
+    fun currentCertificate(id: String): ByteArray? = try {
+        val info = packageManager?.getPackageInfo(id, PackageManager.GET_SIGNING_CERTIFICATES)?.signingInfo
+        when {
+            info == null -> null
+            info.hasMultipleSigners() -> info.apkContentsSigners?.firstOrNull()?.toByteArray()
+            else -> info.signingCertificateHistory?.lastOrNull()?.toByteArray()
+        }
+    } catch (e: PackageManager.NameNotFoundException) {
+        null
+    }
+
+    /** Whether the phone has the shared library (an APK other apps use, like Chrome's Trichrome) at this version. */
+    fun hasLibrary(name: String, version: Long): Boolean = try {
+        packageManager?.getSharedLibraries(0)?.any { it.name == name && it.longVersion == version } ?: false
+    } catch (e: Exception) {
+        false
+    }
+
     /** The current signers and, after a key rotation, the earlier ones: F-Droid's index may list either. */
     private fun signers(info: SigningInfo?): Set<String> {
         if (info == null) return emptySet()
@@ -124,10 +152,12 @@ object Device {
 
     /**
      * Installs an app from its APKs (a base APK and its splits), each streamed into one pm session, as adb
-     * install-multiple does. Null when it worked, else what pm said.
+     * install-multiple does; [installer] becomes its installer of record. Null when it worked, else what pm said.
      */
-    fun installAll(apks: List<File>): String? {
-        val created = run("pm", "install-create", "-r", "--user", "current", "-S", apks.sumOf { it.length() }.toString()).second
+    fun installAll(apks: List<File>, installer: String? = null): String? {
+        val create = mutableListOf("pm", "install-create", "-r", "--user", "current", "-S", apks.sumOf { it.length() }.toString())
+        if (installer != null) create += listOf("-i", installer)
+        val created = run(*create.toTypedArray()).second
         val session = Regex("""\[(\d+)]""").find(created)?.groupValues?.get(1) ?: return created.trim()
         for ((i, apk) in apks.withIndex()) {
             val process = ProcessBuilder("pm", "install-write", "-S", apk.length().toString(), session, "$i-${apk.name}", "-").redirectErrorStream(true).start()

@@ -19,5 +19,15 @@ license:
 - nixpkgs/lib in the Magisk module: the library of nixpkgs (https://github.com/NixOS/nixpkgs),
   unchanged. MIT License: nixpkgs/COPYING in the module.
 
+- In the app (app.apk in the Magisk module), the libraries it is built with, unchanged:
+  - gplayapi 4.0.0 by Aurora OSS (https://gitlab.com/AuroraOSS/gplayapi), for Google Play.
+    GNU General Public License 3.0 or later: LICENSE.
+  - OkHttp 5.3.2 and Okio 3.16.4 by Square (https://square.github.io/okhttp/), Kotlin's standard
+    library, kotlinx.coroutines 1.11.0 and kotlinx.serialization 1.11.0 by JetBrains
+    (https://github.com/Kotlin). Apache License 2.0: licenses/Apache-2.0.txt.
+  - Protocol Buffers' Java runtime (protobuf-javalite 4.34.1) by Google
+    (https://github.com/protocolbuffers/protobuf). BSD 3-Clause License:
+    licenses/protobuf-BSD-3-Clause.txt.
+
 The Nix packages a config names (Tailscale, Syncthing, restic, ...) are not part of Seraph: the
 phone fetches them from cache.nixos.org, each under its own license.

@@ -111,6 +111,11 @@
     }
   ];
 
+  # Apps from Google Play, as Aurora Store downloads them, by package name in quotes. This phone's
+  # own (bank, government, health apps) are left out of this public file.
+  android.packages.playstore = [ ];
+  android.playstore.account = null;               # null: the account signed in on the phone (⋮ → Google Play account)
+
   # Updates of each source's apps: true installs them by itself (every 6 hours, on Wi-Fi), false
   # only notifies (the app's Updates tab installs them).
   android.settings.repo = {
@@ -119,10 +124,11 @@
     guardianproject.autoupdatePackages = false;
     byarchitect.autoupdatePackages = false;
     obtainium.autoupdatePackages = true;
+    playstore.autoupdatePackages = false;
   };
 
-  # The phone's other apps (from Google Play through Aurora Store, sideloaded, debug builds) come
-  # from no repository here, so Seraph leaves them as they are. F-Droid has its own builds of
+  # The phone's other apps (sideloaded, debug builds, and its Google Play apps not listed above)
+  # come from no repository here, so Seraph leaves them as they are. F-Droid has its own builds of
   # Tailscale, KDE Connect, LocalSend, Organic Maps, Proton VPN and addy.io, signed with another
   # key than the ones installed: moving to them means reinstalling (the app's data goes).
 

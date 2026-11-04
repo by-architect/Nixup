@@ -31,8 +31,8 @@ config and the next build puts that setting back the way it was before Seraph.
 <summary><b>Repos And Android Apps</b></summary>
 
 Write each app's package name into its repository's list, then build. F-Droid, IzzyOnDroid, Obtainium-style
-releases (GitHub, GitLab, Codeberg) and custom F-Droid repositories are supported. Aurora / Play Store is not
-supported yet; it is the hardest and maybe the most important part of this project (help is welcome).
+releases (GitHub, GitLab, Codeberg), custom F-Droid repositories and Google Play (as Aurora Store downloads
+from it) are supported.
 
 ```nix
 { pkgs, ... }: {
@@ -54,7 +54,10 @@ supported yet; it is the hardest and maybe the most important part of this proje
     { id = "dev.imranr.obtainium"; url = "https://github.com/ImranR98/Obtainium"; }
   ];
 
-  # 4. Updates: true installs them by itself (every 6 hours, on Wi-Fi), false only notifies
+  # 4. Apps from Google Play, by package name in quotes (see Google Play below)
+  android.packages.playstore = [ "com.whatsapp" "org.telegram.messenger" ];
+
+  # 5. Updates: true installs them by itself (every 6 hours, on Wi-Fi), false only notifies
   android.settings.repo.fdroid.autoupdatePackages = true;
 }
 ```
@@ -65,6 +68,37 @@ supported yet; it is the hardest and maybe the most important part of this proje
 - An app you take out of the config is uninstalled (its data is kept). Apps you installed yourself are never
   touched.
 - A package name starting with a Nix word needs quotes, like `"in.sunilpaulmathew.izzyondroid"`.
+
+</details>
+
+<details>
+<summary><b>Google Play</b></summary>
+
+Apps from Google Play are downloaded by the phone itself, as Aurora Store does, and installed and updated like
+the other apps. Sign in once with a Google account: Seraph app → ⋮ → **Google Play account** → **Sign in**
+(Google's own sign-in page). Without an account, Google Play still gives the free apps.
+
+```nix
+{
+  android.packages.playstore = [ "com.whatsapp" "org.telegram.messenger" ];
+
+  android.playstore.account = "you@gmail.com";     # optional: builds stop if another account is signed in
+  android.playstore.tokenFile = ./google-play.token; # optional: the account's token, so no sign-in is needed
+
+  android.settings.repo.playstore.autoupdatePackages = true;
+}
+```
+
+- The phone tells Google Play what it is (Android version, processor, screen, languages), so it gets the split
+  APKs made for it, and each file is checked against the SHA-256 Google Play lists, its signing key against
+  Google Play's.
+- The account's token stays on the phone, readable by root only; signing out removes it.
+- Use a Google account made for this rather than your main one: Google may block accounts that download
+  with unofficial clients (Aurora Store's FAQ warns about the same).
+- Not supported yet: apps that need expansion files (OBB, mostly large games); such an app stops the build
+  with a message.
+- An app installed from F-Droid (signed with another key) cannot be updated from Google Play: the build says
+  so.
 
 </details>
 
@@ -377,5 +411,5 @@ backups, and apps you installed yourself.
 
 ## License
 
-[GPL-3.0](LICENSE). Seraph includes Termux's terminal code (Apache 2.0) and ships Nix (LGPL 2.1); see
-[NOTICE](NOTICE).
+[GPL-3.0](LICENSE). Seraph includes Termux's terminal code (Apache 2.0), ships Nix (LGPL 2.1) and uses Aurora
+OSS's gplayapi (GPL-3.0) for Google Play; see [NOTICE](NOTICE).

@@ -64,6 +64,18 @@
     }
   ];
 
+  # Apps from Google Play, by package name in quotes, downloaded as Aurora Store does: with the
+  # Google account signed in on the phone (Seraph app: ⋮ → Google Play account), else with none
+  # (free apps only).
+  android.packages.playstore = [
+    # "com.whatsapp"                              # WhatsApp: messenger
+  ];
+
+  android.playstore = {
+    account = null;                               # "you@gmail.com": builds stop if another one is signed in
+    tokenFile = null;                             # ./google-play.token: its token, so no sign-in is needed (secret)
+  };
+
   # Updates of each source's apps: true installs them by itself (every 6 hours, on Wi-Fi), false
   # only notifies (the app's Updates tab installs them).
   android.settings.repo = {
@@ -72,9 +84,10 @@
     guardianproject.autoupdatePackages = false;
     byarchitect.autoupdatePackages = false;
     obtainium.autoupdatePackages = true;
+    playstore.autoupdatePackages = false;
   };
 
-  # The phone's other apps (from Google Play through Aurora Store, sideloaded, debug builds) come
+  # The phone's other apps (sideloaded, debug builds, and Google Play apps not listed above) come
   # from no repository here, so Seraph leaves them as they are. F-Droid has its own builds of
   # Tailscale, KDE Connect, LocalSend, Organic Maps, Proton VPN and addy.io, signed with another
   # key than the ones installed: moving to them means reinstalling (the app's data goes).

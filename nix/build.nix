@@ -88,7 +88,8 @@ in
           android = {
             inherit (settings.display) darkMode;
             inherit repos;
-            # An F-Droid app as its package name; an app from its own releases with where they are.
+            # An F-Droid app (or one from Google Play) as its package name; an app from its own releases
+            # with where they are.
             packages = lib.mapAttrs (_: map (app:
               if builtins.isString app then app
               else if !(app ? _id) then {
@@ -98,7 +99,9 @@ in
               else app._id
             )) config.android.packages;
             settings = lib.mapAttrs (name: _: { autoupdatePackages = settings.repo.${name}.autoupdatePackages or false; })
-              (repos // { obtainium = { }; });
+              (repos // { obtainium = { }; playstore = { }; });
+            # The Google account Google Play's apps come with, and where its token is (nix/playstore.nix).
+            playstore = config.system.build.playstore;
             # debloat only when true: false is the same as not managed; backup goes in backup.
             apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: app:
               managed (removeAttrs app [ "backup" ] // { debloat = if app.debloat == true then true else null; })

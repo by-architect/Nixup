@@ -5,12 +5,13 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Updates of the config's apps (android.packages of each repository, and the apps from releases), outside of a
- * build. list finds the ones with a newer version (the one a build would install) and writes them to updates.json
- * for the app's Updates tab; update installs them, all or the ones named, with notifications; update --auto is what
- * the phone runs every 6 hours: it installs those of the repositories (and obtainium) whose
+ * Updates of the config's apps (android.packages of each repository, the apps from releases and those from Google
+ * Play), outside of a build. list finds the ones with a newer version (the one a build would install) and writes them
+ * to updates.json for the app's Updates tab; update installs them, all or the ones named, with notifications; update
+ * --auto is what the phone runs every 6 hours: it installs those of the repositories (and obtainium, playstore) whose
  * android.settings.repo.<repo>.autoupdatePackages is true, and only tells about the others in a notification. The config
- * is the last build's profile; the indexes and releases are those here (update.sh brings them up to date first).
+ * is the last build's profile; the indexes, releases and what Google Play said are those here (update.sh brings them
+ * up to date first).
  */
 class Updates(private val data: File, private val profile: File = File(data, "profile.json")) {
     private val installer = Installer(data)
@@ -20,6 +21,8 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
     private val android: JSONObject? by lazy { if (profile.isFile) JSONObject(profile.readText()).optJSONObject("android") else null }
     private val repos: Map<String, FDroid> by lazy { if (profile.isFile) FDroid.of(JSONObject(profile.readText()), data) else emptyMap() }
     private val fromReleases: List<Releases.App> by lazy { android?.let { Releases.apps(it) } ?: emptyList() }
+    private val fromPlay: List<String> by lazy { android?.let { PlayStore.apps(it) } ?: emptyList() }
+    private val play: PlayStore by lazy { PlayStore(data, android) }
 
     /** Each repository's apps in the config. */
     private fun configApps(): Map<String, List<String>> {
@@ -54,6 +57,14 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
                 is Releases.Plan.Install -> steps += plan.step
                 is Releases.Plan.Problem -> if (!quiet) Out.line("${app.id}: ${plan.text.removePrefix("${app.id}: ")}")
                 is Releases.Plan.Current -> {}
+            }
+        }
+        for (id in fromPlay) {
+            val installed = Device.installed(id) ?: continue
+            when (val plan = play.plan(id, installed)) {
+                is PlayStore.Plan.Install -> steps += plan.steps
+                is PlayStore.Plan.Problem -> if (!quiet) Out.line("$id: ${plan.text.removePrefix("$id: ")}")
+                is PlayStore.Plan.Current -> {}
             }
         }
         write(steps)
@@ -99,7 +110,8 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
         val selected = when {
             auto -> steps.filter { autoUpdate(it.repo) }
             ids.isEmpty() -> steps
-            else -> steps.filter { it.id in ids }
+            // With the libraries the apps named need (Google Play's apps can need some).
+            else -> ids.flatMap { play.libraries(it) }.toSet().let { needed -> steps.filter { it.id in ids || (it.library && it.id in needed) } }
         }
         if (selected.isEmpty()) {
             Out.line("Nothing to update")
@@ -124,6 +136,7 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
         val auto = JSONObject()
         repos.keys.forEach { auto.put(it, autoUpdate(it)) }
         if (fromReleases.isNotEmpty()) auto.put(Releases.NAME, autoUpdate(Releases.NAME))
+        if (fromPlay.isNotEmpty()) auto.put(PlayStore.NAME, autoUpdate(PlayStore.NAME))
         val json = JSONObject().put("checked", System.currentTimeMillis()).put("autoUpdate", auto).put("updates", updates)
         val fresh = File(file.path + ".new")
         fresh.writeText(json.toString())

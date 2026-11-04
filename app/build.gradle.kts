@@ -19,4 +19,8 @@ android {
 dependencies {
     // The terminal: Termux's emulator and view.
     implementation(project(":terminal-view"))
+    // Google Play, as Aurora Store reaches it (GPL-3.0): the engine downloads android.packages.playstore with it.
+    implementation("com.auroraoss:gplayapi:4.0.0")
+    // Its calls are suspend functions; the engine waits for them (runBlocking).
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
 }

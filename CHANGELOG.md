@@ -6,6 +6,10 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- Apps from Google Play: `android.packages.playstore = [ "com.whatsapp" ];` installs and updates
+  them as Aurora Store would download them, with the split APKs made for the phone. A Google
+  account signs in once in the app (⋮ → Google Play account), or `android.playstore.tokenFile`
+  gives its token; without one, Google Play gives the free apps.
 - Cloning a git repository has a "Clone its submodules too" box (off by default); pulls and builds
   then include them, and a private submodule uses the same token.
 - The app is installed for the phone's owner only, and removed from app clones and work profiles,

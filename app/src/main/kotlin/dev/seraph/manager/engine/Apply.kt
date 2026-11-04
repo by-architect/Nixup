@@ -5,8 +5,8 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Makes the phone match the profile: its apps (android.packages: a list for each repository, and the apps from
- * releases), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
+ * Makes the phone match the profile: its apps (android.packages: a list for each repository, the apps from releases,
+ * and those from Google Play), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
  * phone's own settings (android.system), the secrets (android.secrets) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
  * nothing changes; then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
  * the system settings (see SystemSettings), the services (see Units), and the apps that left the config removed, their data kept.
@@ -31,7 +31,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         val debloated = apps.keys().asSequence().filter { apps.getJSONObject(it).optBoolean("debloat") }.toList()
         val appSettings = JSONObject(apps.toString()).apply { debloated.forEach { remove(it) } }
         val fromReleases = Releases.apps(android)
-        // Each app of the config with where it comes from: a repository, or its releases (obtainium).
+        val fromPlay = PlayStore.apps(android)
+        // Each app of the config with where it comes from: a repository, its releases (obtainium), or Google Play
+        // (playstore, whose list is of package names too).
         val wanted = packages.keys().asSequence().filter { it != Releases.NAME }
             .flatMap { repo -> packages.getJSONArray(repo).strings().map { it to repo } }.toList() +
             fromReleases.map { it.id to Releases.NAME }
@@ -42,7 +44,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         val upToDate = ArrayList<String>()
         val problems = ArrayList<String>()
         for ((id, name) in wanted) {
-            if (name == Releases.NAME) continue
+            if (name == Releases.NAME || name == PlayStore.NAME) continue
             val repo = repos[name]
             if (repo == null) {
                 problems += "android.packages.$name: there is no repository named $name"
@@ -75,8 +77,24 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                 is Releases.Plan.Problem -> problems += plan.text
             }
         }
-        // The apps that update others go first: those after them get them as their installer of record.
-        steps.sortBy { it.id !in Device.FDROID + Device.OBTAINIUM }
+        if (fromPlay.isNotEmpty()) {
+            val play = PlayStore(data, android)
+            try {
+                play.refresh(fromPlay, force)
+                for (id in fromPlay) {
+                    when (val plan = play.plan(id, Device.installed(id))) {
+                        is PlayStore.Plan.Install -> steps += plan.steps
+                        is PlayStore.Plan.Current -> upToDate += "$id ${plan.version}"
+                        is PlayStore.Plan.Problem -> problems += plan.text
+                    }
+                }
+            } catch (e: Exception) {
+                problems += "${PlayStore.NAME}: ${e.message}"
+            }
+        }
+        // The apps that update others go first: those after them get them as their installer of record (a library
+        // stays before the app that needs it: the sort keeps their order).
+        steps.sortBy { it.id !in Device.FDROID + Device.OBTAINIUM + Device.PLAYSTORE }
         val ids = wanted.map { it.first }
         val removals = owned.filter { it !in ids }
         val toInstall = steps.filter { it.installed == null }
