@@ -4,12 +4,15 @@
 # and each build puts it on the phone, which then needs no sign-in.
 #
 #   seraph-play-login [--out <file>]   the token goes to <file> too (default: ./google-play.token), readable by you alone
+#   seraph-play-login --paste          no window: sign in in your own browser and paste its cookie
 #
-# Google's own sign-in page opens in the browser (https://accounts.google.com/EmbeddedSetup, the one Android's setup
-# shows). Sign in there (two-step verification works). Signed in, the page holds a token that lasts minutes, in its
-# cookie oauth_token: copy that cookie's value from the browser's developer tools and paste it here, with the account's
-# email address. Google then trades it for the account's lasting token, as it does for Android's setup and Aurora Store.
-# Needs curl. The token acts as the account itself: keep it out of any repository others can read.
+# A window opens with Google's own sign-in page (https://accounts.google.com/EmbeddedSetup, the one Android's setup
+# shows), as the Seraph app's sign-in screen does on the phone: sign in there (two-step verification works). Signed
+# in, the page gets a token that lasts minutes (its cookie oauth_token), which the window takes by itself, since the
+# page is its own (play-login-window.py, with Qt WebEngine: from python3's PyQt6, or fetched by nix). Google then
+# trades it for the account's lasting token, as it does for Android's setup and Aurora Store. Without a window (no
+# desktop, no Qt WebEngine, or --paste), the page opens in your browser, and you copy that cookie from its developer
+# tools. Needs curl. The token acts as the account itself: keep it out of any repository others can read.
 set -euo pipefail
 # What it writes is for its user alone.
 umask 077
@@ -19,16 +22,55 @@ die() { echo "seraph-play-login: $*" >&2; exit 1; }
 
 page="https://accounts.google.com/EmbeddedSetup"
 out="google-play.token"
+paste=0
 while (($#)); do
   case $1 in
     --out) [[ $# -ge 2 ]] || die "--out needs a file"; out=$2; shift 2 ;;
     --out=*) out=${1#--out=}; shift ;;
+    --paste) paste=1; shift ;;
     -h | --help) usage; exit 0 ;;
     *) die "no such option: $1 (--help says which there are)" ;;
   esac
 done
 command -v curl > /dev/null || die "there is no curl here"
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
+# --- The sign-in window: it prints the account's email address and the page's token, one a line. Its Python is the
+# package's (SERAPH_PLAY_PYTHON), python3 when it has Qt WebEngine, or one nix fetches (once; it stays in the store).
+# Without LD_LIBRARY_PATH: a system's own libraries there (sound, on NixOS) would be taken over Qt's.
+window() {
+  local script="$here/play-login-window.py"
+  if [[ -n ${SERAPH_PLAY_PYTHON:-} ]]; then
+    env -u LD_LIBRARY_PATH "$SERAPH_PLAY_PYTHON" "$script"
+  elif command -v python3 > /dev/null && python3 -c 'import PyQt6.QtWebEngineWidgets' 2> /dev/null; then
+    env -u LD_LIBRARY_PATH python3 "$script"
+  elif command -v nix > /dev/null; then
+    echo "(Getting Qt WebEngine for the window with nix: the first time takes a while.)" >&3
+    nix --extra-experimental-features 'nix-command flakes' shell --impure --expr \
+      '(builtins.getFlake "nixpkgs").legacyPackages.${builtins.currentSystem}.python3.withPackages (ps: [ ps.pyqt6-webengine ])' \
+      --command env -u LD_LIBRARY_PATH python3 "$script"
+  else
+    return 1
+  fi
+}
+
+email="" oauth=""
+if ((!paste)) && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} || $(uname) == Darwin ]]; then
+  echo "Sign in to Google in the window that opens (better an account of its own for this: Google may block an"
+  echo "account that downloads with an unofficial client). After \"I agree\" the window closes by itself."
+  log="$(mktemp)"
+  # What the browser says goes to a log, shown only when the window fails.
+  if signed="$(window 3>&2 2> "$log")"; then
+    email="$(sed -n 1p <<< "$signed")"
+    oauth="$(sed -n 2p <<< "$signed")"
+  else
+    echo "(The window did not give a token$([[ -s $log ]] && echo ": $(grep -v '^\s*$' "$log" | tail -n 3 | tr '\n' ' ')"); now the browser instead.)"
+  fi
+  rm -f "$log"
+fi
+if [[ -n $oauth ]]; then
+  [[ $email == *@*.* ]] || read -r -p "The account's email address: " email
+else
 # --- The sign-in page, in the browser.
 if command -v xdg-open > /dev/null; then
   xdg-open "$page" > /dev/null 2>&1 &
@@ -39,19 +81,24 @@ cat << EOF
 1. Sign in to Google on this page (it opened in the browser, or open it):
      $page
    Better an account of its own for this: Google may block an account that downloads with an unofficial client.
-2. Once you are signed in, open the browser's developer tools (F12) and copy the value of the cookie
-   oauth_token (it starts with oauth2_4/):
-     Firefox:                  Storage → Cookies → https://accounts.google.com
+2. After "I agree" the page stays as it is (or keeps loading): that is all it does, it was made for a phone's
+   setup screen, and the cookie is there now. Open the browser's developer tools on that page (F12), then:
+     Firefox, Zen, LibreWolf:  Storage → Cookies → https://accounts.google.com
      Chrome, Chromium, Brave:  Application → Cookies → https://accounts.google.com
-   It lasts a few minutes: paste it soon.
+   find the cookie oauth_token (its value starts with oauth2_4/), double-click its value, copy it, and paste
+   it below (it is not shown), then press Enter. It lasts a few minutes: paste it soon.
 
 EOF
 read -r -p "The account's email address: " email
-[[ $email == *@*.* ]] || die "\"$email\" is not an email address (like you@gmail.com)"
 read -r -s -p "oauth_token (not shown): " oauth
 echo
-oauth=${oauth//[[:space:]]/}
+# As copied: the value alone, or with its name or quotes around it.
+oauth=${oauth//[[:space:]\"\']/}
+oauth=${oauth#oauth_token=}
 [[ -n $oauth ]] || die "no oauth_token given"
+[[ $oauth == oauth2_4/* ]] || echo "(That does not start with oauth2_4/, as the cookie's value does; trying it anyway.)"
+fi
+[[ $email == *@*.* ]] || die "\"$email\" is not an email address (like you@gmail.com)"
 
 # --- The lasting token, from Google, as the phone's sign-in asks for it (PlayStore.kt's lastingToken). The short token
 # goes in on curl's input, never on its command line, which other users here can see.

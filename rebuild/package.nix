@@ -9,7 +9,7 @@ stdenvNoCC.mkDerivation {
 
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [ ./seraph-rebuild ./seraph-play-login ../nix ];
+    fileset = lib.fileset.unions [ ./seraph-rebuild ./seraph-play-login ./play-login-window.py ../nix ];
   };
 
   nativeBuildInputs = [ makeWrapper ];
