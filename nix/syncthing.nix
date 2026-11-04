@@ -225,15 +225,17 @@ let
   '';
 in
 {
-  # NixOS's older names, which it still takes (with a warning that names the new one).
+  # NixOS's older names, which it still takes (with a warning that names the new one). All but services.syncthing.folders
+  # (settings.folders since NixOS 23.05): a module shared with home-manager may declare an option of that name itself
+  # (its own list of folders), and the phone imports such a module at its top level, where the two would clash.
   imports = [
     (lib.mkRemovedOptionModule [ "services" "syncthing" "useInotify" ] "Syncthing watches folders itself now (fsWatcherEnabled, a folder's setting).")
     (lib.mkRenamedOptionModule [ "services" "syncthing" "extraOptions" ] [ "services" "syncthing" "settings" ])
-    (lib.mkRenamedOptionModule [ "services" "syncthing" "folders" ] [ "services" "syncthing" "settings" "folders" ])
     (lib.mkRenamedOptionModule [ "services" "syncthing" "devices" ] [ "services" "syncthing" "settings" "devices" ])
     (lib.mkRenamedOptionModule [ "services" "syncthing" "options" ] [ "services" "syncthing" "settings" "options" ])
+    (lib.mkRenamedOptionModule [ "services" "syncthing" "declarative" "folders" ] [ "services" "syncthing" "settings" "folders" ])
   ] ++ map (option: lib.mkRenamedOptionModule [ "services" "syncthing" "declarative" option ] [ "services" "syncthing" option ])
-    [ "cert" "key" "devices" "folders" "overrideDevices" "overrideFolders" "extraOptions" ];
+    [ "cert" "key" "devices" "overrideDevices" "overrideFolders" "extraOptions" ];
 
   options.services.syncthing = {
     enable = lib.mkEnableOption ''
