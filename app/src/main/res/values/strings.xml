@@ -275,6 +275,9 @@
     <string name="seraph_installing">Installing Seraph %1$s…</string>
     <!-- The Google Play account -->
     <string name="google_sign_in_title">Sign in to Google Play</string>
+    <string name="play_offline">Google\'s sign-in page cannot load: this app has no internet. Either the phone is offline, or Network access is off for Seraph (App info, Mobile data and Wi-Fi, Network access). Turn it on, then come back here; once you are signed in it can go off again (the downloads do not need it).</string>
+    <string name="play_page_failed">Google\'s sign-in page did not load (%1$s). Is the phone online, and Network access on for Seraph (App info, Mobile data and Wi-Fi)?</string>
+    <string name="app_info">App info</string>
     <string name="play_account_none">No account is signed in: the config\'s apps from Google Play (android.packages.playstore) come with none, which gets the free apps alone.\n\nSigned in, on Google\'s own page, they are that account\'s downloads, and the paid apps it bought come too. The phone keeps its token where root alone reads it. Better an account of its own for this: Google may block an account that downloads with an unofficial client.</string>
     <string name="play_account_signed_in">Signed in as %1$s: the config\'s apps from Google Play (android.packages.playstore) are its downloads.\n\nSign out takes its token off the phone; Google\'s account page (Security, Your devices) can end its sign-in too.</string>
     <string name="play_sign_in">Sign in</string>

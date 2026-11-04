@@ -3,19 +3,27 @@ package dev.seraph.manager
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.view.WindowInsets
 import android.window.OnBackInvokedDispatcher
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.TextView
 
 /**
  * Google's own sign-in page, the one Android's setup shows (as Aurora Store signs in), for the Google Play account the
@@ -26,6 +34,8 @@ import android.widget.ProgressBar
  */
 class GoogleSignInActivity : Activity() {
     private lateinit var web: WebView
+    private lateinit var trouble: View
+    private lateinit var message: TextView
     private var finished = false
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -56,10 +66,29 @@ class GoogleSignInActivity : Activity() {
                     // The page names the account that signed in; the engine also takes the name Google gives with the token.
                     view.evaluateJavascript(EMAIL) { said -> done(said.trim('"').takeIf { it.contains('@') }.orEmpty(), token) }
                 }
+
+                override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                    if (request.isForMainFrame) problem(getString(R.string.play_page_failed, error.description))
+                }
             }
+        }
+        val pad = Ui.dp(this, 20)
+        message = TextView(this).apply { setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Medium) }
+        trouble = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            visibility = View.GONE
+            addView(message)
+            addView(Button(this@GoogleSignInActivity).apply {
+                setText(R.string.app_info)
+                setOnClickListener {
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+                }
+            })
         }
         val root = FrameLayout(this).apply {
             addView(web, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            addView(trouble, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             addView(progress, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             // Drawn edge to edge: the page keeps clear of the bars (and of the keyboard, for its fields).
             setOnApplyWindowInsetsListener { view, insets ->
@@ -73,7 +102,27 @@ class GoogleSignInActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
         }
-        web.loadUrl(PAGE)
+        // Android tells an app it is offline when its network is blocked too (Network access off for it, as LineageOS
+        // and others can set it): the page could only fail then.
+        if (getSystemService(ConnectivityManager::class.java)?.activeNetwork == null) problem(getString(R.string.play_offline))
+        else web.loadUrl(PAGE)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Back from App info, with its network on now: the page, at last.
+        if (trouble.visibility == View.VISIBLE && getSystemService(ConnectivityManager::class.java)?.activeNetwork != null) {
+            trouble.visibility = View.GONE
+            web.visibility = View.VISIBLE
+            web.loadUrl(PAGE)
+        }
+    }
+
+    /** Why the page cannot be there, in place of it, with a way to the app's own settings (its network access). */
+    private fun problem(text: String) {
+        web.visibility = View.GONE
+        message.text = text
+        trouble.visibility = View.VISIBLE
     }
 
     @Deprecated("Android 12 and older; newer ones call the callback onCreate registers")
