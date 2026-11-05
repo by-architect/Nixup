@@ -272,8 +272,16 @@ syntax.
   when it wakes. The Services tab shows when each one runs next.
 - Sockets (`systemd.sockets`: TCP, UDP and unix sockets): the phone opens them and hands them to their service
   as systemd does (`LISTEN_FDS`), so nixpkgs' modules that use them (harmonia) run as they are, and a port below
-  1024 can be a service user's. Such a service starts with the build, not at its first connection; one started
-  for each connection (`Accept = true`) is not on the phone.
+  1024 can be a service user's. A service nothing else wants starts at its first connection; with
+  `Accept = true` each connection goes to a run of its own of the socket's template service (`foo@`).
+- Templates (`systemd.services."foo@"`) run as their instances (`foo@bar`, with `%i`), path units
+  (`systemd.paths`: `PathExists`, `PathChanged`, ...) start their service when a file is there or changes,
+  units in packages (`systemd.packages`) are read from the package as on NixOS, and users' own units
+  (`systemd.user.services`) run as each normal user.
+- `Type = "notify"` services count as started once they say `READY=1`; with `WatchdogSec` one that stops
+  saying `WATCHDOG=1` is ended and started again (`Restart = "on-watchdog"`). `LoadCredentialEncrypted` takes
+  what `systemd-creds encrypt` made on the phone (with the phone's own key: add `pkgs.systemd` to
+  `environment.systemPackages` and run it in the app's terminal).
 - A service with a user of its own (`User`, `DynamicUser`, as NixOS's modules give them) runs as that user,
   with a uid from 400 to 999 the phone keeps for it. Android lets those on the network; the shared storage
   (`/storage`, `/sdcard`), which Android lets only apps and root open, such a service gets when its user is in
@@ -293,9 +301,14 @@ syntax.
 
 NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
 runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The ones Seraph has tried
-are AdGuard Home, aria2, at, Blocky, code-server, cron, dnscrypt-proxy, endlessh, File Browser, Forgejo, gonic,
-Gotify, harmonia, i2pd, llama.cpp, MiniDLNA, Mosquitto, Navidrome, Node-RED, ntfy, Ollama, Radicale, Soft Serve,
-ttyd, Unbound, Uptime Kuma, vnStat and WebDAV ([nix/nixos.nix](nix/nixos.nix)). Another of nixpkgs' modules can be
+are AdGuard Home, aria2, at, Audiobookshelf, Bazarr, Blocky, Caddy, calibre-web, code-server, Conduit (Matrix),
+CoreDNS, CouchDB, cron, Deluge, dnscrypt-proxy, dnsmasq, endlessh, File Browser, Forgejo, FreshRSS, Gitea, gonic,
+GoToSocial, Gotify, Grafana, harmonia, Headscale, Homepage, i2pd, InfluxDB, Jellyfin, Kavita, Komga, Lidarr,
+lighttpd, linkding, llama.cpp, Loki, MariaDB/MySQL, Mealie, MiniDLNA, Mosquitto, Navidrome, nginx, Node-RED, ntfy,
+Ollama, Apache httpd, Privoxy, Prometheus, Prowlarr, qBittorrent, Radarr, Radicale, Readarr, Redis, Soft Serve,
+Sonarr, Stirling-PDF, Tor, Transmission, ttyd, Unbound, Uptime Kuma, Vaultwarden, vnStat and WebDAV
+([nix/nixos.nix](nix/nixos.nix)); PostgreSQL is not, as it needs shared memory Android's kernel has not got (a
+module's SQLite database is on the phone). Another of nixpkgs' modules can be
 added by hand, as on NixOS: `imports = [ "${modulesPath}/services/web-apps/foo.nix" ];` (what it needs that the
 phone has not got stops the build and says so). The small files a module makes (its settings) the phone builds
 itself from what cache.nixos.org has; a package itself it never builds.

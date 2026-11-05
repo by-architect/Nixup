@@ -70,6 +70,7 @@ import kotlin.system.exitProcess
  *   timer-next <timer>            prints the next time a timer of the last build starts its unit (epoch seconds;
  *                                 nothing when it has none left until the next boot), for its loop (see Timers)
  *   timer-fire <timer>            starts a timer's unit, as its loop does at its time
+ *   path-fire <path unit>         starts a path unit's unit, as its loop does when its paths say so (see Paths)
  *   calendar <expression> [--count=<n>] [--after=<epoch seconds>]
  *                                 the next times (5) of a calendar event (OnCalendar, startAt) after now (or the
  *                                 time given), as systemd-analyze calendar shows them, or what is wrong with it
@@ -147,12 +148,19 @@ object Main {
                             val last = timer.optLong("last").takeIf { it > 0 }?.let { ", last ${Out.date(it)}" }.orEmpty()
                             Out.line("${"timer".padEnd(10)} ${timer.getString("name")}  starts ${timer.getString("unit")}: $next$last")
                         }
+                        val paths = list.getJSONArray("paths")
+                        for (i in 0 until paths.length()) paths.getJSONObject(i).let { path ->
+                            val watched = (0 until path.getJSONArray("paths").length()).joinToString(", ") { path.getJSONArray("paths").getString(it) }
+                            val last = path.optLong("last").takeIf { it > 0 }?.let { ", last ${Out.date(it)}" }.orEmpty()
+                            Out.line("${"path".padEnd(10)} ${path.getString("name")}  starts ${path.getString("unit")}: ${if (path.optBoolean("running")) "watching" else "not running"} $watched$last")
+                        }
                         0
                     }
                 }
                 "unit" -> Installer.locked(data) { Units(data).control(files.getOrNull(0) ?: usage(), files.getOrNull(1) ?: usage()) }
                 "timer-next" -> Timers(data).next(files.firstOrNull() ?: usage())?.let { println(it) }.let { 0 }
                 "timer-fire" -> Units(data).fire(files.firstOrNull() ?: usage())
+                "path-fire" -> Units(data).firePath(files.firstOrNull() ?: usage())
                 "calendar" -> calendar(
                     args.drop(1).filter { !it.startsWith("--") }.joinToString(" ").ifBlank { usage() },
                     option(args, "count")?.toIntOrNull() ?: 5, option(args, "after")?.toLongOrNull() ?: (System.currentTimeMillis() / 1000),
@@ -263,5 +271,5 @@ object Main {
     private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | path-fire <path unit> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
 }

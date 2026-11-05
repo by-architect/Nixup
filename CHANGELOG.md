@@ -7,8 +7,10 @@ section after the version, and its text is what the Magisk app shows as the upda
 ## Unreleased
 
 - NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
-  runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 28 Seraph has tried
-  (AdGuard Home, cron, Forgejo, Gotify, harmonia, Navidrome, ntfy, Radicale, Uptime Kuma, ...) are listed in nix/nixos.nix;
+  runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 67 Seraph has tried
+  (AdGuard Home, Caddy, cron, Forgejo, Gitea, Gotify, Grafana, harmonia, Jellyfin, Navidrome, nginx, ntfy, Redis,
+  Sonarr, Tor, Transmission, Uptime Kuma, Vaultwarden, ...) are listed in nix/nixos.nix (PostgreSQL is not: it needs
+  shared memory Android's kernel has not got);
   another can be added as on NixOS, `imports = [ "${modulesPath}/services/…" ];`.
 - Services can run as their own user (`User`, `Group`, `DynamicUser`, as NixOS's modules give them): a user with
   no uid gets one from 400 to 999, which the phone keeps. Android lets those on the network; one in the
@@ -20,9 +22,20 @@ section after the version, and its text is what the Magisk app shows as the upda
   start) and `RandomizedDelaySec`. The Services tab shows when each service a timer starts runs next.
 - Sockets, as on NixOS (`systemd.sockets`, TCP, UDP and unix): the phone opens them and hands them to their
   service as systemd does, so nixpkgs' modules that use them run as they are (harmonia, a binary cache of the
-  phone's store, is on the list), and a port below 1024 can be a service user's. Such a service starts with the
-  build and at boot, not at its first connection; one started for each connection (`Accept = true`) is not on
-  the phone yet.
+  phone's store, is on the list), and a port below 1024 can be a service user's. A service nothing else wants
+  starts at its first connection (the Services tab says "listening" until then); with `Accept = true` each
+  connection goes to a run of its own of the socket's template service.
+- Templates (`foo@`) and their instances (`foo@bar`, `%i`), path units (`systemd.paths`), units in packages
+  (`systemd.packages`: static-web-server's runs as nixpkgs' module makes it) and users' own units
+  (`systemd.user.services`, `timers`, `sockets`, `paths`: each normal user's, run as that user), as on NixOS.
+- `Type = "notify"`: a service counts as started once it says `READY=1`, and with `WatchdogSec` it is ended and
+  started again (`Restart = "on-watchdog"`) when it stops saying `WATCHDOG=1`.
+- `LoadCredentialEncrypted` and `SetCredentialEncrypted`, as `systemd-creds encrypt` makes them on the phone
+  (with its own key); Seraph's `/etc` has a `machine-id`, as NixOS's has.
+- A unit's `Environment` values have their specifiers filled in (`%S`, `%N`, `%d`, `%h`, ...), as systemd does.
+- A module that adds `boot.kernelModules` (nginx's `tls`) builds, with a warning: the phone loads no modules.
+- Fixed: stopping a service took up to minutes on a phone with many processes (each of them was looked at with
+  a command of its own); one look at all of them takes a moment now.
 - Services and the jobs cron starts have the phone's time zone in Seraph's `/etc/localtime`, out of Android's
   time zone data, so summer time comes too; cron's jobs ran in UTC before.
 - `system.path` (cron's `PATH`) is made by Nix itself, without Perl.

@@ -70,6 +70,12 @@ object Etc {
         // The config's own files (environment.etc), and the phone's time zone unless they have one.
         writeFiles(data, etc, profile?.optJSONArray("etc"))
         writeTimeZone(etc, profile?.optJSONArray("etc"))
+        // A machine id, as systemd makes one at the first start (systemd-creds, D-Bus and others read it), kept from
+        // then on; environment.etc."machine-id" gives one of its own.
+        val machineId = File(etc, "machine-id")
+        if (!machineId.isFile && !Files.isSymbolicLink(machineId.toPath())) {
+            machineId.writeText(java.util.UUID.randomUUID().toString().replace("-", "") + "\n")
+        }
         writeLogin(etc, home, profile?.optJSONObject("shell"))
         // What every session runs first (environment.extraInit).
         File(etc, "seraph/environment").writeText(profile?.string("extraInit") ?: "")

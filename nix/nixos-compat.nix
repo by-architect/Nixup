@@ -74,6 +74,12 @@ let
   exportLine = name: value: "export ${name}=${lib.escapeShellArg (if builtins.isList value then lib.concatStringsSep ":" (map toString value) else toString value)}";
 in
 {
+  # NixOS's older names, which modules still use.
+  imports = [
+    (lib.mkAliasOptionModule [ "users" "extraUsers" ] [ "users" "users" ])
+    (lib.mkAliasOptionModule [ "users" "extraGroups" ] [ "users" "groups" ])
+  ];
+
   options = {
     networking = {
       firewall = mkOption {
@@ -284,7 +290,13 @@ in
         default = { };
         description = "Kernel settings, as on NixOS: not set on the phone yet (the build says which it left).";
       };
-      kernelModules = mkOption { type = types.listOf types.str; default = [ ]; description = "As on NixOS: not on the phone (its kernel is Android's)."; };
+      kernelModules = mkOption { type = types.listOf types.str; default = [ ]; description = "As on NixOS: not loaded on the phone (its kernel is Android's; the build says which it left)."; };
+      kernelPackages = mkOption {
+        type = types.raw;
+        default = pkgs.linuxPackages;
+        defaultText = lib.literalExpression "pkgs.linuxPackages";
+        description = "As on NixOS, read by modules (the kernel's version): taken, the phone's kernel is Android's.";
+      };
       extraModulePackages = mkOption { type = types.listOf types.package; default = [ ]; description = "As on NixOS: not on the phone."; };
       kernelParams = mkOption { type = types.listOf types.str; default = [ ]; description = "As on NixOS: not on the phone."; };
       isContainer = taken types.bool false "whether the system is a container";
@@ -294,19 +306,13 @@ in
     };
 
     systemd = {
-      paths = unitKind "path" "units started when a path changes: not on the phone";
       slices = anyAttrs;
       mounts = mkOption { type = types.listOf types.anything; default = [ ]; description = "As on NixOS, mount units: not on the phone."; };
       automounts = mkOption { type = types.listOf types.anything; default = [ ]; description = "As on NixOS: not on the phone."; };
       packages = mkOption {
         type = types.listOf types.package;
         default = [ ];
-        description = "Packages whose own unit files NixOS uses: not on the phone (it does not read packages' unit files): give the unit in systemd.services.";
-      };
-      user = mkOption {
-        type = types.submodule { freeformType = types.lazyAttrsOf types.anything; };
-        default = { };
-        description = "As on NixOS, units of users' own systemd: not on the phone.";
+        description = "Packages whose own unit files are used, as on NixOS (nix/units.nix reads them).";
       };
       network = absent "systemd-networkd: Android manages the phone's networks" {
         networks = anyAttrs;
@@ -349,16 +355,8 @@ in
         enable = taken types.bool false "logrotate (each unit's log on the phone is set aside past 1 MB)";
         settings = anyAttrs;
       };
-      nginx = absent "nginx" { virtualHosts = anyAttrs; };
-      httpd = absent "Apache" { virtualHosts = anyAttrs; };
-      caddy = absent "Caddy" { virtualHosts = anyAttrs; };
-      phpfpm = { pools = anyAttrs; };
-      postgresql = absent "PostgreSQL" { };
-      mysql = absent "MySQL" { };
-      redis = { servers = anyAttrs; };
       home-assistant = absent "Home Assistant" { };
       avahi = absent "Avahi (Android has its own mDNS)" { };
-      prometheus = absent "Prometheus" { exporters = anyAttrs; };
     };
 
     nix = {
@@ -419,30 +417,22 @@ in
       (off "security.doas.enable" config.security.doas.enable "doas is not on the phone.")
       (off "security.rtkit.enable" config.security.rtkit.enable "RealtimeKit is not on the phone.")
       (off "security.apparmor.enable" config.security.apparmor.enable "AppArmor is not on the phone (Android has SELinux).")
-      (off "boot.kernelModules" (config.boot.kernelModules != [ ] || config.boot.extraModulePackages != [ ] || config.boot.kernelParams != [ ]) "the phone's kernel is Android's: Seraph loads no modules and sets no parameters.")
-      (off "systemd.paths" (wanted config.systemd.paths != [ ]) "${lib.concatStringsSep ", " (wanted config.systemd.paths)}: path units are not on the phone.")
+      (off "boot.extraModulePackages" (config.boot.extraModulePackages != [ ] || config.boot.kernelParams != [ ]) "the phone's kernel is Android's: Seraph loads no modules of its own and sets no parameters.")
       (off "systemd.mounts" (config.systemd.mounts != [ ] || config.systemd.automounts != [ ]) "mount units are not on the phone.")
-      (off "systemd.packages" (config.systemd.packages != [ ]) "the phone does not read packages' own unit files: give the unit in systemd.services.")
-      (off "systemd.user.services" ((config.systemd.user.services or { }) != { }) "units of users' own systemd are not on the phone.")
       (off "systemd.network.enable" config.systemd.network.enable "Android manages the phone's networks.")
       (off "services.resolved.enable" config.services.resolved.enable "not on the phone (networking.nameservers sets its services' DNS servers).")
       (off "services.xserver.enable" config.services.xserver.enable "not on the phone.")
       (off "services.pulseaudio.enable" config.services.pulseaudio.enable "Android plays the phone's sound.")
       (off "services.pipewire.enable" config.services.pipewire.enable "Android plays the phone's sound.")
-      (off "services.nginx.enable" config.services.nginx.enable "nginx is not on the phone yet.")
-      (off "services.httpd.enable" config.services.httpd.enable "Apache is not on the phone yet.")
-      (off "services.caddy.enable" config.services.caddy.enable "Caddy is not on the phone yet.")
-      (off "services.phpfpm.pools" (config.services.phpfpm.pools != { }) "PHP-FPM is not on the phone yet.")
-      (off "services.postgresql.enable" config.services.postgresql.enable "PostgreSQL is not on the phone yet (a module's own SQLite database is: often database.type = \"sqlite3\").")
-      (off "services.mysql.enable" config.services.mysql.enable "MySQL is not on the phone yet.")
-      (off "services.redis.servers" (lib.any (server: server.enable or false) (lib.attrValues config.services.redis.servers)) "Redis is not on the phone yet.")
+      (off "services.postgresql.enable" (config.services.postgresql.enable or false) "PostgreSQL needs System V shared memory, which Android's kernel has not got (no CONFIG_SYSVIPC): a module's own SQLite database is on the phone (often database.type = \"sqlite3\").")
       (off "services.home-assistant.enable" config.services.home-assistant.enable "Home Assistant is not on the phone yet.")
       (off "services.avahi.enable" config.services.avahi.enable "Android has its own mDNS on the phone's port 5353.")
-      (off "services.prometheus.enable" config.services.prometheus.enable "Prometheus is not on the phone yet.")
       (off "hardware.graphics.enable" config.hardware.graphics.enable "the phone's GPU is Android's.")
     ];
 
-    warnings = lib.optional (config.boot.kernel.sysctl != { })
+    warnings = lib.optional (config.boot.kernelModules != [ ])
+      "boot.kernelModules: the phone's kernel is Android's, and Seraph loads none of its modules (${lib.concatStringsSep ", " config.boot.kernelModules}): what is built into it is there."
+    ++ lib.optional (config.boot.kernel.sysctl != { })
       "boot.kernel.sysctl: not set on the phone yet (${lib.concatStringsSep ", " (lib.attrNames config.boot.kernel.sysctl)})."
       ++ lib.optional (config.security.wrappers != { })
       "security.wrappers: the phone makes no setuid wrappers (${lib.concatStringsSep ", " (lib.attrNames config.security.wrappers)}): root runs those programs as they are.";

@@ -135,7 +135,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         val secrets = Secrets(data, incoming)
         secrets.plan(android.optJSONArray("secrets"), problems)
         val units = Units(data)
-        units.plan(android.optJSONObject("units"), problems, secrets.changing, android.optJSONObject("timers"))
+        units.plan(android.optJSONObject("units"), problems, secrets.changing, android.optJSONObject("timers"), android.optJSONObject("paths"))
         val adb = Adb(data)
         adb.plan(android.optJSONObject("adb"), problems)
         // The users of apps (users.users.<name>.androidApp) take their app's uid: the app is here, or this build installs it.

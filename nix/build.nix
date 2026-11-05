@@ -146,6 +146,8 @@ in
             units = config.system.build.units;
             # Their timers (systemd.timers, startAt), which the engine keeps.
             timers = config.system.build.timers;
+            # Their path units (systemd.paths).
+            paths = config.system.build.paths;
             etc = config.system.build.etc;
             inherit (config.system.build) network tmpfiles;
             storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths

@@ -45,21 +45,23 @@ class Units(private val data: File) {
     /** Units nothing starts with the build (a timer's, or one to start by hand) that are new or changed: written, not started. */
     private var toWrite: List<String> = emptyList()
     private val timers = Timers(data)
-    /** The units the timers start, each with its timers: they start then, not with the build. */
+    private val paths = Paths(data)
+    /** The units the timers and path units start, each with what starts it ("its timer foo"): they start then. */
     private var timerUnits: Map<String, List<String>> = emptyMap()
 
     /** Whether the plan changes anything. */
     val changes get() = toStop.isNotEmpty() || toStart.isNotEmpty() || leaving.isNotEmpty() || toRefresh.isNotEmpty() ||
-        toWrite.isNotEmpty() || timers.changes || legacy.exists()
+        toWrite.isNotEmpty() || timers.changes || paths.changes || legacy.exists()
 
     /**
      * [secrets]: the files of the secrets the build changes; a unit that names one runs again, as with a changed unit.
-     * [timerSpecs]: the profile's timers (android.timers).
+     * [timerSpecs], [pathSpecs]: the profile's timers and path units (android.timers, android.paths).
      */
-    fun plan(units: JSONObject?, problems: MutableList<String>, secrets: List<String> = emptyList(), timerSpecs: JSONObject? = null) {
+    fun plan(units: JSONObject?, problems: MutableList<String>, secrets: List<String> = emptyList(), timerSpecs: JSONObject? = null, pathSpecs: JSONObject? = null) {
         wanted = units?.let { json -> json.keys().asSequence().associateWith { json.getJSONObject(it) } } ?: emptyMap()
         timers.plan(timerSpecs, wanted.keys, problems)
-        timerUnits = timers.unitsStarted()
+        paths.plan(pathSpecs, wanted.keys, problems)
+        timerUnits = startedBy(timers.unitsStarted(), paths.unitsStarted())
         val had = applied()
         val active = active(wanted)
         for ((name, unit) in wanted) {
@@ -106,7 +108,14 @@ class Units(private val data: File) {
         toWrite = wanted.keys.filter { it !in active && (had[it] == null || it in edited) }
         report(had, active, changed)
         timers.report()
+        paths.report()
     }
+
+    /** The units timers and path units start, each with what starts it. */
+    private fun startedBy(byTimers: Map<String, List<String>>, byPaths: Map<String, List<String>>): Map<String, List<String>> =
+        (byTimers.keys + byPaths.keys).associateWith { unit ->
+            byTimers[unit].orEmpty().map { "its timer $it" } + byPaths[unit].orEmpty().map { "its path unit $it" }
+        }
 
     /** Whether [unit] names one of [files] (JSON writes / as \/). */
     private fun reads(unit: JSONObject, files: List<String>): Boolean {
@@ -124,7 +133,7 @@ class Units(private val data: File) {
             val once = oneshot(unit)
             val what = when {
                 name in leaving -> if (supervisorPid(name) != null) "to stop (it left the config)" else "to remove (it left the config)"
-                name !in active && name in timerUnits -> "started by its timer (${timerUnits.getValue(name).joinToString(", ")})" + when {
+                name !in active && name in timerUnits -> "started by ${timerUnits.getValue(name).joinToString(", ")}" + when {
                     name in toStop -> "; to stop now (changed)"
                     !once && running(name) -> "; running"
                     else -> ""
@@ -171,8 +180,8 @@ class Units(private val data: File) {
             File(unitDir, "spec.json").writeText(unit.toString())
         }
         val failed = startAll(toStart, wanted)
-        // The timers last, as the units they start are there now.
-        return failed + timers.apply()
+        // The timers and path units last, as the units they start are there now.
+        return failed + timers.apply() + paths.apply()
     }
 
     /** At boot: the units the last build left, started again in order. */
@@ -196,6 +205,7 @@ class Units(private val data: File) {
         )
         broken.forEach { retryLater(it) }
         timers.start(had.keys)
+        paths.start(had.keys)
         return count
     }
 
@@ -219,6 +229,7 @@ class Units(private val data: File) {
     fun removeAll(): Int {
         moveLegacy()
         timers.removeAll()
+        paths.removeAll()
         val had = applied()
         order(had.keys, had).reversed().forEach { stop(it) }
         dir.deleteRecursively()
@@ -236,6 +247,7 @@ class Units(private val data: File) {
         val had = applied()
         val active = active(had)
         val started = timers.unitsStartedNow()
+        val byPaths = paths.unitsStartedNow()
         val units = JSONArray()
         for (name in had.keys.sorted()) {
             val unit = had.getValue(name)
@@ -243,6 +255,7 @@ class Units(private val data: File) {
             val state = when {
                 waiting(name) -> "waiting"
                 once -> when (status(name)) { OK -> "done"; SKIPPED -> "skipped"; "" -> "not run"; WAITING -> "waiting"; else -> "failed" }
+                running(name) && File(dir, "$name/listening").isFile -> "listening"
                 running(name) -> "running"
                 supervisorPid(name) != null -> "restarting"
                 File(dir, "$name/skipped").isFile -> "skipped"
@@ -257,17 +270,22 @@ class Units(private val data: File) {
                 entry.put("timer", names.joinToString(", "))
                 names.mapNotNull { timers.nextTime(it) }.minOrNull()?.let { entry.put("next", it) }
             }
+            byPaths[name]?.let { entry.put("path", it.joinToString(", ")) }
             units.put(entry)
         }
-        return JSONObject().put("units", units).put("timers", timers.list())
+        return JSONObject().put("units", units).put("timers", timers.list()).put("paths", paths.list())
     }
 
     /**
      * Timer [timer]'s time (see Timers): its unit starts, as systemd's timer starts it, once a build running now has
      * ended (it changes the units); a simple unit running already is left as it is.
      */
-    fun fire(timer: String): Int {
-        val name = timers.spec(timer)?.optString("unit") ?: throw Stop("there is no timer $timer in the last build", 2)
+    fun fire(timer: String): Int = fireUnit(timers.spec(timer)?.optString("unit") ?: throw Stop("there is no timer $timer in the last build", 2))
+
+    /** Path unit [path]'s paths say so (see Paths): its unit starts, as with a timer's. */
+    fun firePath(path: String): Int = fireUnit(paths.spec(path)?.optString("unit") ?: throw Stop("there is no path unit $path in the last build", 2))
+
+    private fun fireUnit(name: String): Int {
         waitForBuild()
         val unit = applied()[name] ?: throw Stop("its unit $name is not in the last build", 2)
         if (waiting(name) || (!oneshot(unit) && running(name))) {
@@ -454,15 +472,20 @@ class Units(private val data: File) {
             busybox, "sh", background.path, busybox, nice(unit),
             busybox, "setsid", "sh", "-c", SUPERVISOR, MARK + name, busybox, view.path, log.path, unitDir.path, name,
         ).directory(unitDir).redirectInput(devNull).redirectOutput(devNull).redirectError(devNull).apply { unitEnvironment(environment()) }.start()
-        // A forking one has started once its start has ended and its service is found.
-        if (unit.optString("type") == "forking") {
+        // A forking one has started once its start has ended and its service is found; a notify one once it says so.
+        if (unit.optString("type") == "forking" || unit.optBoolean("notify")) {
             val until = System.currentTimeMillis() + 1000L * timeout(unit, "timeoutStart", 90).coerceAtMost(120)
             while (System.currentTimeMillis() < until && !File(unitDir, "ready").isFile && supervisorPid(name) != null) Thread.sleep(300)
         }
         Thread.sleep(1500)
+        // One started at its first connection: until its sockets are open and waiting.
+        if (unit.optBoolean("lazy")) {
+            var tries = 0
+            while (!File(unitDir, "listening").isFile && supervisorPid(name) != null && tries++ < 20) Thread.sleep(250)
+        }
         val main = pid(File(unitDir, "main.pid"))
         if (running(name) && main != null && alive(main)) {
-            Out.line("✔ $name: running")
+            Out.line(if (File(unitDir, "listening").isFile) "✔ $name: listening (it starts at its first connection)" else "✔ $name: running")
             return true
         }
         if (waiting(name)) {
@@ -504,6 +527,10 @@ class Units(private val data: File) {
             "sigkill" to if (unit.optBoolean("sendSigkill", true)) "1" else "",
             "timeout" to timeout(unit, "timeoutStop", 10).coerceAtMost(300).toString(),
             "timeout_start" to timeout(unit, "timeoutStart", 90).coerceAtMost(600).toString(),
+            // Type = notify: what it tells its socket goes there (see notifyStart), and WatchdogSec.
+            "notify" to if (unit.optBoolean("notify")) "1" else "",
+            "notifylog" to if (unit.optBoolean("notify")) File(runDir, "seraph-notify/${notifyName(unitDir.name)}.log").path else "",
+            "watchdog" to if (unit.optBoolean("notify")) unit.string("watchdog")?.let { seconds(it).toDouble().toInt().coerceAtLeast(1).toString() }.orEmpty() else "",
         )
         return "# The loop's settings for this unit (written by the engine; see Units.kt).\n" +
             values.entries.joinToString("") { (key, value) -> "$key=${quote(value)}\n" }
@@ -654,7 +681,11 @@ class Units(private val data: File) {
 
     private fun writeScripts(name: String, unit: JSONObject, unitDir: File) {
         unitDir.listFiles().orEmpty().filter { it.name.endsWith(".sh") }.forEach { it.delete() }
-        for ((file, text) in scripts(name, unit, unitDir)) File(unitDir, file).writeText(text)
+        for ((file, text) in scripts(name, unit, unitDir)) {
+            File(unitDir, file).writeText(text)
+            // Run as a program by socat, for each connection (see listen).
+            if (file == "conn.sh") runCatching { Os.chmod(File(unitDir, file).path, "700".toInt(8)) }
+        }
     }
 
     /** Whether its scripts on the phone are the ones the engine makes of [unit] now. */
@@ -695,7 +726,7 @@ class Units(private val data: File) {
                 parsed.ignore to if (user != null && !root && !parsed.privileged) "${setpriv(unit)} -- $words" else words
             }
             return when {
-                how == "exec" -> listen(unit, wrapped)
+                how == "exec" -> listen(name, unit, unitDir, wrapped, files)
                 how == "condition" -> "$wrapped || { c=${'$'}?; if [ ${'$'}c -ge 1 ] && [ ${'$'}c -le 254 ]; then echo \"$name: its ExecCondition said no (${'$'}c)\" > ${quote(File(unitDir, "skipped").path)}; exit 0; fi; exit ${'$'}c; }"
                 ignore || how == "stop" -> "$wrapped || true"
                 else -> "$wrapped || exit \$?"
@@ -713,7 +744,8 @@ class Units(private val data: File) {
         } else {
             // Its view's mount namespace, by which its loop knows its processes (KillMode).
             val mark = "/system/bin/readlink /proc/self/ns/mnt > ${quote(File(unitDir, "ns").path)}\n"
-            files["start.sh"] = head(name, unit, env) + checks + mark + (condition + pre + line(start.single(), "exec")).joinToString("") { "$it\n" }
+            files["start.sh"] = head(name, unit, env) + checks + mark +
+                (condition + pre + listOfNotNull(notifyStart(unit, unitDir)) + line(start.single(), "exec")).joinToString("") { "$it\n" }
             if (post.isNotEmpty()) files["post.sh"] = head(name, unit, env) + post.joinToString("") { "$it\n" }
         }
         if (stop.isNotEmpty()) files["stop.sh"] = head(name, unit, env) + stop.joinToString("") { "$it\n" }
@@ -728,18 +760,58 @@ class Units(private val data: File) {
      * file is made anew, readable and writable by all as systemd makes it (the program gets the unit's umask back);
      * with StandardInput = "socket" the first socket is its input too.
      */
-    private fun listen(unit: JSONObject, wrapped: String): String {
+    private fun listen(name: String, unit: JSONObject, unitDir: File, wrapped: String, files: MutableMap<String, String>): String {
         val specs = unit.strings("sockets")
         if (specs.isEmpty()) return "exec $wrapped"
         val prepare = specs.filter { it.startsWith("unix::") }.map { it.removePrefix("unix::") }.joinToString("") { path ->
             "/system/bin/mkdir -p ${quote(File(path).parent ?: "/")} && { [ ! -S ${quote(path)} ] || /system/bin/rm -f ${quote(path)}; } || exit 1\n"
         }
-        val input = if (unit.optBoolean("stdinSocket")) " <&3" else ""
-        val restore = quote("umask \"\$1\"; shift; exec \"\$@\"$input")
+        val program = if (unit.optBoolean("accept")) {
+            // Accept = true: socat takes each connection (in a process of its own) and runs conn.sh with it as its
+            // input and output, as systemd runs an instance for each: as StandardInput = "socket" has it, or as fd 3
+            // (LISTEN_FDS=1) for one that takes its socket as systemd hands sockets over.
+            // (3<&0 on the exec itself: mksh closes an fd that `exec 3<&0` alone opens when it runs a program.)
+            files["conn.sh"] = "#!/system/bin/sh\n# A connection to $name (Accept = true), for its template's program (written by the engine; see Units.kt).\n" +
+                if (unit.optBoolean("stdinSocket")) "exec 3<&-\nexec $wrapped\n" else "export LISTEN_FDS=1 LISTEN_PID=${'$'}${'$'}\nexec $wrapped 3<&0\n"
+            "${quote(unit.getString("socat"))} 'ACCEPT-FD:3,fork' ${quote("EXEC:${File(unitDir, "conn.sh").path},nofork")}"
+        } else {
+            wrapped
+        }
+        val input = if (unit.optBoolean("stdinSocket") && !unit.optBoolean("accept")) " <&3" else ""
+        // Started at its first connection: until one waits on a socket (its queue, in /proc/net), only the sockets are
+        // there. A unix socket's queue does not show: one with any starts at once.
+        val wait = if (unit.optBoolean("lazy") && specs.none { it.startsWith("unix::") }) {
+            val fds = (3 until 3 + specs.size).joinToString(" ")
+            val listening = quote(File(unitDir, "listening").path)
+            ": > $listening; while :; do for f in $fds; do i=${'$'}(/system/bin/readlink /proc/${'$'}${'$'}/fd/${'$'}f | /system/bin/tr -dc 0-9); " +
+                "${quote(busybox())} awk -v i=\"${'$'}i\" '${'$'}10 == i && ${'$'}5 !~ /:00000000${'$'}/ { f = 1 } END { exit !f }' /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6 2> /dev/null && break 2; " +
+                "done; /system/bin/sleep 0.5; done; /system/bin/rm -f $listening; "
+        } else {
+            ""
+        }
+        val restore = quote("umask \"\$1\"; shift; ${wait}exec \"\$@\"$input")
         return prepare + "seraph_umask=${'$'}(umask)\numask 0111\n" +
             "exec ${quote(unit.getString("systemfd"))} '-q' '-b' '4096' ${specs.joinToString(" ") { "'-s' ${quote(it)}" }} '--' " +
-            "/system/bin/sh -c $restore seraph-socket \"${'$'}seraph_umask\" $wrapped"
+            "/system/bin/sh -c $restore seraph-socket \"${'$'}seraph_umask\" $program"
     }
+
+    /**
+     * Type = notify: a socket of its own (NOTIFY_SOCKET, in /run/seraph-notify), where socat takes what it says
+     * (READY=1, WATCHDOG=1, ...) and keeps it for its loop, which waits for READY=1 and, with WatchdogSec
+     * (WATCHDOG_USEC), for a WATCHDOG=1 each time, as systemd does. Started in its view, so it ends with it.
+     */
+    private fun notifyStart(unit: JSONObject, unitDir: File): String? {
+        if (!unit.optBoolean("notify")) return null
+        val socket = "/run/seraph-notify/${notifyName(unitDir.name)}"
+        val watchdog = unit.string("watchdog")?.let { (seconds(it).toDouble() * 1_000_000).toLong() }
+        return "/system/bin/mkdir -p /run/seraph-notify && { [ ! -f ${quote("$socket.pid")} ] || kill ${'$'}(/system/bin/cat ${quote("$socket.pid")}) 2> /dev/null; /system/bin/rm -f ${quote(socket)}; }\n" +
+            "${quote(unit.getString("socat"))} -u ${quote("UNIX-RECVFROM:$socket,fork")} ${quote("OPEN:$socket.log,creat,append")} < /dev/null > /dev/null 2>&1 &\n" +
+            "echo ${'$'}! > ${quote("$socket.pid")}; i=0; while [ ! -S ${quote(socket)} ] && [ ${'$'}i -lt 50 ]; do /system/bin/sleep 0.1; i=${'$'}((i + 1)); done; /system/bin/chmod 0666 ${quote(socket)}\n" +
+            "export NOTIFY_SOCKET=${quote(socket)}" + (watchdog?.let { " WATCHDOG_USEC=$it" } ?: "")
+    }
+
+    /** A unit's name as a file name of /run/seraph-notify (socat takes no : or , in it). */
+    private fun notifyName(name: String) = name.replace(Regex("[^A-Za-z0-9_.@-]"), "_")
 
     /** setpriv's words for running a step as its user: its uid and gid, its groups, its ambient capabilities. */
     private fun setpriv(unit: JSONObject): String {
@@ -776,6 +848,10 @@ class Units(private val data: File) {
                 append("while IFS=: read -r seraph_name seraph_x seraph_gid seraph_members; do [ \"${'$'}seraph_name\" = ${quote(group)} ] && break; done < /etc/group\n")
                 append("[ \"${'$'}seraph_name\" = ${quote(group)} ] || { echo \"$name: its group $group is not in Seraph's /etc/group\" >&2; exit 1; }\n")
             }
+        }
+        // Its variables whose specifiers are only known now (%h, %U, %G of its user).
+        runtimeEnvironment(name, unit).takeIf { it.isNotEmpty() }?.let { vars ->
+            append("export ").append(vars.entries.joinToString(" ") { (key, value) -> "$key=$value" }).append('\n')
         }
         // Busybox's mount (Android's toybox cannot remount a bind read-only).
         if (unit.has("binds") || unit.has("credentials") || unit.optBoolean("storage")) append("seraph_b=${quote(busybox())}\n")
@@ -819,7 +895,13 @@ class Units(private val data: File) {
                 val credential = credentials.getJSONObject(i)
                 val id = credential.getString("id")
                 val into = quote("${credentialsDirectory(name)}/$id")
+                val tool = unit.string("credsTool")?.let { quote(it) }
+                val undecrypted = "{ echo \"$name: its credential $id could not be decrypted (systemd-creds encrypt makes it, on this phone)\" >&2; exit 1; }"
                 when {
+                    credential.optBoolean("encrypted") && tool != null && credential.has("text") ->
+                        append("printf '%s' ${quote(credential.getString("text"))} | $tool decrypt ${quote("--name=$id")} - $into || $undecrypted\n")
+                    credential.optBoolean("encrypted") && tool != null && credential.string("path") != null ->
+                        append("$tool decrypt ${quote("--name=$id")} ${quote(credential.getString("path"))} $into || $undecrypted\n")
                     credential.has("text") -> append("printf '%s' ${quote(credential.getString("text"))} > $into || exit 1\n")
                     credential.string("path") != null -> {
                         val from = quote(credential.getString("path"))
@@ -901,7 +983,54 @@ class Units(private val data: File) {
             unit.strings(key).takeIf { it.isNotEmpty() }?.let { env[variable] = it.joinToString(":") { dir -> "$base/$dir" } }
         }
         if (unit.has("credentials")) env["CREDENTIALS_DIRECTORY"] = credentialsDirectory(name)
-        return env
+        // Specifiers in its values (%S, %N, %d, ...), as systemd fills them in; those only known when it runs are
+        // runtimeEnvironment's.
+        return env.mapValues { (_, value) -> specified(name, unit, value) }.filterValues { parts -> parts.none { it is Part.Variable } }
+            .mapValues { (_, parts) -> parts.joinToString("") { (it as Part.Text).text } }
+    }
+
+    /** Its variables with specifiers only known when it runs (its user's HOME, uid, gid), as shell words. */
+    private fun runtimeEnvironment(name: String, unit: JSONObject): Map<String, String> {
+        val env = linkedMapOf<String, String>()
+        unit.optJSONObject("environment")?.let { json -> json.keys().forEach { env[it] = json.getString(it) } }
+        return env.mapValues { (_, value) -> specified(name, unit, value) }.filterValues { parts -> parts.any { it is Part.Variable } }
+            .mapValues { (_, parts) ->
+                "\"" + parts.joinToString("") { part ->
+                    when (part) {
+                        is Part.Text -> part.text.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$").replace("`", "\\`")
+                        is Part.Variable -> "${'$'}{${part.name}}"
+                    }
+                } + "\""
+            }
+    }
+
+    /** [value] with its specifiers filled in: text, and the variables of those only known when it runs. */
+    private fun specified(name: String, unit: JSONObject, value: String): List<Part> {
+        if ('%' !in value) return listOf(Part.Text(value))
+        val runtime = if (unit.string("user") != null) mapOf('h' to "HOME", 'U' to "seraph_uid", 'G' to "seraph_gid") else emptyMap()
+        val parts = mutableListOf<Part>()
+        val text = StringBuilder()
+        var i = 0
+        while (i < value.length) {
+            val c = value[i]
+            if (c == '%' && i + 1 < value.length) {
+                val letter = value[i + 1]
+                val variable = runtime[letter]
+                if (variable != null) {
+                    if (text.isNotEmpty()) parts += Part.Text(text.toString()).also { text.clear() }
+                    parts += Part.Variable(variable, split = false)
+                } else {
+                    // One not on the phone stays as it is.
+                    text.append(runCatching { specifier(name, unit, letter) }.getOrElse { "%$letter" })
+                }
+                i += 2
+            } else {
+                text.append(c)
+                i++
+            }
+        }
+        if (text.isNotEmpty() || parts.isEmpty()) parts += Part.Text(text.toString())
+        return parts
     }
 
     private fun credentialsDirectory(name: String) = "/run/credentials/$name.service"
@@ -1027,6 +1156,8 @@ class Units(private val data: File) {
                 tmp.mkdirs()
                 Os.chmod(tmp.path, "1777".toInt(8))
             }
+            // Where systemd-creds keeps the phone's own key, for encrypted credentials (LoadCredentialEncrypted).
+            File(varDir, "lib/systemd").mkdirs()
         }
     }
 
@@ -1294,7 +1425,14 @@ class Units(private val data: File) {
             tell() { [ -n "${'$'}notify" ] && "${'$'}b" sh "${'$'}notify" service "${'$'}@" "service:${'$'}name" < /dev/null > /dev/null 2>&1; }
             inview() { "${'$'}b" sh "${'$'}view" "${'$'}1" >> "${'$'}log" 2>&1 < /dev/null; }
             # Its processes: those in the mount namespace of the view its start made.
-            procs() { [ -f "${'$'}unit/ns" ] || return 0; ns=${'$'}(cat "${'$'}unit/ns"); for p in /proc/[0-9]*; do [ "${'$'}(readlink "${'$'}p/ns/mnt" 2> /dev/null)" = "${'$'}ns" ] && echo "${'$'}{p#/proc/}"; done; return 0; }
+            # (One stat for all: the namespace's number is its file's inode. A readlink for each of a phone's ~900
+            # processes took half a minute.)
+            procs() {
+              [ -f "${'$'}unit/ns" ] || return 0
+              ino=${'$'}(tr -dc 0-9 < "${'$'}unit/ns")
+              "${'$'}b" stat -L -c '%i %n' /proc/[0-9]*/ns/mnt 2> /dev/null | while read -r i n; do [ "${'$'}i" = "${'$'}ino" ] && { n=${'$'}{n#/proc/}; echo "${'$'}{n%%/*}"; }; done
+              return 0
+            }
             alive() { { [ -n "${'$'}main" ] && kill -0 "${'$'}main" 2> /dev/null; } || { [ "${'$'}killmode" = control-group ] && [ -n "${'$'}(procs)" ]; }; }
             # Ends it as KillMode says, with KillSignal; what still runs after TimeoutStopSec gets SIGKILL (unless SendSIGKILL is no).
             end() {
@@ -1317,7 +1455,7 @@ class Units(private val data: File) {
               [ -n "${'$'}main" ] && end
               [ -n "${'$'}child" ] && wait ${'$'}child 2> /dev/null
               [ -n "${'$'}stoppost" ] && inview "${'$'}stoppost"
-              rm -f "${'$'}unit/supervisor.pid" "${'$'}unit/main.pid" "${'$'}unit/waiting" "${'$'}unit/fresh" "${'$'}unit/ns" "${'$'}unit/ready"
+              rm -f "${'$'}unit/supervisor.pid" "${'$'}unit/main.pid" "${'$'}unit/waiting" "${'$'}unit/fresh" "${'$'}unit/ns" "${'$'}unit/ready" "${'$'}unit/listening"
               exit 0
             }
             trap stopping TERM INT
@@ -1337,7 +1475,8 @@ class Units(private val data: File) {
                 rm -f "${'$'}unit/waiting"
               fi
               echo "${'$'}(date '+%F %T') ${'$'}name: starting" >> "${'$'}log"
-              rm -f "${'$'}unit/skipped" "${'$'}unit/ns"
+              rm -f "${'$'}unit/skipped" "${'$'}unit/ns" "${'$'}unit/watchdog-fired" "${'$'}unit/listening"
+              [ -n "${'$'}notifylog" ] && rm -f "${'$'}notifylog"
               "${'$'}b" sh "${'$'}view" "${'$'}start" >> "${'$'}log" 2>&1 < /dev/null &
               child=${'$'}!
               main=${'$'}child
@@ -1364,11 +1503,43 @@ class Units(private val data: File) {
                 fi
                 : > "${'$'}unit/ready"
               fi
+              # Type = notify: started once it says READY=1 (TimeoutStartSec), then watched for WATCHDOG=1 (WatchdogSec).
+              unready= dog=
+              if [ -z "${'$'}code" ] && [ -n "${'$'}notify" ]; then
+                i=0
+                until grep -q READY=1 "${'$'}notifylog" 2> /dev/null; do
+                  kill -0 ${'$'}child 2> /dev/null || break
+                  if [ ${'$'}i -ge ${'$'}((timeout_start * 5)) ]; then
+                    echo "${'$'}(date '+%F %T') ${'$'}name: it did not say it was ready (READY=1) in ${'$'}timeout_start s: ended" >> "${'$'}log"
+                    unready=1; end; break
+                  fi
+                  sleep 0.2; i=${'$'}((i + 1))
+                done
+                : > "${'$'}unit/ready"
+                if [ -z "${'$'}unready" ] && [ -n "${'$'}watchdog" ]; then
+                  (
+                    last=${'$'}(date +%s) seen=0
+                    while kill -0 ${'$'}main 2> /dev/null; do
+                      sleep 1
+                      n=${'$'}(grep -o WATCHDOG=1 "${'$'}notifylog" 2> /dev/null | wc -l)
+                      now=${'$'}(date +%s)
+                      if [ "${'$'}n" -gt "${'$'}seen" ]; then seen=${'$'}n last=${'$'}now
+                      elif [ ${'$'}((now - last)) -ge "${'$'}watchdog" ]; then
+                        echo "${'$'}(date '+%F %T') ${'$'}name: no WATCHDOG=1 in ${'$'}watchdog s: ended (SIGABRT)" >> "${'$'}log"
+                        : > "${'$'}unit/watchdog-fired"
+                        kill -ABRT ${'$'}main 2> /dev/null
+                        exit 0
+                      fi
+                    done
+                  ) < /dev/null > /dev/null 2>&1 &
+                  dog=${'$'}!
+                fi
+              fi
               if [ -z "${'$'}code" ]; then
                 if [ -f "${'$'}unit/failing" ]; then
                   ( sleep 60; kill -0 ${'$'}main 2> /dev/null && rm "${'$'}unit/failing" 2> /dev/null && tell ok "${'$'}name runs again" "It had stopped by itself" ) < /dev/null > /dev/null 2>&1 &
                 fi
-                [ -n "${'$'}post" ] && [ ! -f "${'$'}unit/skipped" ] && inview "${'$'}post"
+                [ -n "${'$'}post" ] && [ ! -f "${'$'}unit/skipped" ] && [ -z "${'$'}unready" ] && inview "${'$'}post"
                 # While it runs, its storage is looked at every 15 s: one that went away stops it (to wait for it again), one
                 # that came after its start starts it again in a fresh view.
                 rm -f "${'$'}unit/fresh"
@@ -1397,7 +1568,9 @@ class Units(private val data: File) {
                   code=1
                 fi
                 [ -n "${'$'}watcher" ] && kill ${'$'}watcher 2> /dev/null
+                [ -n "${'$'}dog" ] && kill ${'$'}dog 2> /dev/null
               fi
+              [ -n "${'$'}unready" ] && code=1
               # What is left of it ends with it (KillMode control-group), as systemd ends a service's processes.
               [ "${'$'}killmode" = control-group ] && [ -n "${'$'}(procs)" ] && { main=; end; }
               child= watcher= main=
@@ -1426,6 +1599,7 @@ class Units(private val data: File) {
                 on-success) [ -n "${'$'}clean" ] && again=1 ;;
                 on-failure) [ -z "${'$'}clean" ] && again=1 ;;
                 on-abnormal | on-abort) [ -n "${'$'}abnormal" ] && again=1 ;;
+                on-watchdog) [ -f "${'$'}unit/watchdog-fired" ] && again=1 ;;
               esac
               has ${'$'}code "${'$'}prevent" && again=
               has ${'$'}code "${'$'}force" && again=1

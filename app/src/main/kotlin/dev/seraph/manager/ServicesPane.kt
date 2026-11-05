@@ -68,6 +68,7 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
         val shown = activity.getString(
             when (state) {
                 "running" -> R.string.state_running
+                "listening" -> R.string.state_listening
                 "restarting" -> R.string.state_restarting
                 "waiting" -> R.string.state_waiting
                 "done" -> R.string.state_done
@@ -78,7 +79,7 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
             },
         )
         return (if (since > 0 && state != "stopped" && state != "not run") activity.getString(R.string.service_state_since, shown, Ui.ago(since)) else shown) +
-            (if (!unit.optBoolean("wanted", true) && !unit.has("timer")) activity.getString(R.string.state_not_wanted) else "") +
+            (if (!unit.optBoolean("wanted", true) && !unit.has("timer") && !unit.has("path")) activity.getString(R.string.state_not_wanted) else "") +
             (unit.optLong("next").takeIf { it > 0 }?.let { activity.getString(R.string.state_next_run, Ui.date(it)) } ?: "")
     }
 

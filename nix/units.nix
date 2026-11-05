@@ -16,19 +16,22 @@
 # The phone has no systemd: a unit says what the engine does with the options below and these keys
 # of serviceConfig (each as systemd.exec(5) and systemd.service(5) have it):
 #   commands     ExecStart, ExecStartPre, ExecStartPost, ExecCondition, ExecStop, ExecStopPost,
-#                ExecReload (taken: a changed unit starts again), Type (simple, exec, oneshot, forking;
-#                notify, notify-reload, idle and dbus run as simple), RemainAfterExit, PIDFile,
+#                ExecReload (taken: a changed unit starts again), Type (simple, exec, oneshot, forking,
+#                notify and notify-reload, with WatchdogSec; idle and dbus run as simple),
+#                RemainAfterExit, PIDFile,
 #                Restart (no, always, on-success, on-failure, on-abnormal, on-abort, on-watchdog),
 #                RestartSec, SuccessExitStatus, RestartForceExitStatus, RestartPreventExitStatus,
 #                KillMode, KillSignal, SendSIGKILL, TimeoutStopSec, TimeoutStartSec, TimeoutSec
-#   environment  Environment, EnvironmentFile, UnsetEnvironment, WorkingDirectory
+#   environment  Environment (its specifiers filled in: %S, %N, %h, ...), EnvironmentFile,
+#                UnsetEnvironment, WorkingDirectory
 #   user         User, Group, SupplementaryGroups, DynamicUser, PermissionsStartOnly,
 #                AmbientCapabilities, NoNewPrivileges, UMask, Nice, OOMScoreAdjust, Limit*
 #   folders      StateDirectory, RuntimeDirectory, CacheDirectory, LogsDirectory,
 #                ConfigurationDirectory, their *Mode, RuntimeDirectoryPreserve, BindPaths,
 #                BindReadOnlyPaths
 #   secrets      LoadCredential, SetCredential (into $CREDENTIALS_DIRECTORY, readable by the unit
-#                alone)
+#                alone), LoadCredentialEncrypted, SetCredentialEncrypted (as systemd-creds encrypt
+#                made them on the phone, with its own key in /var/lib/systemd: it has no TPM)
 # and of unitConfig: RequiresMountsFor, the Condition and Assert keys on paths
 # (ConditionPathExists, ...), ConditionVirtualization, ConditionArchitecture and
 # ConditionKernelCommandLine. What only hardens a service on NixOS (ProtectSystem, PrivateDevices,
@@ -53,8 +56,19 @@
 # Sockets (systemd.sockets: listenStreams, listenDatagrams, socketConfig.ListenStream and
 # ListenDatagram; TCP, UDP and unix sockets) the phone opens as root and hands to their service as
 # systemd does (as fds 3 and on, with LISTEN_FDS and LISTEN_PID, through systemfd), so a port below
-# 1024 is a service user's too. The service starts with the build and at boot rather than at its
-# first connection; a service started for each connection (Accept = true) is not on the phone.
+# 1024 is a service user's too. One nothing else wants starts at its first connection, as on NixOS
+# (the phone sees one waiting in a TCP or UDP socket's queue, every half second; a unix socket's it
+# cannot, so a service with one starts at once). Accept = true gives each connection to a run of
+# the socket's template service (foo.socket's foo@), as its input and output (StandardInput =
+# "socket") or as fd 3 (LISTEN_FDS=1), through socat.
+#
+# Templates (foo@) run as their instances (foo@bar, with bar as %i): those something names, and
+# those of systemd.services."foo@bar" (its settings over the template's). Path units
+# (systemd.paths) start their unit while a path is there or when it changes (Paths.kt: the phone
+# looks every 2 seconds). Units in packages (systemd.packages: their own unit files) are read as
+# NixOS reads them, under what the config says of each. Users' units (systemd.user) run for each
+# normal user, as each lingers on NixOS: as that user, from the build and the phone's start,
+# named user-<user>-<unit>.
 #
 # unitConfig.RequiresMountsFor: the phone's storage a unit needs (an SD card's folder, the shared
 # storage), which Android mounts only once the phone is first unlocked after it starts, or which may
@@ -96,7 +110,7 @@ let
     "StateDirectory" "RuntimeDirectory" "CacheDirectory" "LogsDirectory" "ConfigurationDirectory"
     "StateDirectoryMode" "RuntimeDirectoryMode" "CacheDirectoryMode" "LogsDirectoryMode" "ConfigurationDirectoryMode"
     "RuntimeDirectoryPreserve" "BindPaths" "BindReadOnlyPaths"
-    "LoadCredential" "SetCredential"
+    "LoadCredential" "SetCredential" "LoadCredentialEncrypted" "SetCredentialEncrypted" "WatchdogSec"
   ] ++ map (limit: "Limit${limit}") limits;
 
   # systemd's Limit* keys (the engine sets them with the shell's ulimit; RTTIME it has not, and leaves).
@@ -116,7 +130,7 @@ let
     "SystemCallLog" "IPAddressAllow" "IPAddressDeny" "IPAccounting" "IPIngressFilterPath" "IPEgressFilterPath"
     "SocketBindAllow" "SocketBindDeny" "ReadOnlyPaths" "ReadWritePaths" "InaccessiblePaths" "ExecPaths"
     "NoExecPaths" "TemporaryFileSystem" "MountAPIVFS" "MountFlags" "BindLogSockets" "KeyringMode"
-    "RootDirectory" "RootImage" "RootEphemeral" "MountImages" "ExtensionImages" "ExtensionDirectories"
+    "RootDirectory" "RootDirectoryStartOnly" "RootImage" "RootEphemeral" "MountImages" "ExtensionImages" "ExtensionDirectories"
     "NetworkNamespacePath" "IPCNamespacePath" "PrivateDevices" "SELinuxContext" "AppArmorProfile"
     "SmackProcessLabel" "Personality" "ImportCredential" "PAMName" "SetLoginEnvironment" "PassEnvironment"
     # Resource control and scheduling.
@@ -565,6 +579,39 @@ let
       };
     };
   };
+  # A path unit: it starts its unit when a path is there, or changes (see the top).
+  pathModule = { ... }: {
+    options = listOptions [ "wantedBy" "requiredBy" "after" "before" "wants" "requires" "bindsTo" "partOf"
+      "conflicts" "documentation" ] // {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the path unit is there at all.";
+      };
+      description = mkOption {
+        type = types.singleLineStr;
+        default = "";
+        description = "What the path unit is.";
+      };
+      pathConfig = mkOption {
+        type = types.attrsOf unitValue;
+        default = { };
+        example = { PathChanged = "/var/lib/foo/inbox"; };
+        description = ''
+          The [Path] section of its unit: PathExists, PathExistsGlob, DirectoryNotEmpty (its unit starts while that is
+          so), PathChanged, PathModified (when that changes), Unit, MakeDirectory and DirectoryMode.
+        '';
+      };
+      unitConfig = mkOption {
+        type = types.attrsOf unitValue;
+        default = { };
+        description = "Its [Unit] section's other keys (taken).";
+      };
+    };
+  };
+  pathKinds = [ "PathExists" "PathExistsGlob" "DirectoryNotEmpty" "PathChanged" "PathModified" ];
+  pathTaken = [ "TriggerLimitIntervalSec" "TriggerLimitBurst" ];
+
   timerKeys = {
     OnCalendar = "onCalendar"; OnBootSec = "onBoot"; OnStartupSec = "onStartup"; OnActiveSec = "onActive";
     OnUnitActiveSec = "onUnitActive"; OnUnitInactiveSec = "onUnitInactive"; RandomizedDelaySec = "randomizedDelay";
@@ -581,9 +628,36 @@ let
   # A unit's name as the others give it: foo.service is foo.
   nameOf = lib.removeSuffix ".service";
   isTemplate = name: lib.hasSuffix "@" name;
-  # Template units (foo@) start only as instances (foo@bar), which socket activation and
-  # systemctl make on NixOS: on the phone an instance is a unit of its own.
-  units = lib.filterAttrs (name: unit: unit.enable && !isTemplate name) config.systemd.services;
+  # A template (foo@) runs as its instances (foo@bar), as systemd runs them: the template's unit with bar as %i, under
+  # what systemd.services."foo@bar" says (as NixOS's drop-in for it). An instance is there when something names it: a
+  # unit (wants, requires, after, ...), a target, a timer's or path's Unit, a socket's Service, or
+  # systemd.services."foo@bar" itself. A template's own wantedBy starts no instance, as on NixOS.
+  templateOf = name: let parts = builtins.match "([^@]+@)(.+)" name; in if parts == null then null else builtins.head parts;
+  templates = lib.filterAttrs (name: unit: unit.enable && isTemplate name) config.systemd.services;
+  plainUnits = lib.filterAttrs (name: unit: unit.enable && !isTemplate name) config.systemd.services;
+  isInstance = name: templateOf name != null && templates ? ${templateOf name};
+  named = map (entry: nameOf (toString entry)) (lib.concatLists (lib.mapAttrsToList (_: unit: unit.wants ++ unit.requires
+      ++ unit.upholds ++ unit.bindsTo ++ unit.requisite ++ unit.after ++ unit.before ++ unit.wantedBy ++ unit.requiredBy
+      ++ unit.upheldBy) plainUnits)
+    ++ lib.concatLists (lib.mapAttrsToList (_: target: target.wants ++ target.requires) config.systemd.targets)
+    ++ lib.mapAttrsToList (name: timer: timer.timerConfig.Unit or "${name}.service") config.systemd.timers
+    ++ lib.mapAttrsToList (name: path: path.pathConfig.Unit or "${name}.service") config.systemd.paths
+    ++ lib.mapAttrsToList (name: socket: socket.socketConfig.Service or "${name}.service") config.systemd.sockets);
+  instanceOf = template: own: template // {
+    inherit (own) enable wantedBy requiredBy upheldBy;
+    serviceConfig = template.serviceConfig // own.serviceConfig;
+    unitConfig = template.unitConfig // own.unitConfig;
+    environment = template.environment // own.environment;
+  } // lib.genAttrs [ "path" "after" "before" "wants" "upholds" "requires" "bindsTo" "requisite" "partOf" "conflicts"
+    "restartTriggers" "reloadTriggers" ] (key: template.${key} ++ own.${key})
+    // lib.genAttrs [ "description" "script" "scriptArgs" "preStart" "postStart" "preStop" "postStop" "reload" ]
+    (key: if own.${key} != "" then own.${key} else template.${key});
+  ownInstances = lib.mapAttrs (name: own: instanceOf templates.${templateOf name} own) (lib.filterAttrs (name: _: isInstance name) plainUnits);
+  namedInstances = lib.genAttrs (lib.unique (lib.filter (name: isInstance name && !(plainUnits ? ${name})) named))
+    (name: templates.${templateOf name} // { wantedBy = [ ]; requiredBy = [ ]; upheldBy = [ ]; });
+  units = plainUnits // ownInstances // namedInstances;
+  # Whether systemd.services has unit [name] (an instance of a template it has too).
+  hasUnit = name: config.systemd.services ? ${name} || isInstance name;
 
   listOf = value: if value == null then [ ] else if builtins.isList value then value else [ value ];
   strings = value: map toString (listOf value);
@@ -625,7 +699,7 @@ let
   userOf = name: unit:
     let sc = unit.serviceConfig; user = if sc ? User then toString sc.User else null; in
     if user != null && user != "" then user
-    else if boolean (sc.DynamicUser or false) then name
+    else if boolean (sc.DynamicUser or false) then lib.replaceStrings [ "@" ] [ "-" ] name
     else null;
   isRoot = user: user == null || user == "root" || user == "0";
 
@@ -667,10 +741,28 @@ let
     else if lib.hasPrefix "@" a then null
     else if builtins.match "[0-9]+" a != null then "${net}::[::]:${a}"
     else "${net}::${a}";
+  # (A unit file's ListenStream= first, then listenStreams, as NixOS's drop-in: "" clears what came before.)
   socketSpecs = socket:
-    map (listenSpec "stream") (reset (strings socket.listenStreams) ++ reset (strings (socket.socketConfig.ListenStream or [ ])))
-    ++ map (listenSpec "datagram") (reset (strings socket.listenDatagrams) ++ reset (strings (socket.socketConfig.ListenDatagram or [ ])));
-  wantedSockets = lib.filterAttrs (_: socketWanted) sockets;
+    map (listenSpec "stream") (reset (strings (socket.socketConfig.ListenStream or [ ]) ++ strings socket.listenStreams))
+    ++ map (listenSpec "datagram") (reset (strings (socket.socketConfig.ListenDatagram or [ ]) ++ strings socket.listenDatagrams));
+  # StandardInput = "socket", or "fd:<socket>" (a unit file's way): the socket is its input too.
+  socketInput = sc: let input = toString (lib.last ([ "" ] ++ listOf (sc.StandardInput or [ ]))); in input == "socket" || lib.hasPrefix "fd:" input;
+  # Accept = true: a connection each, given to a run of the socket's template service (foo.socket's foo@), as
+  # systemd starts an instance for each.
+  acceptOf = socket: boolean (socket.socketConfig.Accept or false);
+  wantedSockets = lib.filterAttrs (_: socket: socketWanted socket && !acceptOf socket) sockets;
+  acceptSockets = lib.filterAttrs (name: socket: socketWanted socket && acceptOf socket && templates ? "${name}@") sockets;
+  # Each such socket's unit: its template's, run as one that takes the connections (Units.kt).
+  acceptUnits = lib.mapAttrs' (name: _: lib.nameValuePair "${name}.socket" templates."${name}@") acceptSockets;
+  acceptFields = name: {
+    sockets = lib.filter (spec: spec != null) (socketSpecs sockets.${lib.removeSuffix ".socket" name});
+    systemfd = "${pkgs.systemfd}/bin/systemfd";
+    socat = "${pkgs.socat}/bin/socat";
+    accept = true;
+    wanted = true;
+    type = "simple";
+    restart = "always";
+  };
   socketsOf = name: lib.concatLists (lib.mapAttrsToList (socketName: socket:
     lib.optionals (serviceOfSocket socketName socket == name) (lib.filter (spec: spec != null) (socketSpecs socket))) wantedSockets);
   socketServices = lib.unique (lib.mapAttrsToList serviceOfSocket wantedSockets);
@@ -690,6 +782,19 @@ let
     // lib.mapAttrs' (key: field: lib.nameValuePair field (toString (lib.last (listOf tc.${key}))))
       (lib.filterAttrs (key: _: key != "OnCalendar" && tc ? ${key}) timerKeys);
   timerProfile = lib.mapAttrs toTimer timers;
+
+  # Path units (systemd.paths): the engine starts their unit when their paths say so (Paths.kt).
+  pathUnits = lib.filterAttrs (_: path: path.enable) config.systemd.paths;
+  toPath = name: path:
+    let pc = path.pathConfig; in
+    {
+      unit = nameOf (toString (pc.Unit or "${name}.service"));
+      inherit (path) description;
+      wanted = lib.any (target: lib.elem target reached) (path.wantedBy ++ path.requiredBy);
+      checks = lib.concatMap (kind: map (value: { inherit kind; path = value; }) (strings (pc.${kind} or [ ]))) pathKinds;
+    }
+    // lib.optionalAttrs (boolean (pc.MakeDirectory or false)) { makeDirectory = true; directoryMode = toString (pc.DirectoryMode or "0755"); };
+  pathProfile = lib.mapAttrs toPath pathUnits;
 
   # A unit's user in one of Android's groups of the shared storage reaches it, in its view (see the top).
   storageGroups = [ "media_rw" "sdcard_rw" "external_storage" ];
@@ -732,7 +837,10 @@ let
       rootSteps = boolean (sc.PermissionsStartOnly or false);
       timeout = key: if sc ? ${key} then toString sc.${key} else if sc ? TimeoutSec then toString sc.TimeoutSec else null;
       envFiles = map (path: { path = lib.removePrefix "-" path; optional = lib.hasPrefix "-" path; }) (reset (strings (sc.EnvironmentFile or [ ])));
-      creds = map (credential "path") (strings (sc.LoadCredential or [ ])) ++ map (credential "text") (strings (sc.SetCredential or [ ]));
+      creds = map (credential "path") (strings (sc.LoadCredential or [ ])) ++ map (credential "text") (strings (sc.SetCredential or [ ]))
+        # Decrypted on the phone with its own key, as systemd-creds encrypt made them there (see the top).
+        ++ map (entry: credential "path" entry // { encrypted = true; }) (strings (sc.LoadCredentialEncrypted or [ ]))
+        ++ map (entry: credential "text" entry // { encrypted = true; }) (strings (sc.SetCredentialEncrypted or [ ]));
       dirs = kind: words (sc."${kind}Directory" or [ ]);
       modes = lib.filterAttrs (_: mode: mode != null) (lib.genAttrs [ "State" "Runtime" "Cache" "Logs" "Configuration" ]
         (kind: if sc ? "${kind}DirectoryMode" then toString sc."${kind}DirectoryMode" else null));
@@ -740,6 +848,9 @@ let
       unitChecks = checks unit;
       extraWants = wantedByUnits name;
       unitSockets = socketsOf name;
+      wantedOtherwise = lib.any (target: lib.elem target reached) (unit.wantedBy ++ unit.requiredBy ++ unit.upheldBy)
+        || lib.elem name wantedByTargets;
+      watchdog = toString (sc.WatchdogSec or "0");
     in
     {
       inherit (unit) description;
@@ -756,8 +867,7 @@ let
       before = map nameOf unit.before;
       wants = map nameOf (unit.wants ++ unit.upholds ++ unit.requires ++ unit.bindsTo ++ unit.requisite) ++ extraWants;
       requires = map nameOf (unit.requires ++ unit.bindsTo ++ unit.requisite) ++ requiredByUnits name;
-      wanted = lib.any (target: lib.elem target reached) (unit.wantedBy ++ unit.requiredBy ++ unit.upheldBy)
-        || lib.elem name wantedByTargets || lib.elem name socketServices;
+      wanted = wantedOtherwise || lib.elem name socketServices;
       # Below the apps, unless the unit says (systemd's Nice: -20, first, to 19, last).
       nice = sc.Nice or 10;
       inherit (unit) notifications;
@@ -804,11 +914,16 @@ let
     // lib.optionalAttrs (creds != [ ]) { credentials = creds; }
     // lib.optionalAttrs (unitChecks != [ ]) { checks = unitChecks; }
     // lib.optionalAttrs (unitSockets != [ ]) { sockets = unitSockets; systemfd = "${pkgs.systemfd}/bin/systemfd"; }
-    // lib.optionalAttrs (toString (sc.StandardInput or "") == "socket") { stdinSocket = true; }
+    // lib.optionalAttrs (socketInput sc) { stdinSocket = true; }
     // lib.optionalAttrs (storageOf user unit) { storage = true; }
+    # Started at its sockets' first connection, as on NixOS, when nothing else wants it.
+    // lib.optionalAttrs (unitSockets != [ ] && !wantedOtherwise) { lazy = true; }
+    // lib.optionalAttrs (lib.elem type [ "notify" "notify-reload" ]) { notify = true; socat = "${pkgs.socat}/bin/socat"; }
+    // lib.optionalAttrs (!lib.elem watchdog [ "0" "" "infinity" ]) { inherit watchdog; }
+    // lib.optionalAttrs (lib.any (entry: entry.encrypted or false) creds) { credsTool = "${pkgs.systemd}/bin/systemd-creds"; }
     // lib.optionalAttrs (!unit.restartIfChanged && !unit.reloadIfChanged) { restartIfChanged = false; };
 
-  profile = lib.mapAttrs toProfile units;
+  profile = lib.mapAttrs toProfile units // lib.mapAttrs (name: unit: toProfile name unit // acceptFields name) acceptUnits;
 
   # The users the units run as, for the view's /etc/passwd and /etc/group (nix/users.nix): one users.users
   # has not (DynamicUser makes them on NixOS) gets a line of its own, with its group; and each is in
@@ -823,11 +938,106 @@ let
       groups = spec.groups ++ lib.optional (spec.storage or false) "media_rw";
       declared = config.users.users ? ${user};
     }
-  ) units);
+  ) (units // acceptUnits));
 
   # The store paths the units use, as Nix finds a build's references: by their names in the text.
   storePathsIn = text: map builtins.head (lib.filter builtins.isList
     (builtins.split "(/nix/store/[a-z0-9]{32}-[A-Za-z0-9+._?=-]+)" (builtins.unsafeDiscardStringContext text)));
+
+  # Units in packages (systemd.packages), as NixOS reads them: their files in <package>/lib/systemd/system and
+  # etc/systemd/system (and the drop-ins in <unit>.d), under what the config says of each (systemd.services.<name>,
+  # ...), as NixOS's drop-ins are: a key the config gives is the config's. Their [Install] is left, as NixOS leaves
+  # it (wantedBy starts one). Read while the config is built, so the package is fetched then.
+  unitKinds = { service = "services"; socket = "sockets"; timer = "timers"; path = "paths"; target = "targets"; };
+  parseUnit = text:
+    let
+      lines = map lib.trim (lib.splitString "\n" (builtins.replaceStrings [ "\\\n" ] [ " " ] text));
+      step = state: line:
+        let
+          section = builtins.match "\\[(.+)]" line;
+          pair = builtins.match "([A-Za-z0-9_]+)[ \t]*=[ \t]*(.*)" line;
+          current = state.sections.${state.current} or { };
+        in
+        if line == "" || lib.hasPrefix "#" line || lib.hasPrefix ";" line then state
+        else if section != null then state // { current = builtins.head section; }
+        else if pair == null then state
+        else state // {
+          sections = state.sections // {
+            ${state.current} = current // { ${builtins.elemAt pair 0} = (current.${builtins.elemAt pair 0} or [ ]) ++ [ (builtins.elemAt pair 1) ]; };
+          };
+        };
+    in (lib.foldl' step { current = ""; sections = { }; } lines).sections;
+  unitFiles = package: lib.concatMap (dir:
+    let folder = "${package}/${dir}"; in
+    lib.optionals (builtins.pathExists folder) (lib.concatLists (lib.mapAttrsToList (file: type:
+      let parts = builtins.match "(.+)\\.(service|socket|timer|path|target)" file; in
+      lib.optional (type == "regular" && parts != null) {
+        name = builtins.elemAt parts 0;
+        kind = builtins.elemAt parts 1;
+        texts = [ (builtins.readFile "${folder}/${file}") ] ++ lib.optionals (builtins.pathExists "${folder}/${file}.d")
+          (map (dropin: builtins.readFile "${folder}/${file}.d/${dropin}")
+            (lib.attrNames (lib.filterAttrs (dropin: _: lib.hasSuffix ".conf" dropin) (builtins.readDir "${folder}/${file}.d"))));
+      }) (builtins.readDir folder)))) [ "lib/systemd/system" "etc/systemd/system" ];
+  fromUnitFile = kind: texts:
+    let
+      sections = lib.foldl' (all: one: lib.zipAttrsWith (_: values: lib.zipAttrsWith (_: lib.concatLists) values) [ all one ]) { }
+        (map parseUnit texts);
+      unit = sections.Unit or { };
+      # Keys that add up (ExecStartPre=, Environment=, After=, ...), as systemd takes them; another's last value wins,
+      # as a drop-in's does.
+      adds = key: lib.any (prefix: lib.hasPrefix prefix key) [ "Exec" "Environment" "Condition" "Assert" "Listen" "OnCalendar"
+        "Path" "DirectoryNotEmpty" "LoadCredential" "SetCredential" "Bind" "ReadWrite" "ReadOnly" "Supplementary" "After"
+        "Before" "Wants" "Requires" "Documentation" "StateDirectory" "CacheDirectory" "LogsDirectory" "RuntimeDirectory"
+        "ConfigurationDirectory" "UnsetEnvironment" "RequiresMountsFor" ];
+      value = key: values: if adds key then (if builtins.length values == 1 then builtins.head values else values) else lib.last values;
+      keys = section: lib.mapAttrs (key: values: lib.mkDefault (value key values)) (sections.${section} or { });
+      listed = key: lib.filter (word: word != "") (lib.concatMap (lib.splitString " ") (unit.${key} or [ ]));
+      lists = names: lib.genAttrs names (name: listed (lib.toUpper (lib.substring 0 1 name) + lib.substring 1 (-1) name));
+      common = [ "after" "before" "wants" "requires" "bindsTo" "partOf" "conflicts" "documentation" ];
+      own = [ "Description" "After" "Before" "Wants" "Requires" "BindsTo" "PartOf" "Conflicts" "Documentation" "Requisite" "Upholds" ];
+    in
+    { description = lib.mkDefault (lib.last ([ "" ] ++ unit.Description or [ ])); unitConfig = builtins.removeAttrs (keys "Unit") own; }
+    // lists common
+    // {
+      service = lists [ "requisite" "upholds" ] // { serviceConfig = keys "Service"; };
+      socket = { socketConfig = keys "Socket"; };
+      timer = { timerConfig = keys "Timer"; };
+      path = { pathConfig = keys "Path"; };
+      target = lists [ "requisite" "upholds" ];
+    }.${kind};
+  packagedUnits = lib.concatMap unitFiles config.systemd.packages;
+
+  # Units of users' own systemd (systemd.user): the phone has no session of a user's, so each normal user's run as it
+  # lingers on NixOS (users.users.<name>.linger): from the build and the phone's start, as that user, named
+  # user-<user>-<unit>, with its XDG_RUNTIME_DIR (/run/user/<uid>). default.target is one the phone reaches.
+  normalUsers = lib.attrNames (lib.filterAttrs (_: user: user.isNormalUser) config.users.users);
+  userUnit = user: name: "user-${user}-${name}";
+  ownUserUnits = lib.concatLists (lib.mapAttrsToList (_: units': lib.attrNames units') {
+    inherit (config.systemd.user) services sockets timers paths targets;
+  });
+  renameFor = user: entry:
+    let
+      suffix = builtins.match ".*(\\.(service|socket|timer|path|target))" entry;
+      bare = if suffix == null then entry else lib.removeSuffix (builtins.head suffix) entry;
+    in if lib.elem bare ownUserUnits then userUnit user bare + (if suffix == null then "" else builtins.head suffix) else entry;
+  forUser = user: unit:
+    let rename = map (renameFor user); in
+    builtins.removeAttrs unit [ "_module" ]
+    // lib.mapAttrs (_: rename) (lib.filterAttrs (key: value: builtins.isList value && lib.elem key [ "wantedBy" "requiredBy"
+      "upheldBy" "after" "before" "wants" "upholds" "requires" "bindsTo" "requisite" "partOf" "conflicts" ]) unit);
+  userService = user: unit: forUser user unit // {
+    serviceConfig = unit.serviceConfig // {
+      User = user;
+      ExecStartPre = [ "+${pkgs.coreutils}/bin/install -d -m 0700 -o %U -g %G /run/user/%U" ] ++ listOf (unit.serviceConfig.ExecStartPre or [ ]);
+    };
+    environment = { XDG_RUNTIME_DIR = "/run/user/%U"; } // unit.environment;
+  };
+  forUsers = kind: make: lib.mkMerge (lib.concatMap (user: [ (lib.mapAttrs' (name: unit: lib.nameValuePair (userUnit user name) (make user name unit))
+    config.systemd.user.${kind}) ]) normalUsers);
+  withUnit = key: user: name: unit: forUser user unit // lib.optionalAttrs (unit ? ${key}) {
+    ${key} = unit.${key} // { ${if key == "socketConfig" then "Service" else "Unit"} = renameFor user (toString
+      (unit.${key}.${if key == "socketConfig" then "Service" else "Unit"} or "${name}.service")); };
+  };
 
   problems = lib.concatLists (lib.mapAttrsToList (name: unit:
     let
@@ -835,7 +1045,6 @@ let
       type = sc.Type or "simple";
       starts = if unit.script != "" then 1 else builtins.length (reset (strings (sc.ExecStart or [ ])));
       other = lib.filter (key: !lib.elem key supported && !lib.elem key taken) (lib.attrNames sc);
-      encrypted = lib.filter (key: lib.elem key [ "LoadCredentialEncrypted" "SetCredentialEncrypted" ]) (lib.attrNames sc);
       otherUnit = lib.filter (key: !lib.elem key unitSupported && !isTakenUnitKey key) (lib.attrNames unit.unitConfig);
       mounts = words (unit.unitConfig.RequiresMountsFor or [ ]);
       badCodes = badExitCodes (sc.SuccessExitStatus or [ ]) ++ badExitCodes (sc.RestartForceExitStatus or [ ])
@@ -845,8 +1054,7 @@ let
       them = list: "${lib.concatStringsSep ", " list} ${if builtins.length list == 1 then "is" else "are"}";
     in
     lib.optional (builtins.match "[A-Za-z0-9_.:@\\\\-]+" name == null) "${unit'}: a unit's name is letters, digits and _ . : @ \\ -."
-    ++ lib.optional (encrypted != [ ]) "${unit'}.serviceConfig: ${them encrypted} not on the phone (it has no TPM nor systemd's credential key): LoadCredential with a file is."
-    ++ lib.optional (other != [ ]) "${unit'}.serviceConfig: ${them (lib.subtractLists encrypted other)} not on the phone (nix/units.nix lists the keys it takes)."
+    ++ lib.optional (other != [ ]) "${unit'}.serviceConfig: ${them other} not on the phone (nix/units.nix lists the keys it takes)."
     ++ lib.optional (unit.script != "" && reset (strings (sc.ExecStart or [ ])) != [ ]) "${unit'}: give script or serviceConfig.ExecStart, not both."
     ++ lib.optional (!lib.elem type types') "${unit'}.serviceConfig.Type: \"${toString type}\" is not on the phone (${lib.concatStringsSep ", " types'})."
     ++ lib.optional (type != "oneshot" && starts != 1) "${unit'}: a ${toString type} unit has one ExecStart (or script)${lib.optionalString (starts > 1) "; several are a oneshot's"}."
@@ -859,8 +1067,8 @@ let
     ++ lib.optional (badCodes != [ ]) "${unit'}.serviceConfig: ${lib.concatStringsSep ", " badCodes}: an exit status is a number or a signal (${lib.concatStringsSep ", " (lib.attrNames signals)})."
     ++ lib.optional (relativeBinds != [ ]) "${unit'}.serviceConfig.BindPaths: full paths, like /var/lib/foo:/srv/foo."
     ++ lib.optional unit.confinement.enable "${unit'}.confinement.enable: not on the phone (each unit runs in a view of its own already)."
-    ++ lib.optional (toString (sc.StandardInput or "") == "socket" && socketsOf name == [ ]) "${unit'}.serviceConfig.StandardInput: \"socket\" needs a socket of systemd.sockets for it."
-  ) units)
+    ++ lib.optional (socketInput sc && socketsOf name == [ ] && !(acceptUnits ? ${name})) "${unit'}.serviceConfig.StandardInput: a socket as its input needs a socket of systemd.sockets for it."
+  ) (units // acceptUnits))
   ++ lib.concatLists (lib.mapAttrsToList (name: timer:
     let
       tc = timer.timerConfig;
@@ -869,7 +1077,7 @@ let
       timer' = "systemd.timers.${name}";
     in
     # (One there but turned off leaves the timer off.)
-    lib.optional (!(config.systemd.services ? ${unit})) "${timer'}: its unit ${unit} is not in systemd.services."
+    lib.optional (!(hasUnit unit)) "${timer'}: its unit ${unit} is not in systemd.services."
     ++ lib.optional (lib.attrNames (builtins.intersectAttrs timerKeys tc) == [ ] || (lib.attrNames (builtins.intersectAttrs timerKeys tc) == [ "OnCalendar" ] && reset (strings tc.OnCalendar) == [ ]))
       "${timer'}.timerConfig: give it a time (OnCalendar, OnBootSec, OnUnitActiveSec, ...)."
     ++ lib.optional (other != [ ]) "${timer'}.timerConfig: ${lib.concatStringsSep ", " other} not on the phone (nix/units.nix lists the keys it takes)."
@@ -882,12 +1090,26 @@ let
       unopened = lib.filter (spec: spec == null) (socketSpecs socket);
       socket' = "systemd.sockets.${name}";
     in
-    lib.optional (!(config.systemd.services ? ${service})) "${socket'}: its service ${service} is not in systemd.services."
-    ++ lib.optional (boolean (sc.Accept or false)) "${socket'}.socketConfig.Accept: a service started for each connection is not on the phone yet (Accept = false is)."
+    lib.optional (!acceptOf socket && !(hasUnit service)) "${socket'}: its service ${service} is not in systemd.services."
+    ++ lib.optional (acceptOf socket && !(templates ? "${name}@")) "${socket'}: with Accept = true its connections go to the template ${name}@, which is not in systemd.services."
+    ++ lib.optional (acceptOf socket && (builtins.length (socketSpecs socket) != 1 || lib.any (spec: spec != null && lib.hasPrefix "udp::" spec) (socketSpecs socket)))
+      "${socket'}: with Accept = true, one stream socket (listenStreams), as the phone takes its connections."
     ++ lib.optional (other != [ ]) "${socket'}.socketConfig: ${lib.concatStringsSep ", " other} not on the phone (nix/units.nix lists the keys it takes)."
     ++ lib.optional (unopened != [ ]) "${socket'}: an abstract socket (@name) or a unix datagram socket is not on the phone."
     ++ lib.optional (socketSpecs socket == [ ]) "${socket'}: give it something to listen on (listenStreams, listenDatagrams)."
-  ) (lib.filterAttrs (_: socketWanted) sockets));
+  ) (lib.filterAttrs (_: socketWanted) sockets))
+  ++ lib.concatLists (lib.mapAttrsToList (name: path:
+    let
+      pc = path.pathConfig;
+      unit = nameOf (toString (pc.Unit or "${name}.service"));
+      other = lib.filter (key: !lib.elem key (pathKinds ++ pathTaken ++ [ "Unit" "MakeDirectory" "DirectoryMode" ])) (lib.attrNames pc);
+      path' = "systemd.paths.${name}";
+    in
+    lib.optional (!(hasUnit unit)) "${path'}: its unit ${unit} is not in systemd.services."
+    ++ lib.optional (lib.all (kind: !(pc ? ${kind})) pathKinds) "${path'}.pathConfig: give it a path (PathExists, PathChanged, ...)."
+    ++ lib.optional (lib.any (entry: !lib.hasPrefix "/" entry.path) (toPath name path).checks) "${path'}.pathConfig: full paths, like /var/lib/foo/inbox."
+    ++ lib.optional (other != [ ]) "${path'}.pathConfig: ${lib.concatStringsSep ", " other} not on the phone (nix/units.nix lists the keys it takes)."
+  ) pathUnits);
 in
 {
   options.systemd = {
@@ -942,6 +1164,32 @@ in
       '';
     };
 
+    paths = mkOption {
+      type = types.attrsOf (types.submodule pathModule);
+      default = { };
+      example = lib.literalExpression ''{ foo = { wantedBy = [ "paths.target" ]; pathConfig.PathChanged = "/var/lib/foo/inbox"; }; }'';
+      description = ''
+        Path units, as NixOS's systemd.paths: a wanted one starts its unit (foo.path's is foo.service, or
+        pathConfig.Unit) while a path is there (PathExists, PathExistsGlob, DirectoryNotEmpty) or when it changes
+        (PathChanged, PathModified). The phone looks every 2 seconds.
+      '';
+    };
+
+    user = {
+      services = mkOption {
+        type = types.attrsOf (types.submodule unitModule);
+        default = { };
+        description = "Units of users' own systemd, as on NixOS: each normal user's, run as it lingers (see nix/units.nix).";
+      };
+      timers = mkOption { type = types.attrsOf (types.submodule timerModule); default = { }; description = "Users' timers, as on NixOS."; };
+      sockets = mkOption { type = types.attrsOf (types.submodule socketModule); default = { }; description = "Users' sockets, as on NixOS."; };
+      paths = mkOption { type = types.attrsOf (types.submodule pathModule); default = { }; description = "Users' path units, as on NixOS."; };
+      targets = mkOption { type = types.attrsOf (types.submodule targetModule); default = { }; description = "Users' targets, as on NixOS."; };
+      tmpfiles = mkOption { type = types.lazyAttrsOf types.anything; default = { }; description = "As on NixOS: users' tmpfiles (taken)."; };
+      extraConfig = mkOption { type = types.lines; default = ""; description = "As on NixOS: the user manager's settings (taken)."; };
+      packages = mkOption { type = types.listOf types.package; default = [ ]; description = "As on NixOS: packages of users' units (taken: give the units in systemd.user.services)."; };
+    };
+
     globalEnvironment = mkOption {
       type = types.attrsOf (types.nullOr (types.oneOf [ types.str types.path types.package ]));
       default = { };
@@ -952,11 +1200,32 @@ in
 
   config = {
     # A unit's startAt is a timer of its name, as NixOS makes it (a module may add to its timerConfig).
-    systemd.timers = lib.mapAttrs (_: unit: { wantedBy = [ "timers.target" ]; timerConfig.OnCalendar = unit.startAt; })
-      (lib.filterAttrs (_: unit: unit.startAt != [ ] && unit.startAt != "") units);
+    systemd.timers = lib.mkMerge [
+      (lib.mapAttrs (_: unit: { wantedBy = [ "timers.target" ]; timerConfig.OnCalendar = unit.startAt; })
+        (lib.filterAttrs (_: unit: unit.startAt != [ ] && unit.startAt != "") plainUnits))
+      (forUsers "timers" (withUnit "timerConfig"))
+      (lib.mkMerge (map (file: { ${file.name} = fromUnitFile "timer" file.texts; }) (lib.filter (file: file.kind == "timer") packagedUnits)))
+    ];
+    systemd.services = lib.mkMerge [
+      (forUsers "services" (user: _: userService user))
+      (lib.mkMerge (map (file: { ${file.name} = fromUnitFile "service" file.texts; }) (lib.filter (file: file.kind == "service") packagedUnits)))
+    ];
+    systemd.sockets = lib.mkMerge [
+      (forUsers "sockets" (withUnit "socketConfig"))
+      (lib.mkMerge (map (file: { ${file.name} = fromUnitFile "socket" file.texts; }) (lib.filter (file: file.kind == "socket") packagedUnits)))
+    ];
+    systemd.paths = lib.mkMerge [
+      (forUsers "paths" (withUnit "pathConfig"))
+      (lib.mkMerge (map (file: { ${file.name} = fromUnitFile "path" file.texts; }) (lib.filter (file: file.kind == "path") packagedUnits)))
+    ];
+    systemd.targets = lib.mkMerge [
+      (forUsers "targets" (user: _: forUser user))
+      (lib.mkMerge (map (file: { ${file.name} = fromUnitFile "target" file.texts; }) (lib.filter (file: file.kind == "target") packagedUnits)))
+    ];
     system.build.units = profile;
     system.build.unitAccounts = unitAccounts;
     system.build.timers = timerProfile;
+    system.build.paths = pathProfile;
     system.build.unitStorePaths = lib.unique (storePathsIn (builtins.toJSON profile));
     assertions = map (message: { assertion = false; inherit message; }) problems;
   };
