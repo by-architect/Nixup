@@ -19,6 +19,19 @@
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
     <string name="close">Close</string>
+
+    <!-- Search: a box over each tab's list, the app picker and each log. -->
+    <string name="search_updates">Search the updates</string>
+    <string name="search_backups">Search apps, folders and backups</string>
+    <string name="search_services">Search the services</string>
+    <string name="search_logs">Search the logs</string>
+    <string name="search_apps">Search the apps</string>
+    <string name="search_text">Search this log</string>
+    <string name="search_no_match">Nothing matches “%1$s”.</string>
+    <plurals name="search_lines">
+        <item quantity="one">%1$d of %2$d lines matches</item>
+        <item quantity="other">%1$d of %2$d lines match</item>
+    </plurals>
     <string name="source_invalid">Not one Seraph can build: a .nix file\'s full path, or a flake\'s address like github:you/phone (each may end in #name).</string>
     <string name="not_a_phone_file">That file is not on the phone\'s storage or an SD card (a cloud drive\'s?): copy it there and pick it again.</string>
     <string name="not_nix">Pick a .nix file: your configuration.nix, or a flake.nix.</string>
@@ -126,7 +139,11 @@
     <string name="restore_parts">What to bring back</string>
     <string name="restore_confirm_title">Restore %1$s from %2$s?</string>
     <string name="restore_confirm_apk">Its APK is installed: version %1$s.</string>
+    <string name="restore_confirm_apk_from">Its APK is installed first, from its backup of %2$s (this one has none): version %1$s.</string>
     <string name="restore_confirm_data">What it has now of %1$s is replaced by the backup\'s; the app is stopped first.</string>
+    <string name="restore_apk_needed">The app is not installed: its APK comes back first, then its data.</string>
+    <string name="restore_not_found_title">App not found</string>
+    <string name="restore_not_found_message">%1$s is not installed, and none of its backups has its APK, so it cannot come back from them.\n\nInstall it first (from its repository, or by hand), then restore its data here.</string>
     <string name="restore_folder_into">Into %1$s itself: the backup\'s files replace those there; the others stay</string>
     <string name="restore_folder_new">Into a new folder: %1$s</string>
     <string name="restored_suffix">restored %1$s</string>
@@ -134,6 +151,7 @@
     <string name="snapshot_version">version %1$s</string>
     <string name="snapshot_newer">  ·  newer than the installed one</string>
     <string name="part_apk">The app (its APK)</string>
+    <string name="part_apk_from">The app (its APK, from the backup of %1$s)</string>
     <string name="part_data">Its data</string>
     <string name="part_deviceData">Its device data (what it reads before the first unlock)</string>
     <string name="part_storage">Its files in Android/data</string>
@@ -163,7 +181,9 @@
     <string name="state_done">✔ done</string>
     <string name="state_failed">✘ failed</string>
     <string name="state_not_run">○ not run</string>
+    <string name="state_skipped">◌ not started (its condition is not met)</string>
     <string name="state_not_wanted">, nothing wants it</string>
+    <string name="state_next_run">; its timer runs it next at %1$s</string>
     <string name="service_acting">%1$s: %2$s…</string>
 
     <!-- The menu. -->

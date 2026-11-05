@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- How an event went, in the Logs tab and the notifications: done, failed, a warning, news, running. -->
+<!-- How an event went, in the Logs tab and the notifications: done, failed, a warning, news, running; and what a
+     search found in a log. -->
 <resources>
     <color name="level_ok">#2E7D32</color>
     <color name="level_error">#C62828</color>
     <color name="level_warn">#B26A00</color>
     <color name="level_info">#1565C0</color>
     <color name="level_start">#6A1B9A</color>
+    <color name="search_match">#66FFD54F</color>
 </resources>

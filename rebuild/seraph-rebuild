@@ -182,12 +182,36 @@ what=profile evaluate --json > "$work/profile.json" || die "the config did not b
 what=secrets evaluate --raw --apply 's: builtins.concatStringsSep "\n" (map (n: n + "\t" + (if s.${n}.text then "text\t" else if s.${n}.file != null then "file\t" + s.${n}.file else "none\t")) (builtins.attrNames s))' \
   > "$work/secrets.txt" || die "the config's secrets could not be read (Nix says why above)"
 
+# The small files the config makes (a service's settings file, a script) are derivations
+# cache.nixos.org has not got, which the phone builds: theirs go along, with all they need
+# (the derivations they are made with) and the files the config put in the store itself, as
+# nix-store --export writes them.
+ship_paths() {
+  local list=() drvs=() sources=() build=() item
+  mapfile -t list < <(nixx eval --raw --impure --expr \
+    "builtins.concatStringsSep \"\\n\" ((builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json"))).android.derivations or [ ])")
+  for item in "${list[@]}"; do
+    case $item in
+      *.drv^*) drvs+=("$item") ;;
+      /nix/store/*) sources+=("$item") ;;
+    esac
+  done
+  # What it would have to build: those the cache has not.
+  if ((${#drvs[@]})); then
+    mapfile -t build < <(nixx build --dry-run --no-link "${drvs[@]}" 2>&1 | sed -n '/will be built:$/,/^[^ ]/s/^ *\(\/nix\/store\/[^ ]*\.drv\)$/\1/p')
+  fi
+  ((${#build[@]} + ${#sources[@]})) || return 0
+  say "== Files the config makes, for the phone to build: ${#build[@]}"
+  nix-store --export $(nix-store --query --requisites "${build[@]}" "${sources[@]}") > "$work/paths.nar"
+}
+
 if [[ $action == build ]]; then
   as_root "rm -rf $incoming" || true
   cp "$work/profile.json" result.json
   say "Built: $(pwd)/result.json (nothing went to the phone)"
   exit 0
 fi
+ship_paths || die "the files the config makes could not be gathered (Nix says why above); nothing was changed"
 
 # What it was built from, for the phone's generation: the flake as Nix resolved it, at its commit, with its lock.
 built_on="$(hostname 2> /dev/null || uname -n)"
@@ -208,7 +232,7 @@ fi
 printf '%s\n' "$source" > "$work/source"
 
 say "== Sending it to the phone"
-for part in profile.json source built-on flake.lock; do
+for part in profile.json source built-on flake.lock paths.nar; do
   [[ -f $work/$part ]] || continue
   send "$work/$part" "$incoming/$part" || die "could not send $part to the phone"
 done

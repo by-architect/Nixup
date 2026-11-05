@@ -22,6 +22,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.WindowInsets
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -41,8 +42,8 @@ import java.util.Locale
  * module's default, a git repository cloned onto the phone (pulled, cloned again: the module's git.sh), or a flake's
  * address typed in; built with the module's build.sh (as root), or only tried (a dry run), or built with everything at
  * its newest (upgrade); its folder opened; and the generations, to go back to one.
- * Updates: the config's apps that have a newer version, checked and installed with the module's update.sh.
- * Backups: see [BackupsPane]. Services: see [ServicesPane]. Logs: see [LogsPane].
+ * Updates: the config's apps that have a newer version, checked and installed with the module's update.sh, found by
+ * name with its search box. Backups: see [BackupsPane]. Services: see [ServicesPane]. Logs: see [LogsPane].
  */
 class MainActivity : Activity() {
     private lateinit var runner: Runner
@@ -74,6 +75,9 @@ class MainActivity : Activity() {
     private var tab = 0
     private var currentSource: String? = null
     private var builtOn: String? = null
+    /** The last check's results (updates.json), and what the Updates tab's search box has. */
+    private var updatesSaved = ""
+    private var updatesQuery = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -129,6 +133,10 @@ class MainActivity : Activity() {
             runner.run(Root.MODULE + "sh \$d/update.sh app check 2>&1", getString(R.string.checking), updatesOutput, updatesScroll) { loadUpdates() }
         }
         updateAll.setOnClickListener { update(emptyList()) }
+        Ui.onSearch(findViewById(R.id.updates_search)) {
+            updatesQuery = it
+            if (updatesSaved.isNotEmpty()) showUpdates(updatesSaved)
+        }
         padForSystemBars(findViewById(R.id.root))
 
         Notifications.channels(this)
@@ -188,6 +196,11 @@ class MainActivity : Activity() {
 
     private fun select(index: Int) {
         tab = index
+        // A search box of the tab left keeps no keyboard open over the next one.
+        currentFocus?.let { focused ->
+            getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(focused.windowToken, 0)
+            focused.clearFocus()
+        }
         tabs.forEachIndexed { i, (button, pane) ->
             pane.visibility = if (i == index) View.VISIBLE else View.GONE
             button.setTypeface(null, if (i == index) Typeface.BOLD else Typeface.NORMAL)
@@ -767,7 +780,9 @@ class MainActivity : Activity() {
         }
     }
 
+    /** The updates of the last check, those with what the search box has (an app's name, package or repository). */
     private fun showUpdates(saved: String) {
+        updatesSaved = saved
         updatesList.removeAllViews()
         val json = try {
             JSONObject(saved)
@@ -788,8 +803,11 @@ class MainActivity : Activity() {
             updateAll.isEnabled = false
             return
         }
-        for (i in 0 until updates.length()) {
-            val update = updates.getJSONObject(i)
+        val found = (0 until updates.length()).map { updates.getJSONObject(it) }.filter { update ->
+            Ui.matches(updatesQuery, update.optString("name"), update.optString("id"), update.optString("repo"), update.optString("from"), update.optString("to"))
+        }
+        if (found.isEmpty()) updatesList.addView(Ui.noMatch(this, updatesQuery))
+        for (update in found) {
             val id = update.getString("id")
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL

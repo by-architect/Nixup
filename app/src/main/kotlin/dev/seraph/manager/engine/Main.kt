@@ -2,6 +2,8 @@ package dev.seraph.manager.engine
 
 import org.json.JSONObject
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
 import kotlin.system.exitProcess
 
 /**
@@ -17,8 +19,11 @@ import kotlin.system.exitProcess
  *                                 services match the profile (with --dry-run: only plans and checks; with --force, the
  *                                 releases are asked for again even when new enough; --secrets: the folder of the
  *                                 secrets a PC sent with it, seraph-rebuild's)
- *   paths <profile>               prints the store paths the profile needs (its android.storePaths), one a line, for
- *                                 the module to fetch from cache.nixos.org before applying it
+ *   paths <profile> [--derivations]
+ *                                 prints the store paths the profile needs (its android.storePaths), one a line, for
+ *                                 the module to fetch from cache.nixos.org before applying it; with --derivations, how
+ *                                 each comes (android.derivations: a derivation's outputs, which the small files the
+ *                                 config makes are built from on the phone, or a path the config added)
  *   secrets <file> <folder> [--store=<root>]
  *                                 puts the secrets a build on the phone gives (<file>: each one's file or text) in
  *                                 <folder>, readable by root alone, as a PC sends them (--store: Seraph's store, for
@@ -52,14 +57,22 @@ import kotlin.system.exitProcess
  *   backup-status [--json]        each app and folder backed up: when last, and whether (and why) it is due
  *   backup-restore <app> [snapshot] [--parts=<parts>]
  *                                 brings an app's data back from its newest backup (or the one named), over what it
- *                                 has, and its APK when it is not installed (--parts: the parts named, apk among them)
+ *                                 has (--parts: the parts named, apk among them); one not installed gets its APK
+ *                                 first, from that backup or another of its backups (none has it: app not found)
  *   backup-restore <folder> [snapshot] [--to=<folder>]
  *                                 brings a folder's files back, into it or into a new folder
  *   backup-parts <app> <snapshot> what one backup of the app has (--json)
  *   restic <arguments...>         restic itself, with the backups' repository and password
- *   units [--json]                each service of the last build (its systemd.services units), and how it is
+ *   units [--json]                each service of the last build (its systemd.services units), and how it is, and its
+ *                                 timers (systemd.timers) with their next times
  *   unit <start|stop|restart> <name>
  *                                 starts, stops or restarts one, until the next build or restart
+ *   timer-next <timer>            prints the next time a timer of the last build starts its unit (epoch seconds;
+ *                                 nothing when it has none left until the next boot), for its loop (see Timers)
+ *   timer-fire <timer>            starts a timer's unit, as its loop does at its time
+ *   calendar <expression> [--count=<n>] [--after=<epoch seconds>]
+ *                                 the next times (5) of a calendar event (OnCalendar, startAt) after now (or the
+ *                                 time given), as systemd-analyze calendar shows them, or what is wrong with it
  *   audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]
  *                                 plays raw sound from its input with Android's audio, as music (services.snapclient's
  *                                 snapclient writes it), and writes the time Android's audio takes (ms) to the file
@@ -103,7 +116,8 @@ object Main {
                     args.firstOrNull { it.startsWith("--store=") }?.let { File(it.removePrefix("--store=")) },
                 )
                 "paths" -> JSONObject(File(files.firstOrNull() ?: usage()).readText()).getJSONObject("android")
-                    .optJSONArray("storePaths")?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
+                    .optJSONArray(if ("--derivations" in args) "derivations" else "storePaths")
+                    ?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
                 "updates" -> Updates(data).check()
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
                 "self-update" -> SelfUpdate(data).let { if ("--install" in args) it.install() else it.check() }
@@ -126,10 +140,23 @@ object Main {
                         val units = list.getJSONArray("units")
                         if (units.length() == 0) Out.line("No services: the last build has none (services.*, systemd.services)")
                         for (i in 0 until units.length()) units.getJSONObject(i).let { Out.line("${it.getString("state").padEnd(10)} ${it.getString("name")}  ${it.optString("description")}") }
+                        val timers = list.getJSONArray("timers")
+                        for (i in 0 until timers.length()) timers.getJSONObject(i).let { timer ->
+                            val next = timer.optLong("next").takeIf { it > 0 }?.let { "next ${Out.date(it)}" }
+                                ?: if (timer.optBoolean("done")) "no time left until the next boot" else if (timer.optBoolean("running")) "waiting" else "not running"
+                            val last = timer.optLong("last").takeIf { it > 0 }?.let { ", last ${Out.date(it)}" }.orEmpty()
+                            Out.line("${"timer".padEnd(10)} ${timer.getString("name")}  starts ${timer.getString("unit")}: $next$last")
+                        }
                         0
                     }
                 }
                 "unit" -> Installer.locked(data) { Units(data).control(files.getOrNull(0) ?: usage(), files.getOrNull(1) ?: usage()) }
+                "timer-next" -> Timers(data).next(files.firstOrNull() ?: usage())?.let { println(it) }.let { 0 }
+                "timer-fire" -> Units(data).fire(files.firstOrNull() ?: usage())
+                "calendar" -> calendar(
+                    args.drop(1).filter { !it.startsWith("--") }.joinToString(" ").ifBlank { usage() },
+                    option(args, "count")?.toIntOrNull() ?: 5, option(args, "after")?.toLongOrNull() ?: (System.currentTimeMillis() / 1000),
+                )
                 else -> usage()
             }
         } catch (e: Stop) {
@@ -212,9 +239,29 @@ object Main {
         return 0
     }
 
+    /** The next [count] times of calendar event [expression] after [start], in the phone's time zone and in UTC, as systemd-analyze shows them. */
+    private fun calendar(expression: String, count: Int, start: Long): Int {
+        val calendar = try {
+            Timers.Calendar.parse(expression)
+        } catch (e: IllegalArgumentException) {
+            throw Stop("\"$expression\": ${e.message}", 2)
+        }
+        val zone = ZoneId.systemDefault()
+        var after = start
+        Out.line("  Original form: $expression")
+        repeat(count.coerceIn(1, 1000)) { i ->
+            val next = calendar.next(after, zone) ?: return 0.also { if (i == 0) Out.line("    Next elapse: never") }
+            val at = Instant.ofEpochSecond(next)
+            Out.line("${if (i == 0) "    Next elapse" else "           Iter. #${i + 1}"}: ${at.atZone(zone).toLocalDateTime()} ($zone)")
+            Out.line("       (in UTC): ${at.atZone(ZoneId.of("UTC")).toLocalDateTime()} UTC  $next")
+            after = next
+        }
+        return 0
+    }
+
     /** The value of --<name>=<value>, when it is given. */
     private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
 }

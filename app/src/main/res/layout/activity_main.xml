@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Five tabs: Build (the config and its builds), Updates, Backups, Services and Logs; the terminal and the rest are in the menu. -->
+<!-- Five tabs: Build (the config and its builds), Updates, Backups, Services and Logs, each list with a search box over it;
+     the terminal and the rest are in the menu. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:focusableInTouchMode="true"
     android:orientation="vertical"
     android:padding="16dp">
 
@@ -308,11 +310,19 @@
                     android:text="@string/update_all" />
             </LinearLayout>
 
+            <SearchView
+                android:id="@+id/updates_search"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:iconifiedByDefault="false"
+                android:queryHint="@string/search_updates" />
+
             <ScrollView
                 android:id="@+id/updates_scroll"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="4dp"
                 android:layout_weight="1">
 
                 <LinearLayout
@@ -382,11 +392,19 @@
                     android:text="@string/refresh" />
             </LinearLayout>
 
+            <SearchView
+                android:id="@+id/backups_search"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:iconifiedByDefault="false"
+                android:queryHint="@string/search_backups" />
+
             <ScrollView
                 android:id="@+id/backups_scroll"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="4dp"
                 android:layout_weight="1">
 
                 <LinearLayout
@@ -426,11 +444,19 @@
                 android:text="@string/services_note"
                 android:textAppearance="?android:attr/textAppearanceSmall" />
 
+            <SearchView
+                android:id="@+id/services_search"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:iconifiedByDefault="false"
+                android:queryHint="@string/search_services" />
+
             <ScrollView
                 android:id="@+id/services_scroll"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="4dp"
                 android:layout_weight="1">
 
                 <LinearLayout
@@ -462,6 +488,14 @@
             android:layout_height="match_parent"
             android:orientation="vertical"
             android:visibility="gone">
+
+            <SearchView
+                android:id="@+id/logs_search"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="0dp"
+                android:iconifiedByDefault="false"
+                android:queryHint="@string/search_logs" />
 
             <HorizontalScrollView
                 android:layout_width="match_parent"

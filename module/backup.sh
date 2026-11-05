@@ -10,8 +10,9 @@
 #   status                   each app and folder: when it was backed up last, and whether it is due
 #   restore <app> [snapshot] [--parts=<parts>]
 #                            brings the app's data back from its newest backup (or the one named),
-#                            over what it has, and its APK when it is not installed; --parts: the
-#                            parts named (apk installs it from the backup)
+#                            over what it has; --parts: the parts named (apk installs it from the
+#                            backup). An app not installed gets its APK first, from that backup or
+#                            another of its backups; when none has it, the app is not found
 #   restore <folder> [snapshot] [--to=<folder>]
 #                            brings the folder's files back, into it or into a new folder
 #   parts <app> <snapshot>   what one backup of the app has

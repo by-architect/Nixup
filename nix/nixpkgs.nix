@@ -54,13 +54,19 @@ in
   };
 
   config = {
+    # nixpkgs' pkgs.formats, as modules use it, writes YAML, JSON and TOML without Python (nix/formats.nix); the
+    # packages are nixpkgs' own, so cache.nixos.org has them.
     _module.args.pkgs =
       if _seraph.nixpkgs == null then _seraph.repoTrees
-      else import _seraph.nixpkgs {
-        system = cfg.hostPlatform;
-        inherit (cfg) config;
-        overlays = [ repos ] ++ cfg.overlays;
-      };
+      else
+        let
+          pkgs = import _seraph.nixpkgs {
+            system = cfg.hostPlatform;
+            inherit (cfg) config;
+            overlays = [ repos ] ++ cfg.overlays;
+          };
+        in
+        pkgs // { formats = import ./formats.nix { inherit lib pkgs; inherit (pkgs) formats; }; };
 
     assertions = [
       {

@@ -33,6 +33,7 @@ set_perm "$MODPATH/notify.sh" 0 0 0755
 set_perm "$MODPATH/system/bin/seraph-shell" 0 0 0755
 set_perm "$MODPATH/system/bin/seraph-backup" 0 0 0755
 ln -sf nix "$MODPATH/bin/nix-instantiate"
+ln -sf nix "$MODPATH/bin/nix-store"
 
 # Streamed in, so the installer does not need to read the module's folder.
 ui_print "- Installing the app"

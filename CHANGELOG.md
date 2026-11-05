@@ -6,6 +6,47 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
+  runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 28 Seraph has tried
+  (AdGuard Home, cron, Forgejo, Gotify, harmonia, Navidrome, ntfy, Radicale, Uptime Kuma, ...) are listed in nix/nixos.nix;
+  another can be added as on NixOS, `imports = [ "${modulesPath}/services/…" ];`.
+- Services can run as their own user (`User`, `Group`, `DynamicUser`, as NixOS's modules give them): a user with
+  no uid gets one from 400 to 999, which the phone keeps. Android lets those on the network; one in the
+  `media_rw` group (`serviceConfig.SupplementaryGroups = [ "media_rw" ];`) gets the shared storage too (your
+  files and SD cards, as `/storage` and `/sdcard`), in its own view of the phone.
+- Timers, as on NixOS: a service's `startAt`, and `systemd.timers` with `OnCalendar` (systemd's calendar
+  events: "daily", "Mon..Fri 07:30", "*:0/15", with a time zone or the phone's), `OnBootSec`, `OnActiveSec`,
+  `OnUnitActiveSec`, `OnUnitInactiveSec`, `Persistent` (a time missed while the phone was off comes at its
+  start) and `RandomizedDelaySec`. The Services tab shows when each service a timer starts runs next.
+- Sockets, as on NixOS (`systemd.sockets`, TCP, UDP and unix): the phone opens them and hands them to their
+  service as systemd does, so nixpkgs' modules that use them run as they are (harmonia, a binary cache of the
+  phone's store, is on the list), and a port below 1024 can be a service user's. Such a service starts with the
+  build and at boot, not at its first connection; one started for each connection (`Accept = true`) is not on
+  the phone yet.
+- Services and the jobs cron starts have the phone's time zone in Seraph's `/etc/localtime`, out of Android's
+  time zone data, so summer time comes too; cron's jobs ran in UTC before.
+- `system.path` (cron's `PATH`) is made by Nix itself, without Perl.
+- A service nothing starts at boot (one a timer starts, or one to start by hand) is in the Services tab after
+  each build, ready to start.
+- `BindPaths` are mounted before the service goes into its `WorkingDirectory`, as systemd does.
+- More of systemd's unit settings: `EnvironmentFile`, `LoadCredential` and `SetCredential`, the cache, logs and
+  configuration folders, `BindPaths`, conditions and `ExecCondition`, `Type = "forking"` with `PIDFile`,
+  `KillMode`, `TimeoutStopSec`, `ExecStopPost` (and `preStop`, `postStop`), every `Restart` value, `UMask` and
+  `Limit…`, targets of `systemd.targets`. What only hardens a service on NixOS (`ProtectSystem`, ...) is taken
+  and does nothing.
+- `environment.etc`, `systemd.tmpfiles`, `networking.hosts`, `networking.nameservers` and
+  `environment.variables`, as on NixOS, in Seraph's view of the phone.
+- The phone builds the small files a config makes (a service's settings file, a script) from what
+  cache.nixos.org has, and a build on a PC sends their recipes along; a package itself it still never builds.
+  YAML, JSON and TOML files are written without Python.
+- sshd stops alone when a build restarts it, as on NixOS: SSH sessions, and a build run through one, stay.
+- Fixed: a build started over adb or ssh through Seraph's own Tailscale stopped halfway when it restarted
+  Tailscale (the session went, and the build with it): a build now goes on to its end, with all of it in
+  its log, when the session it came from is cut.
+- Seraph's view has `/var/run`, `/var/lock` (as `/run`'s) and `/var/tmp`, as NixOS has them; cron needs them.
+- After this update every running service starts again once.
+- A module that tells NixOS from a phone by `options ? networking.firewall` now finds that option on the phone
+  too (NixOS's modules need it): check `options ? android` instead.
 - Services that need the phone's storage say so with `unitConfig.RequiresMountsFor`, as on NixOS: they
   start once it is mounted (an SD card, or what Android mounts once the phone is first unlocked), waiting
   quietly till then instead of failing; one whose storage came after its start starts again in a fresh
@@ -40,6 +81,9 @@ section after the version, and its text is what the Magisk app shows as the upda
   then include them, and a private submodule uses the same token.
 - The app is installed for the phone's owner only, and removed from app clones and work profiles,
   where Magisk refuses root without asking; opened there, it says so.
+- Search: the Updates, Backups, Services and Logs tabs have a search box that keeps the rows with
+  what is typed in them (any case, with or without accents: "sifre" finds "şifre"), each log has
+  one that keeps the lines with it, and Back up… → Apps finds an app by its name or package.
 - Fixed: picking up broken-off runs could start a second build next to one still running, which
   deleted its new profile, so the build applied but the phone kept the old profile. A run still
   going is now left alone, a second build, update or backup waits for the first, and each run has
@@ -49,6 +93,11 @@ section after the version, and its text is what the Magisk app shows as the upda
 - Fixed: a service runs again when a secret file it reads changes (a new Tailscale auth key, an
   ssh host key); before, only a change to the service itself restarted it, so a new key waited
   for a restart.
+- Fixed: restoring an app that is no longer on the phone failed with "not installed" when its
+  backup held only its data (as with `android.backup.defaults.apk = false`). Such an app now comes
+  back whole: its APK first, from that backup or another backup of it, then its data; when no backup
+  has its APK, the restore says "app not found". `seraph-backup restore <app>` takes the newest
+  backup with data, not a newer one that holds only the APK.
 
 ## 0.1.0 (2026-11-03)
 

@@ -56,7 +56,7 @@ let
 
   # NixOS's options the phone has not got: each one's value that leaves it unused, and why.
   notHere = [
-    { name = "startWhenNeeded"; unused = !cfg.startWhenNeeded; why = "sshd starts with each build and at boot; starting it on a first connection (socket activation) is not on the phone."; }
+    { name = "startWhenNeeded"; unused = !cfg.startWhenNeeded; why = "sshd starts with each build and at boot; one started for each connection (a socket with Accept) is not on the phone."; }
     { name = "authorizedKeysCommand"; unused = cfg.authorizedKeysCommand == "none"; why = "not on the phone yet."; }
     { name = "settings.UsePAM"; unused = cfg.settings.UsePAM == false; why = "a phone has no PAM."; }
   ];
@@ -320,6 +320,9 @@ in
       '';
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/sshd -D -e -f /etc/ssh/sshd_config";
+        # As on NixOS: a restart of sshd (a build that changes it) ends sshd alone, not the sessions it started, nor
+        # a build run through one of them.
+        KillMode = "process";
         Restart = "always";
         RestartSec = 5;
       };

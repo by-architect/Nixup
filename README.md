@@ -246,13 +246,42 @@ syntax.
       echo "built at $(date)" > /var/lib/hello.txt
     '';
   };
+
+  # A job at set times, as NixOS's startAt (systemd.time(7): "daily", "Mon..Fri 07:30", "*:0/15")
+  systemd.services.photos-copy = {
+    startAt = "*-*-* 03:00:00";
+    serviceConfig.Type = "oneshot";
+    script = "cp -ru /storage/emulated/0/DCIM /storage/1234-5678/Photos";
+  };
 }
 ```
 
-- Supported: `script`, `preStart`, `postStart`, `environment`, `path`, `wantedBy`, `after`, `before`,
-  `wants`, `requires`, and in `serviceConfig`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`,
-  `Type` (simple, oneshot), `Restart`, `RestartSec`, `WorkingDirectory`, `StateDirectory`,
-  `RuntimeDirectory`, `Environment`, `Nice`. Anything else stops the build with a message.
+- Supported: NixOS's unit options (`script`, `preStart`, `postStart`, `preStop`, `postStop`, `environment`,
+  `path`, `wantedBy`, `requiredBy`, `after`, `before`, `wants`, `requires`, `bindsTo`, `restartTriggers`,
+  `systemd.targets`, ...) and systemd's keys for commands (`ExecStart` and the other `Exec…`, `Type`: simple,
+  exec, oneshot, forking, notify, idle, dbus; `Restart` and its exit statuses, `KillMode`, `TimeoutStopSec`,
+  `PIDFile`), its environment (`Environment`, `EnvironmentFile`, `WorkingDirectory`), its user (`User`,
+  `Group`, `SupplementaryGroups`, `DynamicUser`, `AmbientCapabilities`, `UMask`, `Limit…`), its folders
+  (`StateDirectory`, `CacheDirectory`, `LogsDirectory`, `RuntimeDirectory`, `ConfigurationDirectory`,
+  `BindPaths`), its secrets (`LoadCredential`, `SetCredential`) and conditions (`ConditionPathExists`, ...).
+  What only hardens a service on NixOS (`ProtectSystem`, `PrivateDevices`, `SystemCallFilter`, ...) is taken
+  and does nothing; anything else stops the build with a message. [nix/units.nix](nix/units.nix) lists it all.
+- Timers: a service's `startAt`, and `systemd.timers` with `OnCalendar` (systemd's calendar events, with the
+  same times as `systemd-analyze calendar`), `OnBootSec`, `OnActiveSec`, `OnUnitActiveSec`, `OnUnitInactiveSec`,
+  `Persistent` and `RandomizedDelaySec`. A phone asleep runs nothing: a time that passed while it slept comes
+  when it wakes. The Services tab shows when each one runs next.
+- Sockets (`systemd.sockets`: TCP, UDP and unix sockets): the phone opens them and hands them to their service
+  as systemd does (`LISTEN_FDS`), so nixpkgs' modules that use them (harmonia) run as they are, and a port below
+  1024 can be a service user's. Such a service starts with the build, not at its first connection; one started
+  for each connection (`Accept = true`) is not on the phone.
+- A service with a user of its own (`User`, `DynamicUser`, as NixOS's modules give them) runs as that user,
+  with a uid from 400 to 999 the phone keeps for it. Android lets those on the network; the shared storage
+  (`/storage`, `/sdcard`), which Android lets only apps and root open, such a service gets when its user is in
+  `media_rw` (`serviceConfig.SupplementaryGroups = [ "media_rw" ];`, or the user's `extraGroups`), in its own
+  view of the phone. Or it runs as root (`serviceConfig.User = lib.mkForce "root";`).
+- `environment.etc` (files in Seraph's `/etc`), `systemd.tmpfiles`, `networking.hosts` and
+  `networking.nameservers` work as on NixOS, in Seraph's view of the phone, where `/etc/localtime` is the
+  phone's time zone (cron's jobs and every program keep the phone's time).
 - Services start again at boot, run below the app on the screen (so the phone does not stutter), and send a
   notification when they stop by themselves.
 - Start, stop, restart and logs: the app's **Services** tab.
@@ -262,12 +291,28 @@ syntax.
 <details>
 <summary><b>Ready-Made Services</b></summary>
 
-NixOS's own services need their own bridge each. Available now: Tailscale, Syncthing, SSH, Snapcast
-(server and client) and adb. Except for snapclient (which NixOS does not have), they take the same options as
-on NixOS, so one module file can work on a NixOS machine and on the phone.
+NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
+runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The ones Seraph has tried
+are AdGuard Home, aria2, at, Blocky, code-server, cron, dnscrypt-proxy, endlessh, File Browser, Forgejo, gonic,
+Gotify, harmonia, i2pd, llama.cpp, MiniDLNA, Mosquitto, Navidrome, Node-RED, ntfy, Ollama, Radicale, Soft Serve,
+ttyd, Unbound, Uptime Kuma, vnStat and WebDAV ([nix/nixos.nix](nix/nixos.nix)). Another of nixpkgs' modules can be
+added by hand, as on NixOS: `imports = [ "${modulesPath}/services/web-apps/foo.nix" ];` (what it needs that the
+phone has not got stops the build and says so). The small files a module makes (its settings) the phone builds
+itself from what cache.nixos.org has; a package itself it never builds.
+
+Others need a bridge of their own, which Seraph has for Tailscale, Syncthing, SSH, Snapcast (server and client)
+and adb. Except for snapclient (which NixOS does not have), they take the same options as on NixOS, so one module
+file can work on a NixOS machine and on the phone.
 
 ```nix
 { pkgs, ... }: {
+  # nixpkgs' own module for ntfy (push notifications), as on NixOS
+  services.ntfy-sh = {
+    enable = true;
+    settings.base-url = "http://phone:2586";
+    settings.listen-http = "127.0.0.1:2586";    # tailnet only, through Tailscale
+  };
+
   # Tailscale: run by root in userspace mode (it takes no VPN slot; the Tailscale app can stay)
   services.tailscale = {
     enable = true;
@@ -326,7 +371,10 @@ Apps (APK and data) and folders are backed up by the phone itself with
 - **Before each backup** the storage is checked (SD card there, enough room). If something is missing, the
   backup waits and tries again later. A backup cut off by a restart starts again after you unlock the phone.
 - **Restore** is always by hand: the app's **Backups** tab (pick the backup, then the parts: APK, data, …),
-  or `su -c "seraph-backup restore org.example.app"`.
+  or `su -c "seraph-backup restore org.example.app"`. An app that is not on the phone comes back whole: its
+  APK first, then its data. The APK comes from that backup, or from another backup of the app when that one
+  has none (`android.backup.defaults.apk = false` backs up data only). If no backup has the APK, the restore
+  says "app not found": install the app first, then restore its data.
 - **New phone:** `android.backup.defaults.autoRestore = true;` reinstalls backed-up apps with their data at
   the next build. An app you removed on this phone is never brought back by itself.
 - **Keep `passwordFile` somewhere besides the phone:** without it, the backups cannot be read.
@@ -351,6 +399,9 @@ It works like `nixos-rebuild`:
 - The config can be a `configuration.nix`, a `flake.nix` (with `seraphConfigurations.<name>`), or a git
   repository the app clones (**Git** button: Pull, Pull and build, Reclone).
 - You get a notification when a build, update or backup ends, and every run's log is in the **Logs** tab.
+- The **Updates**, **Backups**, **Services** and **Logs** tabs each have a search box, and so does every log
+  you open: type part of a name, a package or a message to see only what matches (any case, with or without
+  accents).
 
 </details>
 

@@ -420,8 +420,8 @@
   };
 
   # ==== 5. Scripts and services ================================================================
-  # Services with NixOS's names and options, run by root from Nix packages, which the phone fetches
-  # from cache.nixos.org (nixos-unstable) and runs where /nix exists. Logs: the app's Logs tab
+  # Services with NixOS's names and options, run from Nix packages, which the phone fetches from
+  # cache.nixos.org (nixos-unstable) and runs where /nix exists. Logs: the app's Logs tab
   # (/data/adb/seraph/units). A service that stops by itself or fails is told in a notification, and
   # so is Tailscale's connection; the SSH server and adb, the phone's security, never are.
 
@@ -650,6 +650,55 @@
       ExecStop = "${pkgs.coreutils}/bin/true";          # a command when it stops
     };
   };
+
+  # A service of its own user, with more of NixOS's unit settings (nix/units.nix lists all the phone takes).
+  systemd.services.notes = {
+    enable = false;                               # true: run it
+    description = "Notes over HTTP, for the tailnet";
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      DynamicUser = true;                         # its own user (uid 400–999: Android lets it on the network)
+      SupplementaryGroups = [ "media_rw" ];       # and into the shared storage (/storage, /sdcard), in its view
+      StateDirectory = "notes";                   # /var/lib/notes, its user's ("CacheDirectory", "LogsDirectory" alike)
+      LoadCredential = "token:/data/adb/seraph/secrets/notes-token";   # a file only it may read: $CREDENTIALS_DIRECTORY/token
+      EnvironmentFile = "-/data/adb/seraph/secrets/notes.env";        # variables from a file ("-": it may be missing)
+      ExecStart = "${pkgs.python3}/bin/python3 -m http.server 8081 --bind 127.0.0.1 --directory /var/lib/notes";
+      UMask = "0027";                             # its files' mode
+      LimitNOFILE = 4096;                         # its limits (Limit*)
+      ProtectSystem = "strict";                   # what only hardens it on NixOS: taken, and nothing done
+    };
+    unitConfig.ConditionPathExists = "/data/adb/seraph/secrets/notes-token";   # starts only when this is there
+  };
+  # A socket the phone opens for a service, which takes it as systemd hands it over (LISTEN_FDS), as on NixOS:
+  #   systemd.sockets.foo = { wantedBy = [ "sockets.target" ]; listenStreams = [ "127.0.0.1:8082" ]; };
+
+  # A job at set times, as on NixOS: startAt (systemd.time(7)), or systemd.timers.<name> for OnBootSec, Persistent, ...
+  systemd.services.notes-copy = {
+    enable = false;                               # true: run it
+    startAt = "*-*-* 03:00:00";                   # when: like "daily", "Mon..Fri 07:30", "*:0/15"
+    serviceConfig.Type = "oneshot";
+    script = "cp -r /var/lib/notes /storage/emulated/0/Documents/";
+  };
+
+  # NixOS's own service modules, from nixpkgs, as they are: the ones Seraph has tried (nix/nixos.nix lists them) with
+  # all their NixOS options. Each runs as its own user; one that needs the phone's shared storage (a music folder)
+  # gets it with systemd.services.<name>.serviceConfig.SupplementaryGroups = [ "media_rw" ]. The small files a module
+  # makes (its settings) the phone builds itself.
+  services.ntfy-sh = {
+    enable = false;                               # true: run it (push notifications, ntfy.sh's own server)
+    settings.base-url = "http://logos:2586";      # its settings, as on NixOS
+    settings.listen-http = "127.0.0.1:2586";
+  };
+  services.gotify.enable = false;                 # another: Gotify's push server
+  # More of nixpkgs' modules, as on NixOS ({ modulesPath, ... }: at the top):
+  #   imports = [ "${modulesPath}/services/web-apps/foo.nix" ];
+  #   disabledModules = [ "services/misc/ntfy-sh.nix" ];   # leaves one of the list out, for a module of your own
+
+  environment.etc = { };                          # files in Seraph's /etc, like { "foo/foo.conf".text = "a = 1"; }
+  environment.variables = { };                    # variables of every shell session, like { EDITOR = "nano"; }
+  systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
+  networking.hosts = { };                         # names in Seraph's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
+  networking.nameservers = [ ];                   # DNS servers of Seraph's services ([ ]: the network's), like [ "9.9.9.9" ]
 
   environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c seraph-shell), like htop rsync
 
