@@ -97,6 +97,11 @@ class Backup private constructor(
 
     private val repo: String get() = if (repository.startsWith("/")) real(repository) else repository
 
+    /** Whether something is mounted on [dir] (the phone's own mounts, as the engine sees them). */
+    private fun mounted(dir: String): Boolean = runCatching {
+        File("/proc/self/mountinfo").useLines { lines -> lines.any { it.split(' ').getOrNull(4) == dir } }
+    }.getOrDefault(false)
+
     /**
      * Runs [body] (shell lines, after the environment restic needs) in Seraph's view; what restic prints on standard
      * output is returned, and what it says on standard error goes to [say] line by line.
@@ -407,9 +412,11 @@ class Backup private constructor(
      */
     private fun preflight(apps: Map<String, Settings>, folders: List<String>, auto: Boolean): String? {
         if (repository.startsWith("/")) {
-            // An SD card's (or USB storage's) repository: its card must be in.
+            // An SD card's (or USB storage's) repository: its card must be in, and mounted: Android makes the folder it is
+            // mounted on first, and mounts it only once the phone is first unlocked after it starts (a backup at the unlock
+            // found the folder empty, and restic no repository in it).
             Regex("^/storage/([^/]+)/").find(repository)?.groupValues?.get(1)?.takeIf { it != "emulated" && it != "self" }?.let { card ->
-                if (!File("/mnt/media_rw/$card").isDirectory) return "the storage of the repository ($card, an SD card or USB storage) is not there"
+                if (!mounted("/mnt/media_rw/$card")) return "the storage of the repository ($card, an SD card or USB storage) is not mounted (taken out, or the phone not unlocked since it started)"
             }
             val there = generateSequence(File(repo)) { it.parentFile }.firstOrNull { it.exists() } ?: return "the repository's folder is not there"
             val stat = runCatching { android.os.StatFs(there.path) }.getOrNull() ?: return null

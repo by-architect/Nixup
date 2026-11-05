@@ -614,12 +614,15 @@
     preStart = ''test -d "$SHARE"'';              # commands before each start
     postStart = "echo 'web-share: port 8080'";    # commands once started
     restartTriggers = [ ];                        # values whose change restarts it
+    unitConfig.RequiresMountsFor = [ "/storage/emulated/0/Download" ];   # storage it needs: it starts once that is mounted
     notifications = true;                         # Seraph's own: tell when it stops by itself, fails, or runs again
     serviceConfig = {
       Type = "simple";                            # keeps running ("oneshot": runs once)
       ExecStart = "${pkgs.darkhttpd}/bin/darkhttpd $SHARE --addr 127.0.0.1 --port 8080";   # what it runs (or script)
       Restart = "on-failure";                     # start again when it fails: "no", "on-failure", "always"
       RestartSec = 5;                             # seconds before that
+      SuccessExitStatus = "3";                    # exit codes that are no failure
+      RestartForceExitStatus = "3";               # exit codes that start it again whatever Restart says
       WorkingDirectory = "/var/lib/web-share";    # where it runs
       StateDirectory = "web-share";               # /var/lib/web-share, kept
       RuntimeDirectory = "web-share";             # /run/web-share, gone when it stops

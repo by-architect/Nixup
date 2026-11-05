@@ -44,6 +44,7 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
             when (state) {
                 "running" -> R.string.state_running
                 "restarting" -> R.string.state_restarting
+                "waiting" -> R.string.state_waiting
                 "done" -> R.string.state_done
                 "failed" -> R.string.state_failed
                 "not run" -> R.string.state_not_run
@@ -57,7 +58,7 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
         } else {
             listOf(
                 Ui.button(activity, activity.getString(R.string.service_restart)) { act("restart", name, R.string.service_restart) },
-                if (state == "running" || state == "restarting") Ui.button(activity, activity.getString(R.string.service_stop)) { act("stop", name, R.string.service_stop) }
+                if (state == "running" || state == "restarting" || state == "waiting") Ui.button(activity, activity.getString(R.string.service_stop)) { act("stop", name, R.string.service_stop) }
                 else Ui.button(activity, activity.getString(R.string.service_start)) { act("start", name, R.string.service_start) },
             )
         }

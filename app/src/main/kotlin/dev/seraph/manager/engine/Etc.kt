@@ -176,4 +176,6 @@ object Etc {
 
 internal fun JSONObject.string(key: String): String? = if (isNull(key)) null else optString(key).ifEmpty { null }
 
+internal fun JSONObject.ints(key: String): List<Int> = optJSONArray(key)?.let { array -> (0 until array.length()).map { array.getInt(it) } } ?: emptyList()
+
 internal fun JSONObject.strings(key: String): List<String> = optJSONArray(key)?.let { array -> (0 until array.length()).map { array.getString(it) } } ?: emptyList()
