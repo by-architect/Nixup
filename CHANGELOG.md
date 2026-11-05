@@ -24,6 +24,10 @@ section after the version, and its text is what the Magisk app shows as the upda
   cache.nixos.org has, and a build on a PC sends their recipes along; a package itself it still never builds.
   YAML, JSON and TOML files are written without Python.
 - sshd stops alone when a build restarts it, as on NixOS: SSH sessions, and a build run through one, stay.
+- Fixed: a build started over adb or ssh through Seraph's own Tailscale stopped halfway when it restarted
+  Tailscale (the session went, and the build with it): a build now goes on to its end, with all of it in
+  its log, when the session it came from is cut.
+- Seraph's view has `/var/run`, `/var/lock` (as `/run`'s) and `/var/tmp`, as NixOS has them; cron needs them.
 - After this update every running service starts again once.
 - A module that tells NixOS from a phone by `options ? networking.firewall` now finds that option on the phone
   too (NixOS's modules need it): check `options ? android` instead.

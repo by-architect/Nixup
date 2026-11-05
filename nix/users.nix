@@ -103,7 +103,7 @@ let
         description = ''
           The user's shell, as on NixOS: a package (its shellPath, or bin/<name>) or a full path. null: Seraph's
           login shell (/etc/seraph/login: environment.systemPackages on PATH) for root, a normal user and one with
-          useDefaultShell, and none (/system/bin/false) for a system user, which logs in nowhere.
+          useDefaultShell, and none (/system/bin/false) for any other (a service's), which logs in nowhere.
         '';
       };
       useDefaultShell = mkOption {
@@ -197,13 +197,13 @@ let
     ++ lib.attrNames (lib.filterAttrs (_: user: lib.elem name user.extraGroups) users)
     ++ map (user: user.name) (lib.filter (user: lib.elem name (user.groups ++ [ "inet" ])) unitAccounts));
 
-  # Its shell: one it names, Seraph's login shell, or none for a service's user.
+  # Its shell: one it names, Seraph's login shell (root's, a normal user's), or none, as NixOS gives a service's user.
   shellOf = user:
     if user.shell != null then
       (if builtins.isString user.shell then user.shell
        else "${user.shell}${user.shell.passthru.shellPath or "/bin/${user.shell.meta.mainProgram or (lib.getName user.shell)}"}")
-    else if user.isSystemUser && !user.isNormalUser && !user.useDefaultShell && user.name != "root" then "/system/bin/false"
-    else "/etc/seraph/login";
+    else if user.name == "root" || user.isNormalUser || user.useDefaultShell then "/etc/seraph/login"
+    else "/system/bin/false";
   passwdLine = user: lib.concatStringsSep ":" [
     user.name "x" (uidText user) (toString (gidOf user.group)) user.description user.home (shellOf user)
   ];

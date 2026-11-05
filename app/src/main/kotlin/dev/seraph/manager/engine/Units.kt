@@ -921,6 +921,23 @@ class Units(private val data: File) {
         dir.mkdirs()
         view.writeText(viewText())
         background.writeText(BACKGROUND)
+        // As on NixOS: /var/run and /var/lock are /run's (relative links: the same inside the view and outside of it),
+        // and /var/tmp is everyone's.
+        runCatching {
+            File(runDir, "lock").mkdirs()
+            for ((name, target) in listOf("run" to "../run", "lock" to "../run/lock")) {
+                val link = File(varDir, name)
+                if (!link.exists() && !Files.isSymbolicLink(link.toPath())) {
+                    varDir.mkdirs()
+                    Os.symlink(target, link.path)
+                }
+            }
+            val tmp = File(varDir, "tmp")
+            if (!tmp.isDirectory) {
+                tmp.mkdirs()
+                Os.chmod(tmp.path, "1777".toInt(8))
+            }
+        }
     }
 
     /**

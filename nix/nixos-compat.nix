@@ -251,8 +251,13 @@ in
       path = mkOption {
         type = types.package;
         readOnly = true;
-        default = pkgs.buildEnv { name = "system-path"; paths = config.environment.systemPackages; ignoreCollisions = true; };
-        defaultText = lib.literalExpression "environment.systemPackages, together";
+        # With the commands every shell has, as NixOS's has them (cron's jobs run with it as their PATH).
+        default = pkgs.buildEnv {
+          name = "system-path";
+          paths = config.environment.systemPackages ++ (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+          ignoreCollisions = true;
+        };
+        defaultText = lib.literalExpression "environment.systemPackages, with bash, coreutils, findutils, grep, sed and less";
         description = "The system's packages in one folder, as on NixOS (made on the phone when something uses it).";
       };
       checks = taken (types.listOf types.package) [ ] "builds that check the system";

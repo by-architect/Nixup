@@ -50,6 +50,10 @@ run_open() {
   # The newest 60 runs' logs stay.
   ls -t "$LOGS"/*.log 2> /dev/null | tail -n +60 | while read -r old; do rm -f "$old"; done
   : > "$RUN_LOG"
+  # A run goes on when whoever started it goes away (an adb or ssh session cut off, as when a build
+  # restarts Tailscale, through which the session came): what it says still goes to its log, and tee
+  # (which keeps these signals ignored) goes on writing it.
+  trap '' HUP PIPE
   # Everything said from here on goes to its log too, through tee.
   pipe=$DATA/tmp/run-$$.pipe
   rm -f "$pipe"
