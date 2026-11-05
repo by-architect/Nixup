@@ -38,6 +38,23 @@ let
     location = settings.location.enable;
   };
 
+  # What the profile needs of Nix's store: the services' programs and the files the config makes for them, /etc's
+  # files and environment.systemPackages (the backups' restic and the terminal's font come as paths alone). As Nix
+  # finds a build's references, by their names in the text (storePaths); and, from their strings' context, how each
+  # comes (derivations): a derivation's outputs, fetched from cache.nixos.org, or built on the phone when it is a
+  # small file the config makes (a unit's settings file); or a file the config put in the store itself.
+  needed = builtins.toJSON {
+    inherit (config.system.build) units etc;
+    packages = map (package: "${package}") (config.environment.systemPackages ++ shellPackages);
+  };
+  storePathsIn = text: map builtins.head (lib.filter builtins.isList
+    (builtins.split "(/nix/store/[a-z0-9]{32}-[A-Za-z0-9+._?=-]+)" (builtins.unsafeDiscardStringContext text)));
+  derivations = lib.mapAttrsToList (path: how:
+    if how.allOutputs or false then "${path}^*"
+    else if how ? outputs then "${path}^${lib.concatStringsSep "," how.outputs}"
+    else path
+  ) (builtins.getContext needed);
+
   # An app's settings without the ones left null (not managed); an app with none is left out.
   managed = value:
     if builtins.isAttrs value then
@@ -63,7 +80,8 @@ in
       needsNixpkgs = options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
         || options.terminal.font.highestPrio < (lib.mkOptionDefault null).priority
         || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { }
-        || config.android.backup.repository != null;
+        || config.android.backup.repository != null
+        || config.system.build.nixosServices.used;
     };
 
     # toString: a path stays where it is, where interpolating it would copy it into the store.
@@ -119,13 +137,18 @@ in
             adb = config.system.build.adb;
             # The secrets' names: the phone checks each is there, and removes one that left.
             secrets = lib.attrNames config.android.secrets;
-            # The services (systemd.services, Seraph's own among them) as the engine runs them, and
+            # The services (systemd.services, Seraph's own and NixOS's modules' among them) as the
+            # engine runs them, with the view's /etc files (environment.etc), hosts and DNS servers
+            # (networking.hosts, networking.nameservers) and the folders systemd.tmpfiles makes; and
             # every store path the phone needs for them, environment.systemPackages and the
-            # terminal's font: it fetches those from cache.nixos.org before the build changes anything.
+            # terminal's font: it fetches those from cache.nixos.org (and builds the small files the
+            # config makes, as derivations says) before the build changes anything.
             units = config.system.build.units;
-            storePaths = lib.unique (config.system.build.unitStorePaths ++ config.system.build.backupStorePaths
-              ++ config.system.build.terminalStorePaths
-              ++ map (package: builtins.unsafeDiscardStringContext "${package}") (config.environment.systemPackages ++ shellPackages));
+            etc = config.system.build.etc;
+            inherit (config.system.build) network tmpfiles;
+            storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths
+              ++ config.system.build.terminalStorePaths);
+            inherit derivations;
             # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
             # NixOS has them; none without Nix packages.
             shell = if config.environment.systemPackages == [ ] then null else {

@@ -320,6 +320,9 @@ in
       '';
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/sshd -D -e -f /etc/ssh/sshd_config";
+        # As on NixOS: a restart of sshd (a build that changes it) ends sshd alone, not the sessions it started, nor
+        # a build run through one of them.
+        KillMode = "process";
         Restart = "always";
         RestartSec = 5;
       };

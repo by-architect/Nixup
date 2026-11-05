@@ -6,6 +6,27 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
+  runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 27 Seraph has tried
+  (AdGuard Home, cron, Forgejo, Gotify, Navidrome, ntfy, Radicale, Uptime Kuma, ...) are listed in nix/nixos.nix;
+  another can be added as on NixOS, `imports = [ "${modulesPath}/services/…" ];`.
+- Services can run as their own user (`User`, `Group`, `DynamicUser`, as NixOS's modules give them): a user with
+  no uid gets one from 400 to 999, which the phone keeps. Android lets those on the network, but not into the
+  shared storage: a service that needs your files runs as root (`serviceConfig.User = lib.mkForce "root";`).
+- More of systemd's unit settings: `EnvironmentFile`, `LoadCredential` and `SetCredential`, the cache, logs and
+  configuration folders, `BindPaths`, conditions and `ExecCondition`, `Type = "forking"` with `PIDFile`,
+  `KillMode`, `TimeoutStopSec`, `ExecStopPost` (and `preStop`, `postStop`), every `Restart` value, `UMask` and
+  `Limit…`, targets of `systemd.targets`. What only hardens a service on NixOS (`ProtectSystem`, ...) is taken
+  and does nothing.
+- `environment.etc`, `systemd.tmpfiles`, `networking.hosts`, `networking.nameservers` and
+  `environment.variables`, as on NixOS, in Seraph's view of the phone.
+- The phone builds the small files a config makes (a service's settings file, a script) from what
+  cache.nixos.org has, and a build on a PC sends their recipes along; a package itself it still never builds.
+  YAML, JSON and TOML files are written without Python.
+- sshd stops alone when a build restarts it, as on NixOS: SSH sessions, and a build run through one, stay.
+- After this update every running service starts again once.
+- A module that tells NixOS from a phone by `options ? networking.firewall` now finds that option on the phone
+  too (NixOS's modules need it): check `options ? android` instead.
 - Services that need the phone's storage say so with `unitConfig.RequiresMountsFor`, as on NixOS: they
   start once it is mounted (an SD card, or what Android mounts once the phone is first unlocked), waiting
   quietly till then instead of failing; one whose storage came after its start starts again in a fresh

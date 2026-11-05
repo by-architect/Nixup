@@ -17,8 +17,11 @@ import kotlin.system.exitProcess
  *                                 services match the profile (with --dry-run: only plans and checks; with --force, the
  *                                 releases are asked for again even when new enough; --secrets: the folder of the
  *                                 secrets a PC sent with it, seraph-rebuild's)
- *   paths <profile>               prints the store paths the profile needs (its android.storePaths), one a line, for
- *                                 the module to fetch from cache.nixos.org before applying it
+ *   paths <profile> [--derivations]
+ *                                 prints the store paths the profile needs (its android.storePaths), one a line, for
+ *                                 the module to fetch from cache.nixos.org before applying it; with --derivations, how
+ *                                 each comes (android.derivations: a derivation's outputs, which the small files the
+ *                                 config makes are built from on the phone, or a path the config added)
  *   secrets <file> <folder> [--store=<root>]
  *                                 puts the secrets a build on the phone gives (<file>: each one's file or text) in
  *                                 <folder>, readable by root alone, as a PC sends them (--store: Seraph's store, for
@@ -104,7 +107,8 @@ object Main {
                     args.firstOrNull { it.startsWith("--store=") }?.let { File(it.removePrefix("--store=")) },
                 )
                 "paths" -> JSONObject(File(files.firstOrNull() ?: usage()).readText()).getJSONObject("android")
-                    .optJSONArray("storePaths")?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
+                    .optJSONArray(if ("--derivations" in args) "derivations" else "storePaths")
+                    ?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
                 "updates" -> Updates(data).check()
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
                 "self-update" -> SelfUpdate(data).let { if ("--install" in args) it.install() else it.check() }

@@ -9,9 +9,16 @@
 # Seraph's own /data/adb/seraph/users, there from the start of the phone on, before it is first unlocked (an app's
 # own folders are locked until then).
 #
-# Android checks a process's groups for some of what it may do: network sockets need inet (3003), the shared storage
-# external_storage (1077) or sdcard_rw (1015). users.groups has those, with Android's numbers, for extraGroups.
-{ config, lib, ... }:
+# A user without uid or androidApp (a service's user: isSystemUser, as NixOS's service modules make them, or a unit's
+# DynamicUser; or a normal user) gets one on the phone from 400 to 999, as NixOS gives its system users theirs, and
+# keeps it (Etc.kt): Android lets those use the network (as it lets uids below 10000, and apps that may; NixOS's
+# normal users' 1000 and up are Android's own there), but not the shared storage, which only apps and root may open.
+# A group without a gid gets one the same way.
+#
+# Android checks a process's groups for some of what it may do: network sockets need inet (3003) on some phones, the
+# shared storage external_storage (1077) or sdcard_rw (1015). users.groups has those, with Android's numbers, for
+# extraGroups.
+{ config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
 
@@ -84,6 +91,32 @@ let
         defaultText = lib.literalExpression "isNormalUser";
         description = "Make the home folder, owned by the user, when it is not there (a normal user's is made, as on NixOS).";
       };
+      homeMode = mkOption {
+        type = types.strMatching "[0-7]{1,5}";
+        default = "700";
+        description = "The home folder's mode, when createHome makes it, as on NixOS.";
+      };
+      shell = mkOption {
+        type = types.nullOr (types.either types.package types.str);
+        default = null;
+        example = lib.literalExpression "pkgs.bashInteractive";
+        description = ''
+          The user's shell, as on NixOS: a package (its shellPath, or bin/<name>) or a full path. null: Seraph's
+          login shell (/etc/seraph/login: environment.systemPackages on PATH) for root, a normal user and one with
+          useDefaultShell, and none (/system/bin/false) for a system user, which logs in nowhere.
+        '';
+      };
+      useDefaultShell = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether a system user gets Seraph's login shell too, as on NixOS it gets users.defaultUserShell.";
+      };
+      packages = mkOption {
+        type = types.listOf types.package;
+        default = [ ];
+        example = lib.literalExpression "[ pkgs.htop ]";
+        description = "Nix packages for the user, as on NixOS; on the phone they join environment.systemPackages.";
+      };
       openssh = {
         authorizedKeys = {
           keys = mkOption {
@@ -134,24 +167,51 @@ let
   users = config.users.users;
   groups = config.users.groups;
 
-  # A user's uid as /etc/passwd has it: an app's, as the engine fills it in on the phone (Etc.kt).
-  hasUid = user: user.uid != null || user.androidApp != null;
-  uidText = user: if user.androidApp != null then "@app:${user.androidApp}@" else toString user.uid;
+  # A user's uid as /etc/passwd has it: an app's, or a service user's (given on the phone), as the engine fills them
+  # in there (Etc.kt).
+  allocated = user: user.uid == null && user.androidApp == null && (user.isSystemUser || user.isNormalUser);
+  hasUid = user: user.uid != null || user.androidApp != null || allocated user;
+  uidText = user:
+    if user.androidApp != null then "@app:${user.androidApp}@"
+    else if user.uid != null then toString user.uid
+    else "@id:u:${user.name}@";
+  gidText = name: group: if group.gid != null then toString group.gid else "@id:g:${name}@";
 
-  # A user's own group, when users.groups has none of that name: its uid as the gid.
-  ownGroups = lib.mapAttrs' (_: user: lib.nameValuePair user.group { gid = uidText user; members = [ ]; })
-    (lib.filterAttrs (_: user: hasUid user && !(groups ? ${user.group})) users);
-  allGroups = lib.mapAttrs (name: group: { inherit (group) gid members; }) groups // ownGroups;
+  # A user's own group, when users.groups has none of that name: its uid as the gid (a service user's: one given as a
+  # group's, the same number when it can be).
+  ownGroups = lib.mapAttrs' (_: user: lib.nameValuePair user.group {
+    gid = if allocated user then "@id:g:${user.group}@" else uidText user;
+    members = [ ];
+  }) (lib.filterAttrs (_: user: hasUid user && !(groups ? ${user.group})) users);
+  # The units' users that users.users has not (a DynamicUser), with their groups.
+  unitAccounts = config.system.build.unitAccounts;
+  unitUsers = lib.unique (map (user: { inherit (user) name group; }) (lib.filter (user: !user.declared) unitAccounts));
+  unitGroups = lib.listToAttrs (map (user: lib.nameValuePair user.group { gid = "@id:g:${user.group}@"; members = [ ]; })
+    (lib.filter (user: !(groups ? ${user.group}) && !(ownGroups ? ${user.group})) unitUsers));
+  # A group a unit names (SupplementaryGroups) that the view has not: one of its own, as NixOS has its system groups.
+  extraGroups = lib.genAttrs (lib.filter (group: !(groups ? ${group})) (lib.unique (lib.concatMap (user: user.groups) unitAccounts)))
+    (group: { gid = "@id:g:${group}@"; members = [ ]; });
+  allGroups = extraGroups // unitGroups // lib.mapAttrs (name: group: { gid = gidText name group; inherit (group) members; }) groups // ownGroups;
   gidOf = name: allGroups.${name}.gid or null;
   members = name: lib.unique (allGroups.${name}.members
-    ++ lib.attrNames (lib.filterAttrs (_: user: lib.elem name user.extraGroups) users));
+    ++ lib.attrNames (lib.filterAttrs (_: user: lib.elem name user.extraGroups) users)
+    ++ map (user: user.name) (lib.filter (user: lib.elem name (user.groups ++ [ "inet" ])) unitAccounts));
 
+  # Its shell: one it names, Seraph's login shell, or none for a service's user.
+  shellOf = user:
+    if user.shell != null then
+      (if builtins.isString user.shell then user.shell
+       else "${user.shell}${user.shell.passthru.shellPath or "/bin/${user.shell.meta.mainProgram or (lib.getName user.shell)}"}")
+    else if user.isSystemUser && !user.isNormalUser && !user.useDefaultShell && user.name != "root" then "/system/bin/false"
+    else "/etc/seraph/login";
   passwdLine = user: lib.concatStringsSep ":" [
-    user.name "x" (uidText user) (toString (gidOf user.group)) user.description user.home "/etc/seraph/login"
+    user.name "x" (uidText user) (toString (gidOf user.group)) user.description user.home (shellOf user)
   ];
+  unitPasswdLine = user: "${user.name}:x:@id:u:${user.name}@:${toString (gidOf user.group)}::/var/empty:/system/bin/false";
   groupLine = name: group: "${name}:x:${toString group.gid}:${lib.concatStringsSep "," (members name)}";
 
   userList = lib.attrValues users;
+  userPackages = lib.concatMap (user: user.packages) userList;
   missingUid = map (user: user.name) (lib.filter (user: !hasUid user) userList);
   bothUids = map (user: user.name) (lib.filter (user: user.uid != null && user.androidApp != null && user.name != "root") userList);
   unknownGroups = lib.concatMap (user: map (group: "${user.name}: ${group}")
@@ -177,8 +237,13 @@ in
   config = {
     users.users.root.description = lib.mkDefault "root";
 
-    # Android's groups that decide what a process may do (system/core's android_filesystem_config.h).
+    # Android's groups that decide what a process may do (system/core's android_filesystem_config.h), and NixOS's
+    # names for its devices' groups as Android's (its sound devices are audio's, its GPU graphics').
     users.groups = lib.mapAttrs (_: gid: { gid = lib.mkDefault gid; }) {
+      audio = 1005;
+      video = 1003;
+      render = 1003;
+      input = 1004;
       root = 0;
       sdcard_rw = 1015;
       media_rw = 1023;
@@ -190,18 +255,31 @@ in
       readproc = 3009;
       wakelock = 3010;
       everybody = 9997;
+      nogroup = 9999;
       sshd = 74;
     };
+
+    # NixOS's nobody, as Android's own (AID_NOBODY: 9999, which may use the network, as NixOS's 65534 may not here).
+    users.users.nobody = {
+      uid = lib.mkDefault 9999;
+      group = lib.mkDefault "nogroup";
+      isSystemUser = lib.mkDefault true;
+      description = lib.mkDefault "Unprivileged account (don't use!)";
+    };
+
+    # (Only when there are some: a config without Nix packages needs no nixpkgs.)
+    environment.systemPackages = lib.mkIf (userPackages != [ ]) userPackages;
 
     # The view's /etc/passwd and /etc/group (the engine writes them), and the homes to make.
     system.build.users = {
       passwd = lib.concatMapStrings (user: passwdLine user + "\n")
         (lib.sortOn (user: if user.uid != null then user.uid else 1000000) (lib.filter hasUid userList))
+        + lib.concatMapStrings (user: unitPasswdLine user + "\n") unitUsers
         + "sshd:x:74:74:sshd privilege separation:/var/empty:/system/bin/false\n";
-      group = lib.concatStrings (lib.mapAttrsToList (name: group: groupLine name group + "\n")
-        (lib.filterAttrs (_: group: group.gid != null) allGroups));
-      # An app's uid as text the engine fills in ("@app:<package>@"), else a number.
-      homes = map (user: { path = user.home; uid = uidText user; gid = toString (gidOf user.group); })
+      group = lib.concatStrings (lib.mapAttrsToList (name: group: groupLine name group + "\n") allGroups);
+      # An app's uid as text the engine fills in ("@app:<package>@"), a service user's ("@id:u:<name>@"), else a
+      # number.
+      homes = map (user: { path = user.home; uid = uidText user; gid = toString (gidOf user.group); mode = user.homeMode; })
         (lib.filter (user: user.createHome && hasUid user) userList);
       # The users of apps, which must be on the phone (or installed by the build).
       apps = map (user: { inherit (user) name; app = user.androidApp; }) (lib.filter (user: user.androidApp != null) userList);
@@ -210,7 +288,7 @@ in
     assertions = [
       {
         assertion = missingUid == [ ];
-        message = "users.users: ${lib.concatStringsSep ", " missingUid} needs a uid, or androidApp (an Android app's own uid: \"dev.seraph.manager\", Seraph's, may use su as Seraph may).";
+        message = "users.users: ${lib.concatStringsSep ", " missingUid} needs a uid, or androidApp (an Android app's own uid: \"dev.seraph.manager\", Seraph's, may use su as Seraph may), or isSystemUser or isNormalUser (the phone gives it one).";
       }
       {
         assertion = bothUids == [ ];

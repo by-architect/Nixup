@@ -45,6 +45,8 @@ else event build start "Applying a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURC
 log "== Built on ${GEN_BUILT_ON:-a PC}: $GEN_SOURCE"
 log "Profile: $(cat "$IN/profile.json")"
 SECRETS_IN=$IN/secrets
+# The derivations of the files the config makes, which this phone builds (common.sh).
+import_paths "$IN/paths.nar" || fail "what the PC sent of Nix's store could not be taken in (Nix says why above); nothing was changed"
 # Its own (see build.sh), until switch_to makes it the phone's.
 NEW=$PROFILE.new-$$
 at_exit 'rm -f "$NEW"'

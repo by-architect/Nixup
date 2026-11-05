@@ -269,22 +269,70 @@ nix_env() {
 # services see them there), in the namespace with Seraph's /etc (nix_run).
 nix_store() { nix_run "$MODDIR/bin/nix" --store "$DATA/nix" "$@"; }
 
-# The Nix packages a profile needs (its storePaths: the services' programs and
-# environment.systemPackages), fetched from cache.nixos.org into Seraph's store; with
-# dry, only said. Nothing is built on the phone: a package the cache has not got
-# (built from the config, unfree, or changed by an overlay) stops the build here,
-# before anything changes.
+# Nix in Seraph's view, where its store is /nix itself, as on NixOS: what it builds runs
+# there (the small files a config makes need their store at /nix/store). Arguments: Nix's
+# command (nix, nix-store), then its arguments, each a word (they go into a script).
+nix_view() {
+  [ -f "$DATA/units/view.sh" ] || engine etc > /dev/null || return 1
+  tool=$1
+  shift
+  script=$DATA/tmp/nix-view.sh
+  { printf 'exec %s' "'$MODDIR/bin/$tool'"; for word; do printf " '%s'" "$word"; done; printf '\n'; } > "$script"
+  sh "$DATA/units/view.sh" "$script"
+}
+
+# The Nix packages a profile needs (its derivations and storePaths: the services'
+# programs, the files the config makes for them, environment.systemPackages), into
+# Seraph's store: fetched from cache.nixos.org, and the small files a config makes (a
+# service's settings file, a script; their derivations are here, written by the phone's
+# evaluation or sent by the PC that built the config) built here, from what the cache has;
+# with dry, only said. A package the cache has not got (built from source: unfree, or
+# changed by an overlay) is never built on the phone: it stops the build here, before
+# anything changes.
 fetch_packages() {
   paths=$(engine paths "$1" | grep '^/nix/store/') || paths=
-  [ -n "$paths" ] || return 0
+  drvs=$(engine paths "$1" --derivations | grep '^/nix/store/') || drvs=
+  [ -n "$paths$drvs" ] || return 0
   log "== Packages"
   nix_env
   nix_etc > /dev/null || { log "Nix could not get its /etc (the network's DNS servers): is the phone online?"; return 1; }
+  # The derivations here; the others' outputs come from the cache by their paths.
+  here=
+  for drv in $drvs; do [ -f "$DATA/nix${drv%%^*}" ] && here="$here $drv"; done
+  if [ -n "$here" ]; then
+    nix_view nix build --dry-run --no-link $here 2> "$DATA/tmp/packages.plan" || { cat "$DATA/tmp/packages.plan" >&2; return 1; }
+    cat "$DATA/tmp/packages.plan" >&2
+    # What it would build: files made from the config, or a package (from its source) it must not.
+    refused=
+    for drv in $(sed -n '/will be built:$/,/^[^ ]/s/^ *\(\/nix\/store\/[^ ]*\.drv\)$/\1/p' "$DATA/tmp/packages.plan"); do
+      file=$DATA/nix$drv
+      if grep -qE '\("srcs?","' "$file" && ! grep -qF '("preferLocalBuild","1")' "$file"; then
+        refused="$refused ${drv#/nix/store/*-}"
+      fi
+    done
+    if [ -n "$refused" ]; then
+      log "Not in cache.nixos.org, and packages the phone does not build (from their source):$refused"
+      log "(An overlay or nixpkgs.config makes them so, or they are unfree: give one the cache has.)"
+      return 1
+    fi
+    [ "$2" = dry ] || nix_view nix build --no-link $here || return 1
+  fi
+  [ -n "$paths" ] || return 0
   if [ "$2" = dry ]; then
     nix_store build --dry-run --no-link $paths
   else
     nix_store build --no-link $paths
   fi
+}
+
+# What a PC that built the config sent of Nix's store (incoming/paths.nar: the derivations
+# of the files the config makes, with all they need, and the files it added): into Seraph's
+# store, for fetch_packages to build.
+import_paths() {
+  [ -s "$1" ] || return 0
+  log "== Files made from the config, from the PC"
+  nix_env
+  nix_view nix-store --import < "$1" > /dev/null
 }
 
 # The packages of the profile in use, kept from Nix's garbage collection (each a root

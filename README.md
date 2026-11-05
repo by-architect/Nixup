@@ -249,10 +249,22 @@ syntax.
 }
 ```
 
-- Supported: `script`, `preStart`, `postStart`, `environment`, `path`, `wantedBy`, `after`, `before`,
-  `wants`, `requires`, and in `serviceConfig`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`,
-  `Type` (simple, oneshot), `Restart`, `RestartSec`, `WorkingDirectory`, `StateDirectory`,
-  `RuntimeDirectory`, `Environment`, `Nice`. Anything else stops the build with a message.
+- Supported: NixOS's unit options (`script`, `preStart`, `postStart`, `preStop`, `postStop`, `environment`,
+  `path`, `wantedBy`, `requiredBy`, `after`, `before`, `wants`, `requires`, `bindsTo`, `restartTriggers`,
+  `systemd.targets`, ...) and systemd's keys for commands (`ExecStart` and the other `Exec…`, `Type`: simple,
+  exec, oneshot, forking, notify, idle, dbus; `Restart` and its exit statuses, `KillMode`, `TimeoutStopSec`,
+  `PIDFile`), its environment (`Environment`, `EnvironmentFile`, `WorkingDirectory`), its user (`User`,
+  `Group`, `SupplementaryGroups`, `DynamicUser`, `AmbientCapabilities`, `UMask`, `Limit…`), its folders
+  (`StateDirectory`, `CacheDirectory`, `LogsDirectory`, `RuntimeDirectory`, `ConfigurationDirectory`,
+  `BindPaths`), its secrets (`LoadCredential`, `SetCredential`) and conditions (`ConditionPathExists`, ...).
+  What only hardens a service on NixOS (`ProtectSystem`, `PrivateDevices`, `SystemCallFilter`, ...) is taken
+  and does nothing; anything else stops the build with a message. [nix/units.nix](nix/units.nix) lists it all.
+- A service with a user of its own (`User`, `DynamicUser`, as NixOS's modules give them) runs as that user,
+  with a uid from 400 to 999 the phone keeps for it. Android lets those on the network, but not into the shared
+  storage (`/storage`, `/sdcard`), which only apps and root may open: a service that needs your files runs as
+  root (`serviceConfig.User = lib.mkForce "root";`).
+- `environment.etc` (files in Seraph's `/etc`), `systemd.tmpfiles`, `networking.hosts` and
+  `networking.nameservers` work as on NixOS, in Seraph's view of the phone.
 - Services start again at boot, run below the app on the screen (so the phone does not stutter), and send a
   notification when they stop by themselves.
 - Start, stop, restart and logs: the app's **Services** tab.
@@ -262,12 +274,28 @@ syntax.
 <details>
 <summary><b>Ready-Made Services</b></summary>
 
-NixOS's own services need their own bridge each. Available now: Tailscale, Syncthing, SSH, Snapcast
-(server and client) and adb. Except for snapclient (which NixOS does not have), they take the same options as
-on NixOS, so one module file can work on a NixOS machine and on the phone.
+NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
+runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The ones Seraph has tried
+are AdGuard Home, aria2, at, Blocky, code-server, cron, dnscrypt-proxy, endlessh, File Browser, Forgejo, gonic,
+Gotify, i2pd, llama.cpp, MiniDLNA, Mosquitto, Navidrome, Node-RED, ntfy, Ollama, Radicale, Soft Serve, ttyd,
+Unbound, Uptime Kuma, vnStat and WebDAV ([nix/nixos.nix](nix/nixos.nix)). Another of nixpkgs' modules can be
+added by hand, as on NixOS: `imports = [ "${modulesPath}/services/web-apps/foo.nix" ];` (what it needs that the
+phone has not got stops the build and says so). The small files a module makes (its settings) the phone builds
+itself from what cache.nixos.org has; a package itself it never builds.
+
+Others need a bridge of their own, which Seraph has for Tailscale, Syncthing, SSH, Snapcast (server and client)
+and adb. Except for snapclient (which NixOS does not have), they take the same options as on NixOS, so one module
+file can work on a NixOS machine and on the phone.
 
 ```nix
 { pkgs, ... }: {
+  # nixpkgs' own module for ntfy (push notifications), as on NixOS
+  services.ntfy-sh = {
+    enable = true;
+    settings.base-url = "http://phone:2586";
+    settings.listen-http = "127.0.0.1:2586";    # tailnet only, through Tailscale
+  };
+
   # Tailscale: run by root in userspace mode (it takes no VPN slot; the Tailscale app can stay)
   services.tailscale = {
     enable = true;

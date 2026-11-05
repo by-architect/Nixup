@@ -181,7 +181,11 @@ nix_env
 # needs no store (dummy://): read-only, it works out the packages' store paths without
 # writing any, and the phone fetches them after.
 nix_eval() {
-  "$MODDIR/bin/nix-instantiate" --eval --strict --json --readonly-mode --store dummy:// -I nixpkgs="$MODDIR/nixpkgs" \
+  # With nixpkgs, in Seraph's store: the small files the config makes (a service's settings)
+  # are derivations the phone builds, which the evaluation writes there.
+  store="--readonly-mode --store dummy://"
+  [ -n "$NIXPKGS" ] && [ "$1" != --arg ] && store="--read-write-mode --store $DATA/nix"
+  "$MODDIR/bin/nix-instantiate" --eval --strict --json $store -I nixpkgs="$MODDIR/nixpkgs" \
     "$MODDIR/nix/profile.nix" --argstr configFile "$CONFIG" --argstr nixpkgs "$NIXPKGS" "$@"
 }
 
@@ -257,10 +261,23 @@ if [ -n "$FLAKE" ]; then
 fi
 
 # The repositories are in the config: they come first (they need no package
-# names), so their indexes are here when the whole config is evaluated.
+# names), so their indexes are here when the whole config is evaluated. A
+# configuration.nix alone gets the phone's copy of nixpkgs when it has it; one that
+# imports NixOS's modules (modulesPath) needs it, and has it fetched first.
 log "== Repositories"
-eval_repos > "$DATA/tmp/repos.json" \
-  || fail "the config did not build (Nix says why above); nothing was changed"
+[ -z "$FLAKE" ] && [ -d "$DATA/channels/nixpkgs/" ] && NIXPKGS=$(readlink -f "$DATA/channels/nixpkgs")
+if ! eval_repos > "$DATA/tmp/repos.json" 2> "$DATA/tmp/repos.err"; then
+  if [ -z "$FLAKE" ] && grep -q 'seraph:needs-nixpkgs' "$DATA/tmp/repos.err"; then
+    channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
+    eval_repos > "$DATA/tmp/repos.json" \
+      || fail "the config did not build (Nix says why above); nothing was changed"
+  else
+    cat "$DATA/tmp/repos.err" >&2
+    fail "the config did not build (Nix says why above); nothing was changed"
+  fi
+else
+  cat "$DATA/tmp/repos.err" >&2
+fi
 if [ "$MODE" = update ]; then engine index --force "$DATA/tmp/repos.json"; else engine index "$DATA/tmp/repos.json"; fi \
   || log "Building with the indexes there are (a repository without one: its apps cannot be named)"
 

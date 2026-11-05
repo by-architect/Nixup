@@ -73,6 +73,7 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
                 "done" -> R.string.state_done
                 "failed" -> R.string.state_failed
                 "not run" -> R.string.state_not_run
+                "skipped" -> R.string.state_skipped
                 else -> R.string.state_stopped
             },
         )
