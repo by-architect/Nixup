@@ -12,8 +12,16 @@
 #
 # The phone has no systemd: a unit can say what the engine does (the options below, and these of
 # serviceConfig: ExecStart, ExecStartPre, ExecStartPost, ExecStop, Type, Restart, RestartSec,
-# WorkingDirectory, StateDirectory, RuntimeDirectory, RemainAfterExit, Environment, Nice). Anything
-# else stops the build and says so, as NixOS's options the phone has not got do.
+# SuccessExitStatus, RestartForceExitStatus, WorkingDirectory, StateDirectory, RuntimeDirectory,
+# RemainAfterExit, Environment, Nice; and unitConfig.RequiresMountsFor). Anything else stops the
+# build and says so, as NixOS's options the phone has not got do.
+#
+# unitConfig.RequiresMountsFor: the phone's storage a unit needs (an SD card's folder, the shared
+# storage), which Android mounts only once the phone is first unlocked after it starts, or which may
+# be taken out. The unit starts once all of it is mounted, waiting quietly till then (a failure
+# neither told nor counted); one that storage reached after it started (in its view, which takes no
+# mount made later) starts again in a fresh view; and one whose storage goes away stops, to wait for
+# it again.
 #
 # On a phone the app on the screen comes first: units run on Android's background cores (its
 # system-background cpuset), at Nice 10 unless serviceConfig.Nice says otherwise, with a low share
@@ -28,8 +36,13 @@ let
 
   supported = [
     "ExecStart" "ExecStartPre" "ExecStartPost" "ExecStop" "Type" "Restart" "RestartSec"
+    "SuccessExitStatus" "RestartForceExitStatus"
     "WorkingDirectory" "StateDirectory" "RuntimeDirectory" "RemainAfterExit" "Environment" "Nice"
   ];
+  unitKeys = [ "RequiresMountsFor" ];
+  # SuccessExitStatus and RestartForceExitStatus take exit codes, and the signals that ended a program
+  # (a shell's status 128 + its number).
+  signals = { SIGHUP = 129; SIGINT = 130; SIGKILL = 137; SIGUSR1 = 138; SIGUSR2 = 140; SIGPIPE = 141; SIGTERM = 143; };
   types' = [ "simple" "exec" "oneshot" ];
   restarts = [ "no" "on-failure" "always" ];
 
@@ -125,11 +138,15 @@ let
         example = { ExecStart = "\${pkgs.foo}/bin/foo --flag"; Restart = "on-failure"; StateDirectory = "foo"; };
         description = "The [Service] section of its unit (the keys the phone takes are listed at the top of nix/units.nix).";
       };
-      # NixOS's that the phone has not got: there, so a unit that sets them is told so.
       unitConfig = mkOption {
         type = types.attrsOf unitValue;
         default = { };
-        description = "The [Unit] section's other keys: not on the phone yet.";
+        example = { RequiresMountsFor = [ "/storage/1234-5678/Music" ]; };
+        description = ''
+          The [Unit] section's other keys: RequiresMountsFor, the phone's storage it needs (it starts once that is
+          mounted: an SD card, or the storage Android mounts once the phone is first unlocked); the others are not on
+          the phone yet.
+        '';
       };
       startAt = mkOption {
         type = types.either types.str (types.listOf types.str);
@@ -158,6 +175,10 @@ let
     "${lib.makeBinPath all}:${lib.makeSearchPathOutput "bin" "sbin" all}:/system/bin";
 
   commands = value: map (command: { inherit command; }) (strings value);
+  # Exit codes as numbers ("3 4", [ 3 4 ], "SIGTERM"); a word that is neither is left to problems below.
+  exitCodes = value: map (word: signals.${word} or (lib.toInt word))
+    (lib.filter (word: signals ? ${word} || builtins.match "[0-9]+" word != null) (words value));
+  badExitCodes = value: lib.filter (word: !(signals ? ${word}) && builtins.match "[0-9]+" word == null) (words value);
   script = text: lib.optional (text != "") { script = text; };
 
   # serviceConfig.Environment, "NAME=value" each, as systemd takes it.
@@ -196,7 +217,11 @@ let
       stop = commands (sc.ExecStop or [ ]);
       # A change of these restarts it; the engine compares the units as they are.
       triggers = builtins.hashString "sha256" (builtins.toJSON (map toString unit.restartTriggers));
-    };
+    }
+    # Only when set, so a unit without them is the same as before.
+    // lib.optionalAttrs (unit.unitConfig ? RequiresMountsFor) { mounts = words unit.unitConfig.RequiresMountsFor; }
+    // lib.optionalAttrs (sc ? SuccessExitStatus) { successExitStatus = exitCodes sc.SuccessExitStatus; }
+    // lib.optionalAttrs (sc ? RestartForceExitStatus) { restartForceExitStatus = exitCodes sc.RestartForceExitStatus; };
 
   profile = lib.mapAttrs toProfile units;
 
@@ -210,6 +235,9 @@ let
       type = sc.Type or "simple";
       starts = if unit.script != "" then 1 else builtins.length (listOf (sc.ExecStart or [ ]));
       other = lib.filter (key: !lib.elem key supported) (lib.attrNames sc);
+      otherUnit = lib.filter (key: !lib.elem key unitKeys) (lib.attrNames unit.unitConfig);
+      mounts = words (unit.unitConfig.RequiresMountsFor or [ ]);
+      badCodes = badExitCodes (sc.SuccessExitStatus or [ ]) ++ badExitCodes (sc.RestartForceExitStatus or [ ]);
       unit' = "systemd.services.${name}";
     in
     lib.optional (builtins.match "[A-Za-z0-9_.:-]+" name == null) "${unit'}: a unit's name is letters, digits and _ . : -."
@@ -220,7 +248,9 @@ let
     ++ lib.optional (type == "oneshot" && starts == 0) "${unit'}: give it something to run (serviceConfig.ExecStart or script)."
     ++ lib.optional (!lib.elem (sc.Restart or "no") restarts) "${unit'}.serviceConfig.Restart: \"${toString (sc.Restart or "")}\" is not on the phone (no, on-failure or always)."
     ++ lib.optional (sc ? Nice && !(builtins.isInt sc.Nice && sc.Nice >= -20 && sc.Nice <= 19)) "${unit'}.serviceConfig.Nice: a number from -20 to 19."
-    ++ lib.optional (unit.unitConfig != { }) "${unit'}.unitConfig: not on the phone yet."
+    ++ lib.optional (otherUnit != [ ]) "${unit'}.unitConfig: ${lib.concatStringsSep ", " otherUnit} ${if builtins.length otherUnit == 1 then "is" else "are"} not on the phone yet (RequiresMountsFor is)."
+    ++ lib.optional (lib.any (path: !lib.hasPrefix "/" path) mounts) "${unit'}.unitConfig.RequiresMountsFor: full paths, like /storage/1234-5678/Music."
+    ++ lib.optional (badCodes != [ ]) "${unit'}.serviceConfig: ${lib.concatStringsSep ", " badCodes}: an exit status is a number or a signal (${lib.concatStringsSep ", " (lib.attrNames signals)})."
     ++ lib.optional (unit.startAt != [ ] && unit.startAt != "") "${unit'}.startAt: timers are not on the phone yet."
     ++ lib.optional (unit.preStop != "") "${unit'}.preStop: not on the phone yet; serviceConfig.ExecStop is."
     ++ lib.optional (lib.any (target: target != "multi-user.target") unit.wantedBy)

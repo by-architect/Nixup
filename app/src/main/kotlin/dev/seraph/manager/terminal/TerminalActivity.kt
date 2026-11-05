@@ -21,18 +21,24 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.termux.terminal.KeyHandler
+import com.termux.terminal.TerminalColors
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 import dev.seraph.manager.R
+import dev.seraph.manager.Root
+import org.json.JSONObject
+import java.io.File
+import java.util.Properties
 
 /**
  * The terminal: root's shell in Seraph's view of the phone (environment.systemPackages on PATH, as an ssh session has
  * it), in sessions [TerminalService] keeps running while it is not on screen. Built on Termux's terminal view: a tap
  * brings the keyboard, a long press selects text (to copy, or paste), two fingers change the text size, and a row of
  * keys gives what a phone's keyboard lacks (Esc, Tab, Ctrl, Alt, the arrows, ...). A session that ended closes with
- * Enter; the last one closing closes the terminal.
+ * Enter; the last one closing closes the terminal. Its font and colors are the config's (terminal.font,
+ * terminal.colors, as Nix-on-Droid has them), taken each time it comes on screen.
  */
 class TerminalActivity : Activity(), ServiceConnection {
     private lateinit var view: TerminalView
@@ -42,6 +48,8 @@ class TerminalActivity : Activity(), ServiceConnection {
     private var service: TerminalService? = null
     private var ctrl = false
     private var alt = false
+    /** Whether the config's colors are in TerminalColors already (sessions made since have them). */
+    private var lookLoaded = false
     private val prefs by lazy { getSharedPreferences("terminal", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,6 +73,7 @@ class TerminalActivity : Activity(), ServiceConnection {
         val intent = Intent(this, TerminalService::class.java)
         startForegroundService(intent)
         bindService(intent, this, BIND_AUTO_CREATE)
+        loadLook()
     }
 
     override fun onStop() {
@@ -78,6 +87,8 @@ class TerminalActivity : Activity(), ServiceConnection {
         val terminal = (binder as TerminalService.Local).service
         service = terminal
         terminal.ui = sessionClient
+        // Sessions kept from before take the config's colors too.
+        if (lookLoaded) terminal.sessions.forEach { it.emulator?.mColors?.reset() }
         show(terminal.current?.takeIf { it in terminal.sessions } ?: terminal.sessions.lastOrNull() ?: terminal.newSession())
     }
 
@@ -237,6 +248,41 @@ class TerminalActivity : Activity(), ServiceConnection {
         override fun logStackTrace(tag: String?, e: Exception?) { Log.e(tag, "", e) }
     }
 
+    // --- Its font and colors, from the config.
+
+    /**
+     * The config's font and colors, as the engine wrote them for the terminal (/data/adb/seraph/etc/seraph/terminal.json,
+     * which only root reads); the font, a file in Seraph's store, is copied into the app once for each path.
+     */
+    private fun loadLook() = Thread {
+        val text = Root.bytes("cat $LOOK")?.toString(Charsets.UTF_8)
+        val look = text?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val colors = Properties()
+        look?.optJSONObject("colors")?.let { json -> json.keys().forEach { colors.setProperty(it, json.getString(it)) } }
+        val font = look?.optString("font")?.takeIf { it.startsWith("/nix/store/") }?.let { fontFile(it) }
+        runOnUiThread { if (!isDestroyed) applyLook(colors, font) }
+    }.start()
+
+    /** The font at [path] in Seraph's store, as a file of the app's; null when it cannot be had. */
+    private fun fontFile(path: String): File? {
+        val file = File(filesDir, "terminal-font")
+        if (file.isFile && prefs.getString(FONT, null) == path) return file
+        val bytes = Root.bytes("cat '${STORE}${path.replace("'", "'\\''")}'")?.takeIf { it.isNotEmpty() } ?: return null
+        file.writeBytes(bytes)
+        prefs.edit().putString(FONT, path).apply()
+        return file
+    }
+
+    /** [colors] over Termux's own (none: Termux's), in every session, and [font] (none: Android's monospace). */
+    private fun applyLook(colors: Properties, font: File?) {
+        runCatching { TerminalColors.COLOR_SCHEME.updateWith(colors) }.onFailure { Log.w("Terminal", "terminal.colors: ${it.message}") }
+        service?.sessions?.forEach { it.emulator?.mColors?.reset() }
+        lookLoaded = true
+        view.setTypeface(font?.let { runCatching { Typeface.createFromFile(it) }.getOrNull() } ?: Typeface.MONOSPACE)
+        view.onScreenUpdated()
+        view.invalidate()
+    }
+
     // --- What the sessions say, passed on by the service while the terminal is on screen.
 
     private val sessionClient = object : TerminalSessionClient {
@@ -282,6 +328,10 @@ class TerminalActivity : Activity(), ServiceConnection {
 
     companion object {
         private const val TEXT_SIZE = "textSize"
+        private const val FONT = "font"
         private const val DEFAULT_TEXT_SP = 13f
+        /** The terminal's look, as the engine writes it (Etc.kt), and where Seraph's store is outside its view. */
+        private const val LOOK = "/data/adb/seraph/etc/seraph/terminal.json"
+        private const val STORE = "/data/adb/seraph/nix"
     }
 }

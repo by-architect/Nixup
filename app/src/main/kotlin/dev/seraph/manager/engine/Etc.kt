@@ -27,19 +27,31 @@ object Etc {
         File(certs, "ca-certificates.crt").writeText(pems.joinToString("") { runCatching { it.readText() }.getOrDefault("").let { text -> if (text.endsWith("\n")) text else "$text\n" } })
         val home = File(data, "home").apply { mkdirs() }
         val profile = android ?: current(data)
-        // The view's users and groups (users.users, users.groups), or root and sshd's alone.
+        // The view's users and groups (users.users, users.groups), or root and sshd's alone; an app's user with that
+        // app's uid on this phone, and left out while the app is not there.
         val users = profile?.optJSONObject("users")
-        File(etc, "passwd").writeText(users?.string("passwd")
+        val uids = AppUids()
+        File(etc, "passwd").writeText(users?.string("passwd")?.let { uids.fill(it) }
             ?: "root:x:0:0:root:${home.path}:/etc/seraph/login\nsshd:x:74:74:sshd privilege separation:/var/empty:/system/bin/false\n")
-        File(etc, "group").writeText(users?.string("group") ?: "root:x:0:\nsshd:x:74:\n")
+        File(etc, "group").writeText(users?.string("group")?.let { uids.fill(it) } ?: "root:x:0:\nsshd:x:74:\n")
+        // /home of the view: normal users' homes.
+        File(data, "users").mkdirs()
         users?.optJSONArray("homes")?.let { homes ->
             for (i in 0 until homes.length()) {
                 val each = homes.getJSONObject(i)
-                val dir = File(each.getString("path"))
-                if (dir.isDirectory) continue
-                dir.mkdirs()
-                runCatching { Os.chown(dir.path, each.getInt("uid"), each.getInt("gid")) }
-                Os.chmod(dir.path, "700".toInt(8))
+                val uid = uids.number(each.optString("uid")) ?: continue
+                val gid = uids.number(each.optString("gid")) ?: uid
+                val path = each.getString("path")
+                val dir = outside(data, path)
+                if (!dir.isDirectory) {
+                    // (An app's own folder cannot be made before the phone is first unlocked: it is left until then.)
+                    if (!dir.mkdirs()) continue
+                    runCatching { Os.chown(dir.path, uid, gid) }
+                    runCatching { Os.chmod(dir.path, "700".toInt(8)) }
+                } else if (path.startsWith("/home/") && runCatching { Os.stat(dir.path).st_uid }.getOrNull() != uid) {
+                    // A home of Seraph's whose app was installed again, with another uid: what is in it becomes the new one's.
+                    dir.walkTopDown().forEach { runCatching { Os.lchown(it.path, uid, gid) } }
+                }
             }
         }
         File(etc, "hosts").writeText("127.0.0.1 localhost\n::1 localhost ip6-localhost\n")
@@ -48,11 +60,43 @@ object Etc {
         writeLogin(etc, home, profile?.optJSONObject("shell"))
         // What every session runs first (environment.extraInit).
         File(etc, "seraph/environment").writeText(profile?.string("extraInit") ?: "")
+        // The app's terminal: its font and colors (terminal.font, terminal.colors), read by the app when it opens.
+        val terminal = File(etc, "seraph/terminal.json")
+        val look = profile?.optJSONObject("terminal")
+        if (look == null || (look.string("font") == null && (look.optJSONObject("colors")?.length() ?: 0) == 0)) terminal.delete()
+        else terminal.writeText(look.toString())
         // A login shell's prompt, with the phone's name (its device name, networking.hostName).
         val name = profile?.optJSONObject("system")?.optJSONObject("settings")?.optJSONObject("global")?.string("device_name")
             ?: Device.run("settings", "get", "global", "device_name").second.trim().takeIf { it.isNotEmpty() && it != "null" } ?: "phone"
         File(etc, "profile").writeText(PROFILE.replace("@NAME@", name.replace(Regex("[^A-Za-z0-9._-]"), "-")))
         return etc
+    }
+
+    /**
+     * A path of Seraph's view as it is outside of it, where the engine runs: /home, /etc, /var and /run there are
+     * Seraph's own folders (Units' view.sh), and /nix its store.
+     */
+    fun outside(data: File, path: String): File {
+        for ((inView, own) in listOf("/home" to "users", "/etc" to "etc", "/var" to "var", "/run" to "run", "/nix" to "nix/nix")) {
+            if (path == inView || path.startsWith("$inView/")) return File(File(data, own), path.removePrefix(inView).trimStart('/'))
+        }
+        return File(path)
+    }
+
+    /** "@app:<package>@" (users.users.<name>.androidApp): that app's uid on this phone, looked up once each. */
+    private class AppUids {
+        private val found = mutableMapOf<String, Int?>()
+        private fun uid(app: String) = found.getOrPut(app) { Device.uid(app) }
+
+        /** [text] (/etc/passwd or /etc/group) with the apps' uids, without the lines of an app that is not there. */
+        fun fill(text: String): String = text.lineSequence().filter { it.isNotEmpty() }.mapNotNull { line ->
+            var missing = false
+            val filled = APP.replace(line) { match -> uid(match.groupValues[1])?.toString() ?: run { missing = true; match.value } }
+            filled.takeIf { !missing }
+        }.joinToString("") { "$it\n" }
+
+        /** A uid or gid as the profile has it: a number, or an app's ("@app:<package>@"); null when that app is not there. */
+        fun number(text: String): Int? = APP.matchEntire(text)?.let { uid(it.groupValues[1]) } ?: text.toIntOrNull()
     }
 
     /** The android part of the profile in place, if there is one. */
@@ -74,6 +118,8 @@ object Etc {
     }
 
     private fun quote(text: String) = "'" + text.replace("'", "'\\''") + "'"
+
+    private val APP = Regex("@app:([A-Za-z0-9._]+)@")
 
     /**
      * The profile's PATH, then the rest of Android's own (the engine's, as Android starts programs: /product/bin,
@@ -129,5 +175,7 @@ object Etc {
 }
 
 internal fun JSONObject.string(key: String): String? = if (isNull(key)) null else optString(key).ifEmpty { null }
+
+internal fun JSONObject.ints(key: String): List<Int> = optJSONArray(key)?.let { array -> (0 until array.length()).map { array.getInt(it) } } ?: emptyList()
 
 internal fun JSONObject.strings(key: String): List<String> = optJSONArray(key)?.let { array -> (0 until array.length()).map { array.getString(it) } } ?: emptyList()

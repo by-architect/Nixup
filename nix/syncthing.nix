@@ -440,6 +440,9 @@ in
             || install -m 600 "''${part%:*}" ${home}/"''${part#*:}"
         done
       '';
+      # Its folders' storage (an SD card's, or the storage Android mounts once the phone is first unlocked): it starts
+      # once that is there, and again in a fresh view when it comes later, as the folders are missing without it.
+      unitConfig = lib.optionalAttrs (folderList != [ ]) { RequiresMountsFor = map (folder: folder.path) folderList; };
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/syncthing serve --no-browser --no-restart --home=${home}"
           + " --gui-address=${cfg.guiAddress} ${lib.escapeShellArgs cfg.extraFlags}";
@@ -447,6 +450,9 @@ in
         RuntimeDirectory = "syncthing";
         Restart = "on-failure";
         RestartSec = 10;
+        # As on NixOS: 3 and 4 are Syncthing asking to be started again (a setting that needs it, an upgrade).
+        SuccessExitStatus = "3 4";
+        RestartForceExitStatus = "3 4";
       };
     };
 
@@ -456,6 +462,8 @@ in
       after = [ "syncthing.service" ];
       wants = [ "syncthing.service" ];
       path = [ pkgs.curl pkgs.jq ];
+      # It makes the folders: only where their storage is (in a view without it, it would make them in RAM).
+      unitConfig = lib.optionalAttrs (folderList != [ ]) { RequiresMountsFor = map (folder: folder.path) folderList; };
       serviceConfig.Type = "oneshot";
       script = init;
     };

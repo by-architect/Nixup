@@ -176,6 +176,7 @@
     <string name="service_state_since">%1$s since %2$s</string>
     <string name="state_running">● running</string>
     <string name="state_restarting">◌ restarting</string>
+    <string name="state_waiting">◌ waiting for its storage (SD card, or the first unlock)</string>
     <string name="state_stopped">○ stopped</string>
     <string name="state_done">✔ done</string>
     <string name="state_failed">✘ failed</string>

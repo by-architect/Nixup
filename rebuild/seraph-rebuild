@@ -16,7 +16,8 @@
 #   --file <configuration.nix> a configuration.nix built alone (default: ./configuration.nix, when there is
 #                              no flake.nix); its nixpkgs (lib and packages) comes from NIX_PATH
 #   --target-host <phone>      adb (the phone adb sees, the default), adb:<serial>, or [user@]host for ssh
-#                              (whose user can run su on the phone, as Termux's sshd can)
+#                              (whose user can run su on the phone: root, or a user of Seraph's own app,
+#                              users.users.<name>.androidApp = "dev.seraph.manager")
 #   --upgrade                  a flake's inputs at their newest first (nix flake update, for a flake in a
 #                              folder here), and the indexes and releases fetched again
 #   --override-input <input> <flake>

@@ -582,19 +582,23 @@
   };
 
   # A user that logs in over SSH, as NixOS's users.users (an example): an Android app's own uid makes a user that
-  # shares that app's files, storage access and su grant (Termux's: u0_a355 = 10355; `pm list packages -U` lists them).
+  # shares that app's files, storage access and su grant. Seraph's own app needs no other app: su works as Seraph's.
   users.users.niobe = {
     isNormalUser = true;                          # a user that logs in
-    uid = 10355;                                  # an app's uid, or another unused one
+    androidApp = "dev.seraph.manager";            # the uid of this app, looked up at each build (or uid = 10355;)
     description = "Niobe";                        # full name
-    home = "/data/data/com.termux/files/home";    # its home (here Termux's)
-    createHome = false;                           # true: make the home, owned by it
+    home = "/home/niobe";                         # its home: Seraph's own, there from the phone's start on
+    createHome = true;                            # make the home, owned by it
     group = "niobe";                              # its own group (made with its uid)
     extraGroups = [ "inet" "everybody" "external_storage" ];   # network, shared storage (users.groups has Android's)
     openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleOnlyPutYourOwnKeyHere neo@laptop" ];   # an example
   };
 
-  environment.extraInit = "";                     # what every shell session runs first, like 'PATH="$PATH:/data/data/com.termux/files/usr/bin"'
+  environment.extraInit = "";                     # what every shell session runs first, like 'export EDITOR=nano'
+
+  # The app's terminal, as Nix-on-Droid's terminal options: its font (a file of a Nix package) and colors.
+  terminal.font = null;                           # like "${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf"
+  terminal.colors = { };                          # like { background = "#000000"; foreground = "#FFFFFF"; cursor = "#FFFFFF"; color1 = "#CC0000"; }
 
   # Your own services, as NixOS's systemd.services. Example: the Download folder as a web page for
   # your tailnet. Bound to 127.0.0.1, Wi-Fi cannot reach it, but Seraph's Tailscale passes it on:
@@ -610,12 +614,15 @@
     preStart = ''test -d "$SHARE"'';              # commands before each start
     postStart = "echo 'web-share: port 8080'";    # commands once started
     restartTriggers = [ ];                        # values whose change restarts it
+    unitConfig.RequiresMountsFor = [ "/storage/emulated/0/Download" ];   # storage it needs: it starts once that is mounted
     notifications = true;                         # Seraph's own: tell when it stops by itself, fails, or runs again
     serviceConfig = {
       Type = "simple";                            # keeps running ("oneshot": runs once)
       ExecStart = "${pkgs.darkhttpd}/bin/darkhttpd $SHARE --addr 127.0.0.1 --port 8080";   # what it runs (or script)
       Restart = "on-failure";                     # start again when it fails: "no", "on-failure", "always"
       RestartSec = 5;                             # seconds before that
+      SuccessExitStatus = "3";                    # exit codes that are no failure
+      RestartForceExitStatus = "3";               # exit codes that start it again whatever Restart says
       WorkingDirectory = "/var/lib/web-share";    # where it runs
       StateDirectory = "web-share";               # /var/lib/web-share, kept
       RuntimeDirectory = "web-share";             # /run/web-share, gone when it stops

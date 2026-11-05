@@ -24,6 +24,16 @@ object Root {
         null
     }
 
+    /** What [command] writes, as it is (a file's bytes); null when the phone has no su, or it fails. */
+    fun bytes(command: String): ByteArray? = try {
+        val process = ProcessBuilder("su", "-c", global("$command 2>/dev/null")).start()
+        process.outputStream.close()
+        val out = process.inputStream.readBytes()
+        if (process.waitFor() == 0) out else null
+    } catch (e: IOException) {
+        null
+    }
+
     /**
      * [command], run in the whole phone's view (init's mount namespace), as adb's root shell runs: the root shell an
      * app starts sees the phone as the app does, and Android hides the other apps' data folders from an app (a backup

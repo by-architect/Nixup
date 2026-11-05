@@ -6,6 +6,30 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- Services that need the phone's storage say so with `unitConfig.RequiresMountsFor`, as on NixOS: they
+  start once it is mounted (an SD card, or what Android mounts once the phone is first unlocked), waiting
+  quietly till then instead of failing; one whose storage came after its start starts again in a fresh
+  view, and one whose storage goes away stops to wait for it. The Services tab shows "waiting".
+- `serviceConfig.SuccessExitStatus` and `RestartForceExitStatus`, as on NixOS: Syncthing restarting itself
+  (exit 3) is no longer told as a failure.
+- `services.syncthing` waits for its folders' storage, so it no longer fails at every start before the
+  phone is unlocked.
+- Fixed: an automatic backup at the phone's first unlock failed ("the repository cannot be opened"): it
+  checked that the SD card's folder was there, which Android makes before it mounts the card. It now
+  checks the card is mounted, and waits for the next check when it is not.
+- `users.users.<name>.androidApp`: a user with the uid of an app, looked up on the phone at each build (an app
+  installed again gets another one). `androidApp = "dev.seraph.manager"` is Seraph's own: an SSH login that
+  may use su as Seraph may, with no other app (no Termux).
+- A normal user's home is `/home/<name>` (Seraph's own folder), made by the build and there from the phone's
+  start on, before it is first unlocked.
+- `terminal.font` and `terminal.colors`, as Nix-on-Droid has them: the app's terminal takes its font (a file
+  of a Nix package) and colors from the config each time it opens.
+- Services get Android's time zone, so the dates their programs write are the phone's local time.
+- Fixed: the phone took four minutes longer to start, also after the module was removed. Android relabels every
+  file of /data/adb at each start, and Seraph's Nix store has hundreds of thousands; now each start runs
+  restorecon on Seraph's folder, which leaves the mark that makes Android skip it from then on.
+- A newer Seraph whose services' view changed starts the running services again in the new one (sshd saw
+  no /home until it did).
 - Apps from Google Play: `android.packages.playstore = [ "com.whatsapp" ];` installs and updates
   them as Aurora Store would download them, with the split APKs made for the phone; no Play Store
   or GApps needed. A Google account signs in once in the app (⋮ → Google Play account), which then
@@ -25,6 +49,9 @@ section after the version, and its text is what the Magisk app shows as the upda
   its own temporary profile.
 - Fixed: a flake with no `seraphConfigurations` now says so instead of failing with no reason.
 - Tailscale says when its auth key is refused, instead of an empty login link.
+- Fixed: a service runs again when a secret file it reads changes (a new Tailscale auth key, an
+  ssh host key); before, only a change to the service itself restarted it, so a new key waited
+  for a restart.
 - Fixed: restoring an app that is no longer on the phone failed with "not installed" when its
   backup held only its data (as with `android.backup.defaults.apk = false`). Such an app now comes
   back whole: its APK first, from that backup or another backup of it, then its data; when no backup

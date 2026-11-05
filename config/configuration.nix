@@ -47,9 +47,6 @@
     com.nextcloud.client                          # Nextcloud: file sync
     com.prajwalch.torrentsearch                   # Torrent Search
     com.roozbehzarei.filester                     # Filester: share files for a while
-    com.termux                                    # Termux: terminal
-    com.termux.api                                # Termux:API: phone functions for Termux
-    com.termux.boot                               # Termux:Boot: Termux scripts at boot
     com.vayunmathur.contacts                      # MA Contacts: contacts
     com.zorinos.zorin_connect                     # Zorin Connect: phone and PC together
     de.felixnuesse.disky                          # disky: what fills the storage
@@ -219,15 +216,6 @@
     access.installUnknownApps = true;                                            # opens APKs it synced
   };
   android.apps."com.tailscale.ipn".battery = "unrestricted";                    # Tailscale app
-  android.apps."com.termux" = {                                                  # Termux
-    battery = "unrestricted";
-    network.mobile = false;                                                      # Wi-Fi only (Termux:API, :Boot too)
-  };
-  android.apps."com.termux.api" = {                                              # Termux:API
-    battery = "unrestricted";
-    access.displayOverOtherApps = true;                                          # dialogs over apps
-  };
-  android.apps."com.termux.boot".battery = "unrestricted";                      # Termux:Boot
   android.apps."com.whatsapp".battery = "unrestricted";                         # WhatsApp
   android.apps."io.chaldeaprjkt.gamespace".battery = "unrestricted";            # Game Space (crDroid's own)
   android.apps."io.heckel.ntfy".battery = "unrestricted";                       # ntfy

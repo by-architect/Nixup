@@ -37,7 +37,8 @@ class Units(private val data: File) {
     /** Whether the plan changes anything. */
     val changes get() = toStop.isNotEmpty() || toStart.isNotEmpty() || leaving.isNotEmpty() || legacy.exists()
 
-    fun plan(units: JSONObject?, problems: MutableList<String>) {
+    /** [secrets]: the files of the secrets the build changes; a unit that names one runs again, as with a changed unit. */
+    fun plan(units: JSONObject?, problems: MutableList<String>, secrets: List<String> = emptyList()) {
         wanted = units?.let { json -> json.keys().asSequence().associateWith { json.getJSONObject(it) } } ?: emptyMap()
         val had = applied()
         val active = active(wanted)
@@ -50,16 +51,22 @@ class Units(private val data: File) {
         }
         leaving = had.keys.filter { it !in wanted }
         // Changed: its unit, or the scripts the engine makes of it (as NixOS restarts a unit whose unit file changed).
+        // Or a secret file it reads (a new auth key): the unit is the same, what it reads is not.
+        // Or Seraph's view itself (a newer Seraph's, with another /home, ...): a unit running in the one before starts
+        // again in the new one (a oneshot that ran is left).
+        val viewChanged = view.isFile && runCatching { view.readText() }.getOrNull() != viewText()
         val changed = wanted.keys.filter { name ->
-            had[name]?.let { it.toString() != wanted.getValue(name).toString() || !written(name, wanted.getValue(name)) } == true
+            had[name]?.let { it.toString() != wanted.getValue(name).toString() || !written(name, wanted.getValue(name)) } == true ||
+                (had[name] != null && reads(wanted.getValue(name), secrets)) ||
+                (viewChanged && had[name] != null && !oneshot(wanted.getValue(name)) && running(name))
         }
         val start = mutableListOf<String>()
         for (name in active) {
             val unit = wanted.getValue(name)
             when {
                 had[name] == null || name in changed -> start += name
-                oneshot(unit) -> if (status(name) != OK) start += name
-                !running(name) -> start += name
+                oneshot(unit) -> if (status(name) != OK && !waiting(name)) start += name
+                !running(name) && !waiting(name) -> start += name
             }
         }
         // A oneshot runs again after a unit it wants (or requires) starts, as its settings may be that unit's.
@@ -70,6 +77,13 @@ class Units(private val data: File) {
         toStart = order(start, wanted)
         toStop = order((had.keys.filter { it in wanted && it !in active } + changed).filter { supervisorPid(it) != null }.distinct(), had).reversed()
         report(had, active, changed)
+    }
+
+    /** Whether [unit] names one of [files] (JSON writes / as \/). */
+    private fun reads(unit: JSONObject, files: List<String>): Boolean {
+        if (files.isEmpty()) return false
+        val text = unit.toString().replace("\\/", "/")
+        return files.any { text.contains(it) }
     }
 
     private fun report(had: Map<String, JSONObject>, active: Set<String>, changed: List<String>) {
@@ -85,6 +99,7 @@ class Units(private val data: File) {
                 name in toStart && had[name] == null -> if (once) "to run" else "to start"
                 name in toStart && name in changed -> if (once) "to run again (changed)" else "to start again (changed)"
                 name in toStart -> if (once) "to run again" else if (supervisorPid(name) != null) "to start again (it keeps stopping)" else "to start (it was not running)"
+                waiting(name) -> "waiting for its storage (${mounts(unit).firstOrNull { !onStorage(it) } ?: "it is there now"})"
                 once -> "done"
                 else -> "running"
             }
@@ -169,12 +184,13 @@ class Units(private val data: File) {
             val unit = had.getValue(name)
             val once = oneshot(unit)
             val state = when {
-                once -> when (status(name)) { OK -> "done"; "" -> "not run"; else -> "failed" }
+                waiting(name) -> "waiting"
+                once -> when (status(name)) { OK -> "done"; "" -> "not run"; WAITING -> "waiting"; else -> "failed" }
                 running(name) -> "running"
                 supervisorPid(name) != null -> "restarting"
                 else -> "stopped"
             }
-            val since = File(dir, if (once) "$name/status" else "$name/main.pid").lastModified()
+            val since = File(dir, if (once) "$name/status" else if (state == "waiting") "$name/waiting" else "$name/main.pid").lastModified()
             units.put(
                 JSONObject().put("name", name).put("description", unit.optString("description"))
                     .put("type", if (once) "oneshot" else "simple").put("state", state).put("wanted", name in active)
@@ -215,7 +231,11 @@ class Units(private val data: File) {
                 Etc.write(data)
                 val ok = start(name, unit)
                 val done = if (once) "Ran $name" else if (action == "restart") "Restarted $name" else "Started $name"
-                if (ok) Notify.event("service", "info", done, if (System.getenv("SERAPH_RETRY") == "1") "Tried again: it did not start at boot" else "By hand", "service:$name", quiet = true)
+                if (ok) Notify.event("service", "info", done, when {
+                    System.getenv("SERAPH_WAITED") == "1" -> "Its storage is there now"
+                    System.getenv("SERAPH_RETRY") == "1" -> "Tried again: it did not start at boot"
+                    else -> "By hand"
+                }, "service:$name", quiet = true)
                 if (ok) 0 else 1
             }
             "retry" -> {
@@ -261,6 +281,9 @@ class Units(private val data: File) {
         for (runtime in unit.strings("runtimeDirectories")) File(runDir, runtime).apply { deleteRecursively(); mkdirs() }
         writeScripts(name, unit, unitDir)
         File(unitDir, "spec.json").writeText(unit.toString())
+        // The storage it needs (unitConfig.RequiresMountsFor), one path a line, for its loop.
+        val mounts = mounts(unit)
+        File(unitDir, "mounts").let { if (mounts.isEmpty()) it.delete() else it.writeText(mounts.joinToString("") { path -> "$path\n" }) }
         return if (oneshot(unit)) runOnce(name, unitDir, unit) else launch(name, unit, unitDir)
     }
 
@@ -279,11 +302,16 @@ class Units(private val data: File) {
             busybox, "setsid", "sh", "-c", SUPERVISOR, MARK + name, busybox, view.path, log.path, unitDir.path, name,
             unit.optString("restart", "no"), seconds(unit.optString("restartSec", "0.1")),
             File(unitDir, "start.sh").path, optional("post.sh"), optional("stop.sh"), notify,
+            unit.ints("successExitStatus").joinToString(" "), unit.ints("restartForceExitStatus").joinToString(" "),
         ).directory(unitDir).redirectInput(devNull).redirectOutput(devNull).redirectError(devNull).apply { unitEnvironment(environment()) }.start()
         Thread.sleep(1500)
         val main = pid(File(unitDir, "main.pid"))
         if (running(name) && main != null && alive(main)) {
             Out.line("✔ $name: running")
+            return true
+        }
+        if (waiting(name)) {
+            Out.line("◌ $name: waiting for ${mounts(unit).firstOrNull { !onStorage(it) } ?: "its storage"} (${STORAGE_WHY}); it starts once that is there")
             return true
         }
         Out.line("✘ $name: it stopped at once; the end of its log (${log.path}):")
@@ -311,9 +339,19 @@ class Units(private val data: File) {
     /** Its nice (serviceConfig.Nice; 10, below the apps, by default). */
     private fun nice(unit: JSONObject) = unit.optInt("nice", 10).coerceIn(-20, 19).toString()
 
-    /** A oneshot, to its end; what it says is shown (and kept in its log). */
+    /**
+     * A oneshot, to its end; what it says is shown (and kept in its log). One whose storage is not there yet runs once it
+     * is, from a waiter of its own: as a unit waiting, not a failure.
+     */
     private fun runOnce(name: String, unitDir: File, unit: JSONObject): Boolean {
         val log = File(unitDir, "log")
+        mounts(unit).firstOrNull { !onStorage(it) }?.let { missing ->
+            File(unitDir, "status").writeText(WAITING)
+            if (!waiting(name)) waitThenRun(name, unitDir)
+            log.appendText("${Out.date(System.currentTimeMillis())} $name: waiting for $missing ($STORAGE_WHY)\n")
+            Out.line("◌ $name: waiting for $missing ($STORAGE_WHY); it runs once that is there")
+            return true
+        }
         if (!background.isFile) writeView()
         val process = ProcessBuilder(busybox(), "sh", background.path, busybox(), nice(unit), busybox(), "sh", view.path, File(unitDir, "start.sh").path)
             .directory(unitDir).redirectErrorStream(true).redirectInput(File("/dev/null")).apply { unitEnvironment(environment()) }.start()
@@ -341,9 +379,28 @@ class Units(private val data: File) {
         return ok
     }
 
+    /** Runs the oneshot [name] (units.sh start) once its storage (unitDir/mounts) is all there, from a process of its own. */
+    private fun waitThenRun(name: String, unitDir: File) {
+        val module = Notify.module ?: return
+        val script = ON_STORAGE + "\n" + """
+            echo ${'$'}${'$'} > "${'$'}2/waiter.pid"
+            until all_there "${'$'}2/mounts"; do sleep 5; done
+            rm -f "${'$'}2/waiter.pid"
+            SERAPH_WAITED=1 exec sh "${'$'}1/units.sh" boot start "${'$'}3"
+        """.trimIndent()
+        runCatching {
+            ProcessBuilder(busybox(), "setsid", "sh", "-c", script, "seraph-wait:$name", module.path, unitDir.path, name)
+                .redirectInput(File("/dev/null")).redirectOutput(File("/dev/null")).redirectError(File("/dev/null"))
+                .apply { environment()["b"] = busybox(); environment().remove("SERAPH_RUN") }.start()
+        }
+    }
+
     /** Stops a simple unit: its ExecStop, then its process; its runtime folders go, as systemd's do. */
     private fun stop(name: String) {
         val unitDir = File(dir, name)
+        // A oneshot's waiter for its storage, too.
+        pid(File(unitDir, "waiter.pid"))?.takeIf { cmdline(it).contains("seraph-wait:$name") }?.let { Device.run("kill", "-TERM", "$it") }
+        File(unitDir, "waiter.pid").delete()
         val supervisor = supervisorPid(name)
         if (supervisor != null) {
             Device.run("kill", "-TERM", "$supervisor")
@@ -432,6 +489,27 @@ class Units(private val data: File) {
 
     private fun status(name: String) = runCatching { File(dir, "$name/status").readText().trim() }.getOrDefault("")
 
+    /** Whether it waits for its storage (unitConfig.RequiresMountsFor): a simple unit's loop, or a oneshot's waiter. */
+    private fun waiting(name: String): Boolean {
+        val unitDir = File(dir, name)
+        return if (File(unitDir, "waiting").isFile) supervisorPid(name) != null
+        else status(name) == WAITING && pid(File(unitDir, "waiter.pid"))?.let { cmdline(it).contains("seraph-wait:$name") } == true
+    }
+
+    /** The phone's storage it needs (unitConfig.RequiresMountsFor). */
+    private fun mounts(unit: JSONObject) = unit.strings("mounts")
+
+    /**
+     * Whether [path] is on the phone's storage now: the nearest part of it that is there is not RAM, as the bare folder
+     * an SD card (or the storage Android mounts once the phone is first unlocked) is mounted on is.
+     */
+    private fun onStorage(path: String): Boolean {
+        var there = File(path)
+        while (!there.exists()) there = there.parentFile ?: return false
+        val type = Device.run("stat", "-f", "-c", "%T", there.path)
+        return type.first == 0 && type.second.trim().let { it.isNotEmpty() && it != "tmpfs" }
+    }
+
     /** Its loop's process, while it runs. */
     private fun supervisorPid(name: String): Int? = pid(File(dir, "$name/supervisor.pid"))?.takeIf { cmdline(it).contains(MARK + name) }
 
@@ -483,9 +561,11 @@ class Units(private val data: File) {
         ?: throw Stop("there is no busybox (Magisk's or KernelSU's) to run the services with", 1)
 
     /** The view alone (see VIEW), for what runs in it without a build (backups). */
+    private fun viewText() = VIEW.replace("@BUSYBOX@", busybox()).replace("@DATA@", data.path)
+
     fun writeView() {
         dir.mkdirs()
-        view.writeText(VIEW.replace("@BUSYBOX@", busybox()).replace("@DATA@", data.path))
+        view.writeText(viewText())
         background.writeText(BACKGROUND)
     }
 
@@ -522,6 +602,21 @@ class Units(private val data: File) {
 
     companion object {
         private const val OK = "ok"
+        private const val WAITING = "waiting"
+        private const val STORAGE_WHY = "the phone's storage: an SD card, or what Android mounts once the phone is first unlocked"
+
+        /**
+         * Shell functions on the phone's storage, with busybox as ${'$'}b: on_storage ROOT PATH (the nearest part of PATH
+         * that is there, under ROOT ("": the phone's own), is not RAM) and all_there FILE (each path in FILE is).
+         */
+        private val ON_STORAGE = """
+            on_storage() {
+              d=${'$'}2
+              while [ "${'$'}d" != / ] && [ ! -e "${'$'}1${'$'}d" ]; do d=${'$'}{d%/*}; [ -n "${'$'}d" ] || d=/; done
+              t=${'$'}("${'$'}b" stat -f -c %T "${'$'}1${'$'}d" 2> /dev/null) && [ -n "${'$'}t" ] && [ "${'$'}t" != tmpfs ]
+            }
+            all_there() { [ -f "${'$'}1" ] || return 0; while read -r p; do [ -z "${'$'}p" ] || on_storage "" "${'$'}p" || return 1; done < "${'$'}1"; return 0; }
+        """.trimIndent()
         private const val ONESHOT_MINUTES = 10L
         private const val MARK = "seraph-unit:"
         private val BUSYBOXES = listOf("/data/adb/magisk/busybox", "/data/adb/ksu/bin/busybox", "/data/adb/ap/bin/busybox")
@@ -529,8 +624,9 @@ class Units(private val data: File) {
         /**
          * Runs a unit's script ($1) as root in Seraph's view of the phone: a root of its own, in a mount namespace of
          * its own, with Android's own folders as they are, /nix (Seraph's store), Seraph's /etc, /var and /run (the
-         * units' state, which stays) and a /tmp of its own. Each step execs the next, so the script's own process is
-         * the one started.
+         * units' state, which stays), /home (the normal users' homes, Seraph's users folder) and a /tmp of its own,
+         * and Android's time zone as TZ (its offset from UTC, "<+0300>-03:00": glibc does not read Android's zones).
+         * Each step execs the next, so the script's own process is the one started.
          */
         private val VIEW = """
             # Seraph's view of the phone, for its services (written by the engine; see Units.kt).
@@ -543,7 +639,7 @@ class Units(private val data: File) {
               "${'$'}b" mount -t tmpfs -o mode=755 seraph "${'$'}v"
               for e in /*; do
                 n=${'$'}{e#/}
-                case ${'$'}n in nix | etc | var | run | tmp) continue ;; esac
+                case ${'$'}n in nix | etc | var | run | home | tmp) continue ;; esac
                 if [ -L "${'$'}e" ]; then ln -s "${'$'}(readlink "${'$'}e")" "${'$'}v/${'$'}n"
                 elif [ -d "${'$'}e" ]; then mkdir -p "${'$'}v/${'$'}n"; "${'$'}b" mount --rbind "${'$'}e" "${'$'}v/${'$'}n"
                 elif [ -f "${'$'}e" ]; then : > "${'$'}v/${'$'}n"; "${'$'}b" mount --bind "${'$'}e" "${'$'}v/${'$'}n"
@@ -551,12 +647,21 @@ class Units(private val data: File) {
               done
               # /dev holds the view itself: its copy inside the view goes.
               "${'$'}b" umount -l "${'$'}v${'$'}v" 2> /dev/null || true
-              for d in nix:${'$'}data/nix/nix etc:${'$'}data/etc var:${'$'}data/var run:${'$'}data/run; do
+              for d in nix:${'$'}data/nix/nix etc:${'$'}data/etc var:${'$'}data/var run:${'$'}data/run home:${'$'}data/users; do
                 mkdir -p "${'$'}v/${'$'}{d%%:*}" "${'$'}{d#*:}"
                 "${'$'}b" mount --bind "${'$'}{d#*:}" "${'$'}v/${'$'}{d%%:*}"
               done
               mkdir -p "${'$'}v/tmp"
               "${'$'}b" mount -t tmpfs -o mode=1777 tmp "${'$'}v/tmp"
+              if [ -z "${'$'}TZ" ]; then
+                off=${'$'}(/system/bin/date +%z 2> /dev/null)
+                case ${'$'}off in
+                  [+-][0-9][0-9][0-9][0-9])
+                    hm=${'$'}{off#?}
+                    case ${'$'}off in +*) sign=- ;; *) sign=+ ;; esac
+                    export TZ="<${'$'}off>${'$'}sign${'$'}{hm%??}:${'$'}{hm#??}" ;;
+                esac
+              fi
               exec "${'$'}b" chroot "${'$'}v" /system/bin/sh "${'$'}script"
             ' @BUSYBOX@ @DATA@ "${'$'}1"
         """.trimIndent() + "\n"
@@ -583,22 +688,40 @@ class Units(private val data: File) {
          * Restart says (after RestartSec); a TERM runs its stop.sh, then stops it. Its log is set aside past 1 MB.
          * With notify.sh, it tells the app when the unit stops by itself (once, until it has run again for a minute)
          * and when it runs again.
-         * Arguments: busybox, view.sh, log, unit folder, name, restart, seconds, start.sh, post.sh, stop.sh, notify.sh.
+         * With unitConfig.RequiresMountsFor (the unit folder's mounts) it waits for that storage before each start, and
+         * while it runs stops it when the storage goes away and starts it again in a fresh view when it came after its
+         * start: neither is a failure. SuccessExitStatus's codes are no failure, RestartForceExitStatus's start it again.
+         * Arguments: busybox, view.sh, log, unit folder, name, restart, seconds, start.sh, post.sh, stop.sh, notify.sh,
+         * SuccessExitStatus's codes, RestartForceExitStatus's codes.
          */
         private val SUPERVISOR = """
-            b=${'$'}1 view=${'$'}2 log=${'$'}3 unit=${'$'}4 name=${'$'}5 restart=${'$'}6 delay=${'$'}7 start=${'$'}8 post=${'$'}9 stop=${'$'}{10} notify=${'$'}{11}
+            b=${'$'}1 view=${'$'}2 log=${'$'}3 unit=${'$'}4 name=${'$'}5 restart=${'$'}6 delay=${'$'}7 start=${'$'}8 post=${'$'}9 stop=${'$'}{10} notify=${'$'}{11} success=${'$'}{12} force=${'$'}{13}
             echo ${'$'}${'$'} > "${'$'}unit/supervisor.pid"
-            child=
+            child= watcher=
             tell() { [ -n "${'$'}notify" ] && "${'$'}b" sh "${'$'}notify" service "${'$'}@" "service:${'$'}name" < /dev/null > /dev/null 2>&1; }
             stopping() {
-              [ -n "${'$'}stop" ] && "${'$'}b" sh "${'$'}view" "${'$'}stop" >> "${'$'}log" 2>&1 < /dev/null
+              [ -n "${'$'}watcher" ] && kill ${'$'}watcher 2> /dev/null
+              [ -n "${'$'}stop" ] && [ -n "${'$'}child" ] && "${'$'}b" sh "${'$'}view" "${'$'}stop" >> "${'$'}log" 2>&1 < /dev/null
               [ -n "${'$'}child" ] && kill ${'$'}child 2> /dev/null && wait ${'$'}child
-              rm -f "${'$'}unit/supervisor.pid" "${'$'}unit/main.pid"
+              rm -f "${'$'}unit/supervisor.pid" "${'$'}unit/main.pid" "${'$'}unit/waiting" "${'$'}unit/fresh"
               exit 0
             }
             trap stopping TERM INT
+            @ON_STORAGE@
+            # The first of its storage (unitConfig.RequiresMountsFor) the phone has not got now; the first the phone has got and
+            # the view of process ${'$'}1 has not (mounted after it started, which a view does not take).
+            missing() { [ -f "${'$'}unit/mounts" ] || return 1; while read -r p; do [ -z "${'$'}p" ] || on_storage "" "${'$'}p" || { echo "${'$'}p"; return 0; }; done < "${'$'}unit/mounts"; return 1; }
+            stale() { [ -f "${'$'}unit/mounts" ] || return 1; while read -r p; do [ -n "${'$'}p" ] && on_storage "" "${'$'}p" && ! on_storage "/proc/${'$'}1/root" "${'$'}p" && { echo "${'$'}p"; return 0; }; done < "${'$'}unit/mounts"; return 1; }
+            has() { case " ${'$'}2 " in *" ${'$'}1 "*) return 0 ;; esac; return 1; }
             while :; do
               [ -f "${'$'}log" ] && [ "${'$'}(stat -c %s "${'$'}log")" -gt 1048576 ] && mv -f "${'$'}log" "${'$'}log.old"
+              # Its storage first: it waits for it, which is no failure.
+              if p=${'$'}(missing); then
+                echo "${'$'}(date '+%F %T') ${'$'}name: waiting for ${'$'}p (the phone's storage: an SD card, or what Android mounts once the phone is first unlocked)" >> "${'$'}log"
+                : > "${'$'}unit/waiting"
+                while missing > /dev/null; do sleep 5 & wait ${'$'}!; done
+                rm -f "${'$'}unit/waiting"
+              fi
               echo "${'$'}(date '+%F %T') ${'$'}name: starting" >> "${'$'}log"
               "${'$'}b" sh "${'$'}view" "${'$'}start" >> "${'$'}log" 2>&1 < /dev/null &
               child=${'$'}!
@@ -607,15 +730,47 @@ class Units(private val data: File) {
                 ( sleep 60; kill -0 ${'$'}child 2> /dev/null && rm "${'$'}unit/failing" 2> /dev/null && tell ok "${'$'}name runs again" "It had stopped by itself" ) < /dev/null > /dev/null 2>&1 &
               fi
               [ -n "${'$'}post" ] && "${'$'}b" sh "${'$'}view" "${'$'}post" >> "${'$'}log" 2>&1 < /dev/null
+              # While it runs, its storage is looked at every 15 s: one that went away stops it (to wait for it again), one that
+              # came after its start starts it again in a fresh view.
+              rm -f "${'$'}unit/fresh"
+              if [ -f "${'$'}unit/mounts" ]; then
+                (
+                  while sleep 15; do
+                    kill -0 ${'$'}child 2> /dev/null || exit 0
+                    if p=${'$'}(missing); then why="${'$'}p went away: waiting for it again"
+                    elif p=${'$'}(stale ${'$'}child); then why="${'$'}p was mounted after it started: starting it again in a fresh view"
+                    else continue; fi
+                    echo "${'$'}why" > "${'$'}unit/fresh"
+                    [ -n "${'$'}stop" ] && "${'$'}b" sh "${'$'}view" "${'$'}stop" >> "${'$'}log" 2>&1 < /dev/null
+                    kill ${'$'}child 2> /dev/null
+                    exit 0
+                  done
+                ) < /dev/null > /dev/null 2>&1 &
+                watcher=${'$'}!
+              fi
               wait ${'$'}child
               code=${'$'}?
+              [ -n "${'$'}watcher" ] && kill ${'$'}watcher 2> /dev/null
+              child= watcher=
+              rm -f "${'$'}unit/main.pid"
+              if [ -f "${'$'}unit/fresh" ]; then
+                # Stopped for its storage: no failure, and it starts again (or waits) whatever Restart says.
+                echo "${'$'}(date '+%F %T') ${'$'}name: ${'$'}(cat "${'$'}unit/fresh")" >> "${'$'}log"
+                rm -f "${'$'}unit/fresh"
+                continue
+              fi
               echo "${'$'}(date '+%F %T') ${'$'}name: stopped (${'$'}code)" >> "${'$'}log"
+              # SuccessExitStatus: no failure; RestartForceExitStatus: it starts again whatever Restart says (Syncthing's 3: a
+              # restart it asked for).
+              failed=
+              [ ${'$'}code -ne 0 ] && ! has ${'$'}code "${'$'}success" && failed=1
               again=
               case ${'$'}restart in
                 always) again=1 ;;
-                on-failure) [ ${'$'}code -ne 0 ] && again=1 ;;
+                on-failure) [ -n "${'$'}failed" ] && again=1 ;;
               esac
-              if { [ ${'$'}code -ne 0 ] || [ "${'$'}restart" = always ]; } && [ ! -f "${'$'}unit/failing" ]; then
+              has ${'$'}code "${'$'}force" && again=1
+              if { [ -n "${'$'}failed" ] || { [ "${'$'}restart" = always ] && ! has ${'$'}code "${'$'}success"; }; } && ! has ${'$'}code "${'$'}force" && [ ! -f "${'$'}unit/failing" ]; then
                 : > "${'$'}unit/failing"
                 if [ -n "${'$'}again" ]; then tell error "${'$'}name stopped" "Exit status ${'$'}code; it starts again in ${'$'}{delay%.000} s"
                 else tell error "${'$'}name stopped" "Exit status ${'$'}code"; fi
@@ -624,8 +779,8 @@ class Units(private val data: File) {
               sleep "${'$'}delay" &
               wait ${'$'}!
             done
-            rm -f "${'$'}unit/supervisor.pid" "${'$'}unit/main.pid"
-        """.trimIndent()
+            rm -f "${'$'}unit/supervisor.pid" "${'$'}unit/main.pid" "${'$'}unit/waiting"
+        """.trimIndent().replace("@ON_STORAGE@", ON_STORAGE)
 
         /** systemd's specifiers a command may have, and their values in the view. */
         private fun specifier(name: String, letter: Char): String = when (letter) {
