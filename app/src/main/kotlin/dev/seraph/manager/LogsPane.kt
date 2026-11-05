@@ -22,8 +22,9 @@ import java.util.Locale
 /**
  * The Logs tab: what Seraph did and what happened, newest first, by day, from its journal of events (see the module's
  * notify.sh): each build, update, backup and git pull as one entry with how it ended and how long it took, each
- * service that stopped or ran again, and Tailscale's connection. A filter shows one kind, or the problems alone; an
- * entry opens its own log (the run's, or the service's); Files opens the logs themselves.
+ * service that stopped or ran again, and Tailscale's connection. A filter shows one kind, or the problems alone, and
+ * the search box the entries with what is typed in them (their title, what they say, their kind); an entry opens its
+ * own log (the run's, or the service's, searchable too); Files opens the logs themselves.
  */
 class LogsPane(private val activity: MainActivity, root: View, private val runner: Runner) {
     private val filters: LinearLayout = root.findViewById(R.id.logs_filters)
@@ -31,6 +32,7 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
     private val list: LinearLayout = root.findViewById(R.id.logs_list)
     private var events: List<Shown> = emptyList()
     private var filter = 0
+    private var query = ""
 
     /**
      * An entry: its event, how long its run took (its start and end are one entry), and for a start with no end,
@@ -54,6 +56,10 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
         }
         root.findViewById<Button>(R.id.logs_refresh).setOnClickListener { load() }
         root.findViewById<Button>(R.id.logs_files).setOnClickListener { files() }
+        Ui.onSearch(root.findViewById(R.id.logs_search)) {
+            query = it
+            show()
+        }
     }
 
     fun load() {
@@ -93,14 +99,16 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
         }
         list.removeAllViews()
         val keep = kinds[filter].second
-        val shown = events.filter { keep(it.event) }
+        val shown = events.filter { keep(it.event) && matches(it.event) }
         val problems = events.count { it.event.problem && System.currentTimeMillis() - it.event.time < DateUtils.DAY_IN_MILLIS }
         status.text = when {
             events.isEmpty() -> activity.getString(R.string.logs_none)
             problems > 0 -> activity.resources.getQuantityString(R.plurals.logs_problems_today, problems, problems)
             else -> activity.getString(R.string.logs_fine)
         }
-        if (shown.isEmpty() && events.isNotEmpty()) list.addView(Ui.note(activity, activity.getString(R.string.logs_none_here)))
+        if (shown.isEmpty() && events.isNotEmpty()) {
+            list.addView(if (query.isNotEmpty()) Ui.noMatch(activity, query) else Ui.note(activity, activity.getString(R.string.logs_none_here)))
+        }
         var day = ""
         for (entry in shown) {
             val thisDay = Logs.day(activity, entry.event.time)
@@ -111,6 +119,9 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
             list.addView(row(entry))
         }
     }
+
+    /** Whether [event] has what the search box has: in its title, what it says, its kind or who started it. */
+    private fun matches(event: Event) = Ui.matches(query, event.title, event.text, Logs.kind(activity, event.kind), Logs.by(activity, event.by))
 
     private fun row(entry: Shown): View {
         val event = entry.event

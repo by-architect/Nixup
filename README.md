@@ -316,7 +316,10 @@ Apps (APK and data) and folders are backed up by the phone itself with
 - **Before each backup** the storage is checked (SD card there, enough room). If something is missing, the
   backup waits and tries again later. A backup cut off by a restart starts again after you unlock the phone.
 - **Restore** is always by hand: the app's **Backups** tab (pick the backup, then the parts: APK, data, …),
-  or `su -c "seraph-backup restore org.example.app"`.
+  or `su -c "seraph-backup restore org.example.app"`. An app that is not on the phone comes back whole: its
+  APK first, then its data. The APK comes from that backup, or from another backup of the app when that one
+  has none (`android.backup.defaults.apk = false` backs up data only). If no backup has the APK, the restore
+  says "app not found": install the app first, then restore its data.
 - **New phone:** `android.backup.defaults.autoRestore = true;` reinstalls backed-up apps with their data at
   the next build. An app you removed on this phone is never brought back by itself.
 - **Keep `passwordFile` somewhere besides the phone:** without it, the backups cannot be read.
@@ -341,6 +344,9 @@ It works like `nixos-rebuild`:
 - The config can be a `configuration.nix`, a `flake.nix` (with `seraphConfigurations.<name>`), or a git
   repository the app clones (**Git** button: Pull, Pull and build, Reclone).
 - You get a notification when a build, update or backup ends, and every run's log is in the **Logs** tab.
+- The **Updates**, **Backups**, **Services** and **Logs** tabs each have a search box, and so does every log
+  you open: type part of a name, a package or a message to see only what matches (any case, with or without
+  accents).
 
 </details>
 

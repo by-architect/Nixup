@@ -16,12 +16,20 @@ section after the version, and its text is what the Magisk app shows as the upda
   then include them, and a private submodule uses the same token.
 - The app is installed for the phone's owner only, and removed from app clones and work profiles,
   where Magisk refuses root without asking; opened there, it says so.
+- Search: the Updates, Backups, Services and Logs tabs have a search box that keeps the rows with
+  what is typed in them (any case, with or without accents: "sifre" finds "şifre"), each log has
+  one that keeps the lines with it, and Back up… → Apps finds an app by its name or package.
 - Fixed: picking up broken-off runs could start a second build next to one still running, which
   deleted its new profile, so the build applied but the phone kept the old profile. A run still
   going is now left alone, a second build, update or backup waits for the first, and each run has
   its own temporary profile.
 - Fixed: a flake with no `seraphConfigurations` now says so instead of failing with no reason.
 - Tailscale says when its auth key is refused, instead of an empty login link.
+- Fixed: restoring an app that is no longer on the phone failed with "not installed" when its
+  backup held only its data (as with `android.backup.defaults.apk = false`). Such an app now comes
+  back whole: its APK first, from that backup or another backup of it, then its data; when no backup
+  has its APK, the restore says "app not found". `seraph-backup restore <app>` takes the newest
+  backup with data, not a newer one that holds only the APK.
 
 ## 0.1.0 (2026-11-03)
 

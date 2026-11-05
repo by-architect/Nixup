@@ -52,7 +52,8 @@ import kotlin.system.exitProcess
  *   backup-status [--json]        each app and folder backed up: when last, and whether (and why) it is due
  *   backup-restore <app> [snapshot] [--parts=<parts>]
  *                                 brings an app's data back from its newest backup (or the one named), over what it
- *                                 has, and its APK when it is not installed (--parts: the parts named, apk among them)
+ *                                 has (--parts: the parts named, apk among them); one not installed gets its APK
+ *                                 first, from that backup or another of its backups (none has it: app not found)
  *   backup-restore <folder> [snapshot] [--to=<folder>]
  *                                 brings a folder's files back, into it or into a new folder
  *   backup-parts <app> <snapshot> what one backup of the app has (--json)

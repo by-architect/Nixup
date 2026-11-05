@@ -30,7 +30,9 @@ import java.time.OffsetDateTime
  * app this phone backed up and that was removed since stays removed: it comes back only by hand.
  *
  * By hand (seraph-backup, the app's Backups tab), any installed app or folder can be backed up too, with the parts
- * named, and an app's APK and any of its data parts, or a folder, brought back from any of its snapshots.
+ * named, and an app's APK and any of its data parts, or a folder, brought back from any of its snapshots. An app that
+ * is not on the phone comes back whole: its APK first (from that snapshot, else from another of its snapshots, see
+ * [apkBackup]), then its data; with no APK in any of them, it is not found.
  */
 class Backup private constructor(
     private val data: File,
@@ -757,10 +759,12 @@ class Backup private constructor(
     }
 
     /**
-     * seraph-backup restore <app>: from its newest backup of a version not newer than the one installed (or
-     * [snapshotId]), its data over what it has, and its APK when it is not installed. With [parts], the parts named:
-     * apk installs it from the backup (when it is not installed, or an older version is), and each data part replaces
-     * what the app has of it. Every check comes first: when one fails, nothing has changed.
+     * seraph-backup restore <app>: from its newest backup with data of a version not newer than the one installed (see
+     * [newestWithData]; or [snapshotId]), its data over what it has, and its APK when it is not installed. With
+     * [parts], the parts named: apk installs it from the backup (when it is not installed, or an older version is), and
+     * each data part replaces what the app has of it. An app that is not installed comes back whole, its APK first,
+     * then its data, apk named or not; the APK comes from that backup, else from another of the app's ([apkBackup]),
+     * and with none it is not found. Every check comes first: when one fails, nothing has changed.
      */
     fun restoreNow(id: String, snapshotId: String?, parts: List<String>? = null): Int = locked {
         if (!Device.unlocked()) throw Stop("the phone was not unlocked since it started: the apps' data is out of reach until then")
@@ -768,38 +772,78 @@ class Backup private constructor(
         val installed = Device.versionCode(id)
         val all = snapshots(id).filter { !it.warm }
         val snapshot = if (snapshotId != null) all.firstOrNull { it.id.startsWith(snapshotId) } ?: throw Stop("$id has no backup $snapshotId (seraph-backup list $id)")
-        else newest(all, id, installed) ?: throw Stop(
+        else newestWithData(all, id, installed) ?: throw Stop(
             if (all.isEmpty()) "$id has no backups (seraph-backup list)" else "$id has no backup of a version not newer than the one installed (seraph-backup list $id)",
         )
         val has = partsOf(id, snapshot)
-        val wanted = parts ?: (listOf("apk").filter { installed == null } + (apps[id]?.include ?: DATA_PARTS))
-        val missing = wanted.filter { it !in has }
+        // Its data alone cannot come back without the app: one not installed gets its APK first.
+        val wanted = (parts ?: (apps[id]?.include ?: DATA_PARTS)).let { if (installed == null && "apk" !in it) listOf("apk") + it else it }
+        val missing = wanted.filter { it != "apk" && it !in has }
         if (parts != null && missing.isNotEmpty()) {
             throw Stop("the backup of $id from ${snapshot.date} has no ${missing.joinToString(", ")} (it has ${has.joinToString(", ").ifEmpty { "nothing" }})")
         }
-        val take = wanted.filter { it in has }
-        val dataParts = take.filter { it != "apk" }
+        val dataParts = wanted.filter { it != "apk" && it in has }
+        val apk = if ("apk" in wanted) apkBackup(id, snapshot, has, all) else null
+        if ("apk" in wanted && apk == null) {
+            throw Stop(if (installed == null) notFound(id, snapshot, all) else "no backup of $id has its APK${snapshot.versionCode?.let { " (version $it or newer)" } ?: ""} (seraph-backup list $id)")
+        }
+        if (apk == null && dataParts.isEmpty()) throw Stop("the backup of $id from ${snapshot.date} has none of that (it has ${has.joinToString(", ").ifEmpty { "nothing" }})")
         val backed = snapshot.versionCode
-        val withApk = "apk" in take
-        val installs = withApk && (installed == null || backed == null || backed > installed)
-        if (take.isEmpty()) throw Stop("the backup of $id from ${snapshot.date} has none of that (it has ${has.joinToString(", ").ifEmpty { "nothing" }})")
-        if (withApk && installed != null && backed != null && backed < installed) {
-            throw Stop("the installed $id (version $installed) is newer than its backup's ($backed), and Android installs no older version over a newer one: uninstall it first, then restore it with its APK and data")
+        val apkVersion = apk?.versionCode
+        val installs = apk != null && (installed == null || apkVersion == null || apkVersion > installed)
+        if (apk != null && installed != null && apkVersion != null && apkVersion < installed) {
+            throw Stop("the installed $id (version $installed) is newer than its backup's ($apkVersion), and Android installs no older version over a newer one: uninstall it first, then restore it with its APK and data")
         }
         if (dataParts.isNotEmpty()) {
             if (installed != null && hidden(id)) throw Stop("$id: its data folder is out of sight here (an app's view of the phone, which hides the other apps' data)")
-            if (installed == null && !installs) {
-                throw Stop(if ("apk" in has) "$id is not installed: restore its APK too (apk), or install it first" else "$id is not installed, and this backup has no APK of it: install it first")
-            }
-            val after = if (installs) backed else installed
+            val after = if (installs) apkVersion else installed
             if (backed != null && after != null && backed > after) {
                 throw Stop("that backup is of a newer version of $id ($backed) than the one installed ($after): update the app first, or restore its APK too")
             }
         }
-        if (withApk && !installs) Out.line("  $id is at its backup's version already: its APK is not installed again")
-        if (installs && !installFrom(id, snapshot)) return@locked 1
+        if (apk != null && !installs) Out.line("  $id is at its backup's version already: its APK is not installed again")
+        if (installs && apk !== snapshot) Out.line("  The backup of ${snapshot.date} has no APK of $id: it comes from its backup of ${apk!!.date}")
+        if (installs && !installFrom(id, apk!!)) return@locked 1
         if (dataParts.isNotEmpty() && !restoreData(id, snapshot, overwrite = true, only = dataParts)) return@locked 1
         0
+    }
+
+    /**
+     * The backup [id]'s APK comes from, for the data of [snapshot] (which [has] these parts), of [all] the app's: that
+     * one, when it has the APK; else the newest other with the APK of the same version, or else of a newer version (an
+     * app reads the data of its own version or an older one, never that of a newer one). Null when none has it. The
+     * parts of a backup made before they were tagged are asked of restic, and only as far as needed.
+     */
+    private fun apkBackup(id: String, snapshot: Snapshot, has: List<String>, all: List<Snapshot>): Snapshot? {
+        if ("apk" in has) return snapshot
+        val version = snapshot.versionCode
+        return all.filter { it.id != snapshot.id && (version == null || (it.versionCode ?: Long.MAX_VALUE) >= version) }
+            .sortedWith(compareBy<Snapshot> { if (version != null && it.versionCode == version) 0 else 1 }.thenByDescending { it.time })
+            .firstOrNull { hasApk(id, it) }
+    }
+
+    private fun hasApk(id: String, snapshot: Snapshot): Boolean = "apk" in knownParts(id, snapshot)
+
+    /** The parts of [snapshot] of [id], as [partsOf] has them; none when it cannot be read. */
+    private fun knownParts(id: String, snapshot: Snapshot): List<String> = snapshot.parts ?: runCatching { partsOf(id, snapshot) }.getOrDefault(emptyList())
+
+    /**
+     * What a restore by the app's name alone takes, of [all] its backups: the newest of a version not newer than the
+     * one installed (of any, when it is not installed) that has some of its data, else the newest of those: a backup
+     * of its APK alone, newer than its data's, does not hide its data (the APK comes from wherever it is, see [apkBackup]).
+     */
+    private fun newestWithData(all: List<Snapshot>, id: String, installed: Long?): Snapshot? {
+        val fit = all.filter { it.app == id && (installed == null || (it.versionCode ?: Long.MAX_VALUE) <= installed) }
+        return fit.lastOrNull { snapshot -> knownParts(id, snapshot).any { it != "apk" } } ?: fit.lastOrNull()
+    }
+
+    /** Why [id], which is not installed, cannot come back with the data of [snapshot]: no backup of it ([all]) has an APK that reads it. */
+    private fun notFound(id: String, snapshot: Snapshot, all: List<Snapshot>): String {
+        val version = snapshot.versionCode
+        val older = if (version == null) null else all.lastOrNull { (it.versionCode ?: Long.MAX_VALUE) < version && hasApk(id, it) }
+        return "app not found: $id is not installed, and " +
+            (if (older == null) "none of its backups has its APK" else "its backups have only an older APK (version ${older.versionCode}) than this data's ($version)") +
+            ": install it first, then restore its data"
     }
 
     /**
@@ -854,10 +898,19 @@ class Backup private constructor(
             .filter { it in PARTS }.distinct().sortedBy { PARTS.indexOf(it) }.toList()
     }
 
-    /** The parts of one backup of [id], for the app's restore. */
+    /**
+     * The parts of one backup of [id], and the backup its APK would come from (see [apkBackup]; none when no backup has
+     * it), for the app's restore.
+     */
     fun partsJson(id: String, snapshotId: String): JSONObject {
-        val snapshot = snapshots(id).firstOrNull { !it.warm && it.id.startsWith(snapshotId) } ?: throw Stop("$id has no backup $snapshotId (seraph-backup list $id)")
-        return JSONObject().put("parts", JSONArray(partsOf(id, snapshot)))
+        val all = snapshots(id).filter { !it.warm }
+        val snapshot = all.firstOrNull { it.id.startsWith(snapshotId) } ?: throw Stop("$id has no backup $snapshotId (seraph-backup list $id)")
+        val parts = partsOf(id, snapshot)
+        val apk = apkBackup(id, snapshot, parts, all)
+        return JSONObject().put("parts", JSONArray(parts)).put(
+            "apk",
+            apk?.let { JSONObject().put("id", it.id).put("time", it.time).put("versionCode", it.versionCode).put("versionName", it.versionName) },
+        )
     }
 
     private fun checkParts(parts: List<String>, allowed: List<String>) {

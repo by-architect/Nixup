@@ -6,4 +6,5 @@
     <color name="level_warn">#FFCC80</color>
     <color name="level_info">#90CAF9</color>
     <color name="level_start">#CE93D8</color>
+    <color name="search_match">#80FFB300</color>
 </resources>

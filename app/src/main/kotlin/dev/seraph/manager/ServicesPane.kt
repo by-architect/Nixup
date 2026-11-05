@@ -10,7 +10,8 @@ import org.json.JSONObject
 /**
  * The Services tab: the last build's services (its systemd.services units: services.tailscale, services.openssh, the
  * config's own), how each is, and a start, stop or restart by hand, as systemctl does, which lasts until the next
- * build or restart; and each one's log. Through the module's units.sh, as root.
+ * build or restart; and each one's log. Its search box keeps the services with what is typed in their name, what they
+ * are, or how they are ("failed", "running"). Through the module's units.sh, as root.
  */
 class ServicesPane(private val activity: MainActivity, root: View, private val runner: Runner) {
     private val list: LinearLayout = root.findViewById(R.id.services_list)
@@ -18,27 +19,51 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
     private val scroll: ScrollView = root.findViewById(R.id.services_scroll)
     /** The rows' start, stop and restart buttons, which wait while a script runs (a log can always be read). */
     private val actions = mutableListOf<Button>()
+    /** The services last read, each as units.sh says it. */
+    private var units: List<JSONObject> = emptyList()
+    private var query = ""
+
+    init {
+        Ui.onSearch(root.findViewById(R.id.services_search)) {
+            query = it
+            show()
+        }
+    }
 
     /** What the tab shows, read again. */
     fun load() {
         runner.read(Root.MODULE + "sh \$d/units.sh app list --json 2>&1") { exit, said ->
-            val units = Runner.json(said)?.optJSONArray("units")
-            list.removeAllViews()
-            actions.clear()
+            val json = Runner.json(said)?.optJSONArray("units")
+            units = json?.let { array -> (0 until array.length()).map { array.getJSONObject(it) } } ?: emptyList()
             when {
-                exit == null -> list.addView(Ui.note(activity, activity.getString(R.string.no_root)))
-                units == null -> list.addView(Ui.note(activity, Runner.lastLine(said)))
-                units.length() == 0 -> list.addView(Ui.note(activity, activity.getString(R.string.services_none)))
-                else -> for (i in 0 until units.length()) list.addView(row(units.getJSONObject(i)))
+                exit == null -> problem(activity.getString(R.string.no_root))
+                json == null -> problem(Runner.lastLine(said))
+                units.isEmpty() -> problem(activity.getString(R.string.services_none))
+                else -> show()
             }
-            setRunning(runner.running)
         }
     }
 
-    private fun row(unit: JSONObject): View {
-        val name = unit.getString("name")
+    private fun problem(text: String) {
+        list.removeAllViews()
+        actions.clear()
+        list.addView(Ui.note(activity, text))
+    }
+
+    /** The services, those with what the search box has. */
+    private fun show() {
+        if (units.isEmpty()) return
+        list.removeAllViews()
+        actions.clear()
+        val found = units.filter { Ui.matches(query, it.getString("name"), it.optString("description"), line(it)) }
+        if (found.isEmpty()) list.addView(Ui.noMatch(activity, query))
+        found.forEach { list.addView(row(it)) }
+        setRunning(runner.running)
+    }
+
+    /** How a service is: running since when, failed, ... */
+    private fun line(unit: JSONObject): String {
         val state = unit.optString("state")
-        val once = unit.optString("type") == "oneshot"
         val since = unit.optLong("since")
         val shown = activity.getString(
             when (state) {
@@ -50,8 +75,15 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
                 else -> R.string.state_stopped
             },
         )
-        val line = (if (since > 0 && state != "stopped" && state != "not run") activity.getString(R.string.service_state_since, shown, Ui.ago(since)) else shown) +
+        return (if (since > 0 && state != "stopped" && state != "not run") activity.getString(R.string.service_state_since, shown, Ui.ago(since)) else shown) +
             (if (!unit.optBoolean("wanted", true)) activity.getString(R.string.state_not_wanted) else "")
+    }
+
+    private fun row(unit: JSONObject): View {
+        val name = unit.getString("name")
+        val state = unit.optString("state")
+        val once = unit.optString("type") == "oneshot"
+        val line = line(unit)
         val buttons = if (once) {
             listOf(Ui.button(activity, activity.getString(R.string.service_run)) { act("start", name, R.string.service_run) })
         } else {
