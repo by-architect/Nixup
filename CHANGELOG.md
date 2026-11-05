@@ -7,12 +7,28 @@ section after the version, and its text is what the Magisk app shows as the upda
 ## Unreleased
 
 - NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
-  runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 27 Seraph has tried
-  (AdGuard Home, cron, Forgejo, Gotify, Navidrome, ntfy, Radicale, Uptime Kuma, ...) are listed in nix/nixos.nix;
+  runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 28 Seraph has tried
+  (AdGuard Home, cron, Forgejo, Gotify, harmonia, Navidrome, ntfy, Radicale, Uptime Kuma, ...) are listed in nix/nixos.nix;
   another can be added as on NixOS, `imports = [ "${modulesPath}/services/…" ];`.
 - Services can run as their own user (`User`, `Group`, `DynamicUser`, as NixOS's modules give them): a user with
-  no uid gets one from 400 to 999, which the phone keeps. Android lets those on the network, but not into the
-  shared storage: a service that needs your files runs as root (`serviceConfig.User = lib.mkForce "root";`).
+  no uid gets one from 400 to 999, which the phone keeps. Android lets those on the network; one in the
+  `media_rw` group (`serviceConfig.SupplementaryGroups = [ "media_rw" ];`) gets the shared storage too (your
+  files and SD cards, as `/storage` and `/sdcard`), in its own view of the phone.
+- Timers, as on NixOS: a service's `startAt`, and `systemd.timers` with `OnCalendar` (systemd's calendar
+  events: "daily", "Mon..Fri 07:30", "*:0/15", with a time zone or the phone's), `OnBootSec`, `OnActiveSec`,
+  `OnUnitActiveSec`, `OnUnitInactiveSec`, `Persistent` (a time missed while the phone was off comes at its
+  start) and `RandomizedDelaySec`. The Services tab shows when each service a timer starts runs next.
+- Sockets, as on NixOS (`systemd.sockets`, TCP, UDP and unix): the phone opens them and hands them to their
+  service as systemd does, so nixpkgs' modules that use them run as they are (harmonia, a binary cache of the
+  phone's store, is on the list), and a port below 1024 can be a service user's. Such a service starts with the
+  build and at boot, not at its first connection; one started for each connection (`Accept = true`) is not on
+  the phone yet.
+- Services and the jobs cron starts have the phone's time zone in Seraph's `/etc/localtime`, out of Android's
+  time zone data, so summer time comes too; cron's jobs ran in UTC before.
+- `system.path` (cron's `PATH`) is made by Nix itself, without Perl.
+- A service nothing starts at boot (one a timer starts, or one to start by hand) is in the Services tab after
+  each build, ready to start.
+- `BindPaths` are mounted before the service goes into its `WorkingDirectory`, as systemd does.
 - More of systemd's unit settings: `EnvironmentFile`, `LoadCredential` and `SetCredential`, the cache, logs and
   configuration folders, `BindPaths`, conditions and `ExecCondition`, `Type = "forking"` with `PIDFile`,
   `KillMode`, `TimeoutStopSec`, `ExecStopPost` (and `preStop`, `postStop`), every `Restart` value, `UMask` and

@@ -56,7 +56,7 @@ let
 
   # NixOS's options the phone has not got: each one's value that leaves it unused, and why.
   notHere = [
-    { name = "startWhenNeeded"; unused = !cfg.startWhenNeeded; why = "sshd starts with each build and at boot; starting it on a first connection (socket activation) is not on the phone."; }
+    { name = "startWhenNeeded"; unused = !cfg.startWhenNeeded; why = "sshd starts with each build and at boot; one started for each connection (a socket with Accept) is not on the phone."; }
     { name = "authorizedKeysCommand"; unused = cfg.authorizedKeysCommand == "none"; why = "not on the phone yet."; }
     { name = "settings.UsePAM"; unused = cfg.settings.UsePAM == false; why = "a phone has no PAM."; }
   ];

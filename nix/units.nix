@@ -38,9 +38,23 @@
 #
 # A service user (User, or DynamicUser) is a user of the view (nix/users.nix) with a uid from 400 to
 # 999, as NixOS gives its system users: Android lets those use the network (higher ones, as
-# systemd's dynamic users have, it does not), but not the shared storage (/storage, /sdcard), which
-# only apps and root may open. A unit that needs the phone's own files runs as root:
-# serviceConfig.User = lib.mkForce "root".
+# systemd's dynamic users have, it does not). Android's shared storage (/storage, /sdcard) only
+# apps and root may open; a unit whose user is in media_rw (or sdcard_rw, external_storage: its
+# SupplementaryGroups, or users.users.<name>.extraGroups) gets a /storage of its own in its view,
+# with the real folders Android keeps it in (the phone's own storage and each SD card), which
+# media_rw may use (Units.kt's STORAGE). Or it runs as root: serviceConfig.User = lib.mkForce "root".
+#
+# Timers (systemd.timers, and startAt, which makes one as on NixOS) start their unit at their times:
+# OnCalendar (systemd.time(7)'s calendar events, with the phone's time zone or one of their own),
+# OnBootSec, OnStartupSec, OnActiveSec, OnUnitActiveSec, OnUnitInactiveSec, Persistent and
+# RandomizedDelaySec (Timers.kt). A phone asleep runs nothing: a time that passed while it slept
+# comes once it wakes, as with systemd's timers without WakeSystem.
+#
+# Sockets (systemd.sockets: listenStreams, listenDatagrams, socketConfig.ListenStream and
+# ListenDatagram; TCP, UDP and unix sockets) the phone opens as root and hands to their service as
+# systemd does (as fds 3 and on, with LISTEN_FDS and LISTEN_PID, through systemfd), so a port below
+# 1024 is a service user's too. The service starts with the build and at boot rather than at its
+# first connection; a service started for each connection (Accept = true) is not on the phone.
 #
 # unitConfig.RequiresMountsFor: the phone's storage a unit needs (an SD card's folder, the shared
 # storage), which Android mounts only once the phone is first unlocked after it starts, or which may
@@ -415,7 +429,8 @@ let
       startAt = mkOption {
         type = types.either types.str (types.listOf types.str);
         default = [ ];
-        description = "When to start it, as a timer: not on the phone yet.";
+        example = "Mon..Fri *-*-* 07:30";
+        description = "When to start it, as a timer of its name with this OnCalendar (systemd.time(7)), as on NixOS.";
       };
       confinement = {
         enable = mkOption {
@@ -472,6 +487,96 @@ let
       };
     };
   };
+
+  # The lists of a socket's or a timer's [Unit] and [Install] sections, as NixOS has them.
+  listOptions = names: lib.genAttrs names (name: mkOption {
+    type = types.listOf types.str;
+    default = [ ];
+    description = "As on NixOS.";
+  });
+
+  # A socket: the phone opens it and hands it to its service (see the top).
+  socketModule = { ... }: {
+    options = listOptions [ "wantedBy" "requiredBy" "after" "before" "wants" "requires" "bindsTo" "partOf"
+      "conflicts" "documentation" ] // {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the socket is there at all.";
+      };
+      description = mkOption {
+        type = types.singleLineStr;
+        default = "";
+        description = "What the socket is.";
+      };
+      listenStreams = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = [ "8080" "127.0.0.1:8080" "/run/foo.sock" ];
+        description = "Its stream sockets (TCP: a port, or an address and port; or a unix socket's path), as on NixOS.";
+      };
+      listenDatagrams = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = [ "5353" ];
+        description = "Its datagram sockets (UDP: a port, or an address and port), as on NixOS.";
+      };
+      socketConfig = mkOption {
+        type = types.attrsOf unitValue;
+        default = { };
+        example = { ListenStream = "/run/foo.sock"; };
+        description = "The [Socket] section of its unit: ListenStream, ListenDatagram, Service; Accept = false only.";
+      };
+      unitConfig = mkOption {
+        type = types.attrsOf unitValue;
+        default = { };
+        description = "Its [Unit] section's other keys (taken).";
+      };
+    };
+  };
+
+  # A timer: it starts its unit at the times it says (see the top).
+  timerModule = { ... }: {
+    options = listOptions [ "wantedBy" "requiredBy" "after" "before" "wants" "requires" "bindsTo" "partOf"
+      "conflicts" "documentation" ] // {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the timer is there at all.";
+      };
+      description = mkOption {
+        type = types.singleLineStr;
+        default = "";
+        description = "What the timer is.";
+      };
+      timerConfig = mkOption {
+        type = types.attrsOf unitValue;
+        default = { };
+        example = { OnCalendar = "daily"; Persistent = true; };
+        description = ''
+          The [Timer] section of its unit: OnCalendar, OnBootSec, OnStartupSec, OnActiveSec, OnUnitActiveSec,
+          OnUnitInactiveSec, Persistent, RandomizedDelaySec and Unit (AccuracySec, WakeSystem and the like are taken).
+        '';
+      };
+      unitConfig = mkOption {
+        type = types.attrsOf unitValue;
+        default = { };
+        description = "Its [Unit] section's other keys (taken).";
+      };
+    };
+  };
+  timerKeys = {
+    OnCalendar = "onCalendar"; OnBootSec = "onBoot"; OnStartupSec = "onStartup"; OnActiveSec = "onActive";
+    OnUnitActiveSec = "onUnitActive"; OnUnitInactiveSec = "onUnitInactive"; RandomizedDelaySec = "randomizedDelay";
+  };
+  timerTaken = [ "Persistent" "Unit" "AccuracySec" "FixedRandomDelay" "WakeSystem" "RemainAfterElapse" "OnClockChange"
+    "OnTimezoneChange" "RandomizedOffsetSec" "DeferReactivation" ];
+  socketSupported = [ "ListenStream" "ListenDatagram" "Accept" "Service" ];
+  socketTaken = [ "Backlog" "BindIPv6Only" "FreeBind" "ReusePort" "NoDelay" "KeepAlive" "KeepAliveTimeSec"
+    "KeepAliveIntervalSec" "KeepAliveProbes" "ReceiveBuffer" "SendBuffer" "RemoveOnStop" "SocketMode" "DirectoryMode"
+    "SocketUser" "SocketGroup" "PassCredentials" "PassSecurity" "PassPacketInfo" "MaxConnections" "MaxConnectionsPerSource"
+    "Timestamping" "Transparent" "Broadcast" "IPTOS" "IPTTL" "Mark" "PipeSize" "Priority" "Symlinks" "FileDescriptorName"
+    "TriggerLimitIntervalSec" "TriggerLimitBurst" "PollLimitIntervalSec" "PollLimitBurst" "DeferTrigger" ];
 
   # A unit's name as the others give it: foo.service is foo.
   nameOf = lib.removeSuffix ".service";
@@ -545,6 +650,53 @@ let
   requiredByUnits = name: lib.attrNames (lib.filterAttrs (_: unit:
     lib.any (by: by == "${name}.service" || by == name) unit.requiredBy) units);
 
+  # Sockets (systemd.sockets): the phone opens a wanted one itself and hands it to its service as systemd hands one
+  # over (LISTEN_FDS, through systemfd); the service starts with the build and the phone, not at its first
+  # connection, as on NixOS.
+  sockets = lib.filterAttrs (_: socket: socket.enable) config.systemd.sockets;
+  socketWanted = socket: lib.any (target: lib.elem target reached) (socket.wantedBy ++ socket.requiredBy);
+  serviceOfSocket = name: socket: nameOf (toString (socket.socketConfig.Service or "${name}.service"));
+  # A Listen* value as systemfd takes it: "8080" (every address), "127.0.0.1:8080", "[::1]:8080", "/run/foo.sock";
+  # null for what it cannot open (an abstract socket, a unix datagram socket).
+  listenSpec = kind: address:
+    let
+      a = toString address;
+      net = if kind == "stream" then "tcp" else "udp";
+    in
+    if lib.hasPrefix "/" a then (if kind == "stream" then "unix::${a}" else null)
+    else if lib.hasPrefix "@" a then null
+    else if builtins.match "[0-9]+" a != null then "${net}::[::]:${a}"
+    else "${net}::${a}";
+  socketSpecs = socket:
+    map (listenSpec "stream") (reset (strings socket.listenStreams) ++ reset (strings (socket.socketConfig.ListenStream or [ ])))
+    ++ map (listenSpec "datagram") (reset (strings socket.listenDatagrams) ++ reset (strings (socket.socketConfig.ListenDatagram or [ ])));
+  wantedSockets = lib.filterAttrs (_: socketWanted) sockets;
+  socketsOf = name: lib.concatLists (lib.mapAttrsToList (socketName: socket:
+    lib.optionals (serviceOfSocket socketName socket == name) (lib.filter (spec: spec != null) (socketSpecs socket))) wantedSockets);
+  socketServices = lib.unique (lib.mapAttrsToList serviceOfSocket wantedSockets);
+
+  # Timers (systemd.timers, with those a unit's startAt makes, below): the engine starts their unit at their
+  # times (Timers.kt).
+  timers = lib.filterAttrs (_: timer: timer.enable) config.systemd.timers;
+  toTimer = name: timer:
+    let tc = timer.timerConfig; in
+    {
+      unit = nameOf (toString (tc.Unit or "${name}.service"));
+      inherit (timer) description;
+      wanted = lib.any (target: lib.elem target reached) (timer.wantedBy ++ timer.requiredBy);
+      onCalendar = reset (strings (tc.OnCalendar or [ ]));
+    }
+    // lib.optionalAttrs (boolean (tc.Persistent or false)) { persistent = true; }
+    // lib.mapAttrs' (key: field: lib.nameValuePair field (toString (lib.last (listOf tc.${key}))))
+      (lib.filterAttrs (key: _: key != "OnCalendar" && tc ? ${key}) timerKeys);
+  timerProfile = lib.mapAttrs toTimer timers;
+
+  # A unit's user in one of Android's groups of the shared storage reaches it, in its view (see the top).
+  storageGroups = [ "media_rw" "sdcard_rw" "external_storage" ];
+  storageOf = user: unit: !isRoot user && lib.any (group: lib.elem group storageGroups)
+    (words (unit.serviceConfig.SupplementaryGroups or [ ])
+      ++ lib.optionals (config.users.users ? ${user}) (config.users.users.${user}.extraGroups ++ [ config.users.users.${user}.group ]));
+
   # LoadCredential = "id:path" (an id alone: the file of that name in /etc/credstore or /run/credstore, as
   # systemd looks for it); SetCredential = "id:text".
   credential = kind: entry:
@@ -587,6 +739,7 @@ let
       limitsSet = lib.filter (key: sc ? "Limit${key}") limits;
       unitChecks = checks unit;
       extraWants = wantedByUnits name;
+      unitSockets = socketsOf name;
     in
     {
       inherit (unit) description;
@@ -604,7 +757,7 @@ let
       wants = map nameOf (unit.wants ++ unit.upholds ++ unit.requires ++ unit.bindsTo ++ unit.requisite) ++ extraWants;
       requires = map nameOf (unit.requires ++ unit.bindsTo ++ unit.requisite) ++ requiredByUnits name;
       wanted = lib.any (target: lib.elem target reached) (unit.wantedBy ++ unit.requiredBy ++ unit.upheldBy)
-        || lib.elem name wantedByTargets;
+        || lib.elem name wantedByTargets || lib.elem name socketServices;
       # Below the apps, unless the unit says (systemd's Nice: -20, first, to 19, last).
       nice = sc.Nice or 10;
       inherit (unit) notifications;
@@ -650,6 +803,9 @@ let
     // lib.optionalAttrs (binds sc != [ ]) { binds = binds sc; }
     // lib.optionalAttrs (creds != [ ]) { credentials = creds; }
     // lib.optionalAttrs (unitChecks != [ ]) { checks = unitChecks; }
+    // lib.optionalAttrs (unitSockets != [ ]) { sockets = unitSockets; systemfd = "${pkgs.systemfd}/bin/systemfd"; }
+    // lib.optionalAttrs (toString (sc.StandardInput or "") == "socket") { stdinSocket = true; }
+    // lib.optionalAttrs (storageOf user unit) { storage = true; }
     // lib.optionalAttrs (!unit.restartIfChanged && !unit.reloadIfChanged) { restartIfChanged = false; };
 
   profile = lib.mapAttrs toProfile units;
@@ -660,7 +816,13 @@ let
   # the network.
   unitAccounts = lib.concatLists (lib.mapAttrsToList (name: unit:
     let user = userOf name unit; spec = profile.${name}; in
-    lib.optional (!isRoot user) { name = user; group = spec.group or user; groups = spec.groups; declared = config.users.users ? ${user}; }
+    lib.optional (!isRoot user) {
+      name = user;
+      group = spec.group or user;
+      # The shared storage's real folders are media_rw's.
+      groups = spec.groups ++ lib.optional (spec.storage or false) "media_rw";
+      declared = config.users.users ? ${user};
+    }
   ) units);
 
   # The store paths the units use, as Nix finds a build's references: by their names in the text.
@@ -696,9 +858,36 @@ let
     ++ lib.optional (lib.any (path: !lib.hasPrefix "/" path) mounts) "${unit'}.unitConfig.RequiresMountsFor: full paths, like /storage/1234-5678/Music."
     ++ lib.optional (badCodes != [ ]) "${unit'}.serviceConfig: ${lib.concatStringsSep ", " badCodes}: an exit status is a number or a signal (${lib.concatStringsSep ", " (lib.attrNames signals)})."
     ++ lib.optional (relativeBinds != [ ]) "${unit'}.serviceConfig.BindPaths: full paths, like /var/lib/foo:/srv/foo."
-    ++ lib.optional (unit.startAt != [ ] && unit.startAt != "") "${unit'}.startAt: timers are not on the phone yet."
     ++ lib.optional unit.confinement.enable "${unit'}.confinement.enable: not on the phone (each unit runs in a view of its own already)."
-  ) units);
+    ++ lib.optional (toString (sc.StandardInput or "") == "socket" && socketsOf name == [ ]) "${unit'}.serviceConfig.StandardInput: \"socket\" needs a socket of systemd.sockets for it."
+  ) units)
+  ++ lib.concatLists (lib.mapAttrsToList (name: timer:
+    let
+      tc = timer.timerConfig;
+      unit = nameOf (toString (tc.Unit or "${name}.service"));
+      other = lib.filter (key: !(timerKeys ? ${key}) && !lib.elem key timerTaken) (lib.attrNames tc);
+      timer' = "systemd.timers.${name}";
+    in
+    # (One there but turned off leaves the timer off.)
+    lib.optional (!(config.systemd.services ? ${unit})) "${timer'}: its unit ${unit} is not in systemd.services."
+    ++ lib.optional (lib.attrNames (builtins.intersectAttrs timerKeys tc) == [ ] || (lib.attrNames (builtins.intersectAttrs timerKeys tc) == [ "OnCalendar" ] && reset (strings tc.OnCalendar) == [ ]))
+      "${timer'}.timerConfig: give it a time (OnCalendar, OnBootSec, OnUnitActiveSec, ...)."
+    ++ lib.optional (other != [ ]) "${timer'}.timerConfig: ${lib.concatStringsSep ", " other} not on the phone (nix/units.nix lists the keys it takes)."
+  ) timers)
+  ++ lib.concatLists (lib.mapAttrsToList (name: socket:
+    let
+      sc = socket.socketConfig;
+      service = serviceOfSocket name socket;
+      other = lib.filter (key: !lib.elem key socketSupported && !lib.elem key socketTaken) (lib.attrNames sc);
+      unopened = lib.filter (spec: spec == null) (socketSpecs socket);
+      socket' = "systemd.sockets.${name}";
+    in
+    lib.optional (!(config.systemd.services ? ${service})) "${socket'}: its service ${service} is not in systemd.services."
+    ++ lib.optional (boolean (sc.Accept or false)) "${socket'}.socketConfig.Accept: a service started for each connection is not on the phone yet (Accept = false is)."
+    ++ lib.optional (other != [ ]) "${socket'}.socketConfig: ${lib.concatStringsSep ", " other} not on the phone (nix/units.nix lists the keys it takes)."
+    ++ lib.optional (unopened != [ ]) "${socket'}: an abstract socket (@name) or a unix datagram socket is not on the phone."
+    ++ lib.optional (socketSpecs socket == [ ]) "${socket'}: give it something to listen on (listenStreams, listenDatagrams)."
+  ) (lib.filterAttrs (_: socketWanted) sockets));
 in
 {
   options.systemd = {
@@ -733,6 +922,26 @@ in
       '';
     };
 
+    sockets = mkOption {
+      type = types.attrsOf (types.submodule socketModule);
+      default = { };
+      example = lib.literalExpression ''{ foo = { wantedBy = [ "sockets.target" ]; listenStreams = [ "127.0.0.1:8080" ]; }; }'';
+      description = ''
+        Sockets, as NixOS's systemd.sockets: the phone opens a wanted one and hands it to its service (foo.socket's
+        is foo.service, or socketConfig.Service), which starts with the build and at boot.
+      '';
+    };
+
+    timers = mkOption {
+      type = types.attrsOf (types.submodule timerModule);
+      default = { };
+      example = lib.literalExpression ''{ foo = { wantedBy = [ "timers.target" ]; timerConfig = { OnCalendar = "daily"; Persistent = true; }; }; }'';
+      description = ''
+        Timers, as NixOS's systemd.timers: a wanted one starts its unit (foo.timer's is foo.service, or
+        timerConfig.Unit) at its times; a unit's startAt makes one, as on NixOS.
+      '';
+    };
+
     globalEnvironment = mkOption {
       type = types.attrsOf (types.nullOr (types.oneOf [ types.str types.path types.package ]));
       default = { };
@@ -742,8 +951,12 @@ in
   };
 
   config = {
+    # A unit's startAt is a timer of its name, as NixOS makes it (a module may add to its timerConfig).
+    systemd.timers = lib.mapAttrs (_: unit: { wantedBy = [ "timers.target" ]; timerConfig.OnCalendar = unit.startAt; })
+      (lib.filterAttrs (_: unit: unit.startAt != [ ] && unit.startAt != "") units);
     system.build.units = profile;
     system.build.unitAccounts = unitAccounts;
+    system.build.timers = timerProfile;
     system.build.unitStorePaths = lib.unique (storePathsIn (builtins.toJSON profile));
     assertions = map (message: { assertion = false; inherit message; }) problems;
   };

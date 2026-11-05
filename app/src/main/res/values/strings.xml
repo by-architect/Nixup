@@ -183,6 +183,7 @@
     <string name="state_not_run">○ not run</string>
     <string name="state_skipped">◌ not started (its condition is not met)</string>
     <string name="state_not_wanted">, nothing wants it</string>
+    <string name="state_next_run">; its timer runs it next at %1$s</string>
     <string name="service_acting">%1$s: %2$s…</string>
 
     <!-- The menu. -->

@@ -657,7 +657,8 @@
     description = "Notes over HTTP, for the tailnet";
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
-      DynamicUser = true;                         # its own user (uid 400–999: Android lets it on the network, not into the shared storage)
+      DynamicUser = true;                         # its own user (uid 400–999: Android lets it on the network)
+      SupplementaryGroups = [ "media_rw" ];       # and into the shared storage (/storage, /sdcard), in its view
       StateDirectory = "notes";                   # /var/lib/notes, its user's ("CacheDirectory", "LogsDirectory" alike)
       LoadCredential = "token:/data/adb/seraph/secrets/notes-token";   # a file only it may read: $CREDENTIALS_DIRECTORY/token
       EnvironmentFile = "-/data/adb/seraph/secrets/notes.env";        # variables from a file ("-": it may be missing)
@@ -668,11 +669,21 @@
     };
     unitConfig.ConditionPathExists = "/data/adb/seraph/secrets/notes-token";   # starts only when this is there
   };
+  # A socket the phone opens for a service, which takes it as systemd hands it over (LISTEN_FDS), as on NixOS:
+  #   systemd.sockets.foo = { wantedBy = [ "sockets.target" ]; listenStreams = [ "127.0.0.1:8082" ]; };
+
+  # A job at set times, as on NixOS: startAt (systemd.time(7)), or systemd.timers.<name> for OnBootSec, Persistent, ...
+  systemd.services.notes-copy = {
+    enable = false;                               # true: run it
+    startAt = "*-*-* 03:00:00";                   # when: like "daily", "Mon..Fri 07:30", "*:0/15"
+    serviceConfig.Type = "oneshot";
+    script = "cp -r /var/lib/notes /storage/emulated/0/Documents/";
+  };
 
   # NixOS's own service modules, from nixpkgs, as they are: the ones Seraph has tried (nix/nixos.nix lists them) with
-  # all their NixOS options. Each runs as its own user, so one that needs the phone's shared storage (a music folder)
-  # gets root: systemd.services.<name>.serviceConfig.User = lib.mkForce "root". The small files a module makes (its
-  # settings) the phone builds itself.
+  # all their NixOS options. Each runs as its own user; one that needs the phone's shared storage (a music folder)
+  # gets it with systemd.services.<name>.serviceConfig.SupplementaryGroups = [ "media_rw" ]. The small files a module
+  # makes (its settings) the phone builds itself.
   services.ntfy-sh = {
     enable = false;                               # true: run it (push notifications, ntfy.sh's own server)
     settings.base-url = "http://logos:2586";      # its settings, as on NixOS

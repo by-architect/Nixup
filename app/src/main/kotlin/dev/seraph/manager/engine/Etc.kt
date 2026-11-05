@@ -4,14 +4,16 @@ import android.system.Os
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.file.Files
+import java.util.TimeZone
 
 /**
  * Seraph's /etc for the Linux programs it runs (Nix, and the services' programs from Nix packages), which look there
  * for DNS servers, trusted certificates, hosts and users, where Android has none: the DNS servers of the networks in
  * use (or networking.nameservers), Android's trusted certificates, localhost (and networking.hosts), the users of
- * users.users and the services' own ([Ids]), and the config's own files (environment.etc). They run in a mount
- * namespace of their own with it over /etc (see Units).
+ * users.users and the services' own ([Ids]), the phone's time zone ([writeTimeZone]), and the config's own files
+ * (environment.etc). They run in a mount namespace of their own with it over /etc (see Units).
  *
  * The users' shell there (users.users, root's too) is /etc/seraph/login ([LOGIN]): the profile's shell, with
  * environment.systemPackages on PATH, started the same way for an ssh session (services.openssh), the app's terminal
@@ -65,8 +67,9 @@ object Etc {
         File(etc, "hosts").writeText("127.0.0.1 localhost\n::1 localhost ip6-localhost\n" + (network?.string("hosts") ?: ""))
         val dns = network?.strings("nameservers")?.takeIf { it.isNotEmpty() } ?: Device.dnsServers()
         if (dns.isNotEmpty()) File(etc, "resolv.conf").writeText(dns.joinToString("") { "nameserver $it\n" })
-        // The config's own files (environment.etc).
+        // The config's own files (environment.etc), and the phone's time zone unless they have one.
         writeFiles(data, etc, profile?.optJSONArray("etc"))
+        writeTimeZone(etc, profile?.optJSONArray("etc"))
         writeLogin(etc, home, profile?.optJSONObject("shell"))
         // What every session runs first (environment.extraInit).
         File(etc, "seraph/environment").writeText(profile?.string("extraInit") ?: "")
@@ -129,6 +132,70 @@ object Etc {
             }
         }
         if (now.isEmpty()) list.delete() else list.writeText(now.joinToString("") { "$it\n" })
+    }
+
+    /**
+     * The phone's time zone as Linux programs read it, unless environment.etc gives one: /etc/localtime (its rules, a
+     * TZif file, out of Android's time zone data) and /etc/timezone (its name). With it, programs that clear their
+     * environment (cron, for its jobs) keep the phone's time, and so does a clock change of the zone (summer time).
+     */
+    private fun writeTimeZone(etc: File, entries: JSONArray?) {
+        val own = (0 until (entries?.length() ?: 0)).map { entries!!.getJSONObject(it).getString("target").trim('/') }
+        val zone = Device.timeZone().ifEmpty { TimeZone.getDefault().id }
+        if ("localtime" !in own) {
+            val file = File(etc, "localtime")
+            val rules = zoneRules(zone)
+            when {
+                // (Not found: the services' TZ, the zone's offset from UTC, stays theirs; see Units.)
+                rules == null -> if (Files.isSymbolicLink(file.toPath()) || file.isFile) file.delete()
+                Files.isSymbolicLink(file.toPath()) || !file.isFile || !file.readBytes().contentEquals(rules) -> {
+                    // Whole or not at all, for a program that reads it now.
+                    val next = File(etc, ".localtime.new")
+                    next.writeBytes(rules)
+                    Os.chmod(next.path, "644".toInt(8))
+                    if (Files.isSymbolicLink(file.toPath())) file.delete()
+                    if (!next.renameTo(file)) next.delete()
+                }
+            }
+        }
+        if ("timezone" !in own && zone.isNotEmpty()) {
+            val file = File(etc, "timezone")
+            if (runCatching { file.readText() }.getOrNull() != "$zone\n") file.writeText("$zone\n")
+        }
+    }
+
+    /**
+     * The rules of time zone [zone] (a TZif file, as /usr/share/zoneinfo has them), out of Android's time zone data:
+     * one file with every zone (bionic's tzdata: a header, an index of 52-byte entries, then the zones), its newest
+     * copy first (the time zone updates' module, then the system's).
+     */
+    fun zoneRules(zone: String): ByteArray? {
+        for (path in listOf("/apex/com.android.tzdata/etc/tz/tzdata", "/system/usr/share/zoneinfo/tzdata")) {
+            val file = File(path).takeIf { it.isFile } ?: continue
+            val found = runCatching {
+                RandomAccessFile(file, "r").use { tzdata ->
+                    val magic = ByteArray(12).also { tzdata.readFully(it) }
+                    if (!String(magic, Charsets.US_ASCII).startsWith("tzdata")) return@use null
+                    val index = tzdata.readInt()
+                    val start = tzdata.readInt()
+                    tzdata.seek(index.toLong())
+                    val name = ByteArray(40)
+                    for (i in 0 until (start - index) / 52) {
+                        tzdata.readFully(name)
+                        val offset = tzdata.readInt()
+                        val length = tzdata.readInt()
+                        tzdata.readInt()
+                        if (String(name, Charsets.US_ASCII).trimEnd('\u0000') == zone) {
+                            tzdata.seek(start.toLong() + offset)
+                            return@use ByteArray(length).also { tzdata.readFully(it) }
+                        }
+                    }
+                    null
+                }
+            }.getOrNull()
+            if (found != null) return found
+        }
+        return null
     }
 
     /** "+<number>", or a name of [names]. */
@@ -291,8 +358,8 @@ object Etc {
         # root's home; another user's is the one sshd gave it, from /etc/passwd.
         [ "${'$'}(/system/bin/id -u)" = 0 ] && export HOME=@HOME@
         export LANG="${'$'}{LANG:-C.UTF-8}" TERM="${'$'}{TERM:-xterm-256color}"
-        # Android's time zone, as its offset from UTC (POSIX: "<+0300>-03:00"): glibc does not read Android's zones.
-        if [ -z "${'$'}TZ" ]; then
+        # Android's time zone is /etc/localtime; without it, its offset from UTC (POSIX: "<+0300>-03:00").
+        if [ -z "${'$'}TZ" ] && [ ! -s /etc/localtime ]; then
           off=${'$'}(/system/bin/date +%z)
           case ${'$'}off in
             +[0-9][0-9][0-9][0-9]) export TZ="<${'$'}off>-${'$'}{off:1:2}:${'$'}{off:3:2}" ;;

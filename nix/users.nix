@@ -12,12 +12,12 @@
 # A user without uid or androidApp (a service's user: isSystemUser, as NixOS's service modules make them, or a unit's
 # DynamicUser; or a normal user) gets one on the phone from 400 to 999, as NixOS gives its system users theirs, and
 # keeps it (Etc.kt): Android lets those use the network (as it lets uids below 10000, and apps that may; NixOS's
-# normal users' 1000 and up are Android's own there), but not the shared storage, which only apps and root may open.
-# A group without a gid gets one the same way.
+# normal users' 1000 and up are Android's own there). The shared storage, which Android's /storage lets only apps
+# and root open, a service's user reaches in its unit's view when it is in media_rw (or sdcard_rw, external_storage:
+# see nix/units.nix). A group without a gid gets one the same way.
 #
 # Android checks a process's groups for some of what it may do: network sockets need inet (3003) on some phones, the
-# shared storage external_storage (1077) or sdcard_rw (1015). users.groups has those, with Android's numbers, for
-# extraGroups.
+# shared storage's folders media_rw (1023). users.groups has those, with Android's numbers, for extraGroups.
 { config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
@@ -73,7 +73,7 @@ let
         type = types.listOf types.str;
         default = [ ];
         example = [ "inet" "external_storage" ];
-        description = "More groups: inet for the network, external_storage or sdcard_rw for the shared storage (users.groups).";
+        description = "More groups: inet for the network, media_rw for the shared storage (a service's user; users.groups).";
       };
       home = mkOption {
         type = types.str;

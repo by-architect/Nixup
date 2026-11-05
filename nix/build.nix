@@ -144,6 +144,8 @@ in
             # terminal's font: it fetches those from cache.nixos.org (and builds the small files the
             # config makes, as derivations says) before the build changes anything.
             units = config.system.build.units;
+            # Their timers (systemd.timers, startAt), which the engine keeps.
+            timers = config.system.build.timers;
             etc = config.system.build.etc;
             inherit (config.system.build) network tmpfiles;
             storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths

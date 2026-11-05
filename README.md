@@ -246,6 +246,13 @@ syntax.
       echo "built at $(date)" > /var/lib/hello.txt
     '';
   };
+
+  # A job at set times, as NixOS's startAt (systemd.time(7): "daily", "Mon..Fri 07:30", "*:0/15")
+  systemd.services.photos-copy = {
+    startAt = "*-*-* 03:00:00";
+    serviceConfig.Type = "oneshot";
+    script = "cp -ru /storage/emulated/0/DCIM /storage/1234-5678/Photos";
+  };
 }
 ```
 
@@ -259,12 +266,22 @@ syntax.
   `BindPaths`), its secrets (`LoadCredential`, `SetCredential`) and conditions (`ConditionPathExists`, ...).
   What only hardens a service on NixOS (`ProtectSystem`, `PrivateDevices`, `SystemCallFilter`, ...) is taken
   and does nothing; anything else stops the build with a message. [nix/units.nix](nix/units.nix) lists it all.
+- Timers: a service's `startAt`, and `systemd.timers` with `OnCalendar` (systemd's calendar events, with the
+  same times as `systemd-analyze calendar`), `OnBootSec`, `OnActiveSec`, `OnUnitActiveSec`, `OnUnitInactiveSec`,
+  `Persistent` and `RandomizedDelaySec`. A phone asleep runs nothing: a time that passed while it slept comes
+  when it wakes. The Services tab shows when each one runs next.
+- Sockets (`systemd.sockets`: TCP, UDP and unix sockets): the phone opens them and hands them to their service
+  as systemd does (`LISTEN_FDS`), so nixpkgs' modules that use them (harmonia) run as they are, and a port below
+  1024 can be a service user's. Such a service starts with the build, not at its first connection; one started
+  for each connection (`Accept = true`) is not on the phone.
 - A service with a user of its own (`User`, `DynamicUser`, as NixOS's modules give them) runs as that user,
-  with a uid from 400 to 999 the phone keeps for it. Android lets those on the network, but not into the shared
-  storage (`/storage`, `/sdcard`), which only apps and root may open: a service that needs your files runs as
-  root (`serviceConfig.User = lib.mkForce "root";`).
+  with a uid from 400 to 999 the phone keeps for it. Android lets those on the network; the shared storage
+  (`/storage`, `/sdcard`), which Android lets only apps and root open, such a service gets when its user is in
+  `media_rw` (`serviceConfig.SupplementaryGroups = [ "media_rw" ];`, or the user's `extraGroups`), in its own
+  view of the phone. Or it runs as root (`serviceConfig.User = lib.mkForce "root";`).
 - `environment.etc` (files in Seraph's `/etc`), `systemd.tmpfiles`, `networking.hosts` and
-  `networking.nameservers` work as on NixOS, in Seraph's view of the phone.
+  `networking.nameservers` work as on NixOS, in Seraph's view of the phone, where `/etc/localtime` is the
+  phone's time zone (cron's jobs and every program keep the phone's time).
 - Services start again at boot, run below the app on the screen (so the phone does not stutter), and send a
   notification when they stop by themselves.
 - Start, stop, restart and logs: the app's **Services** tab.
@@ -277,8 +294,8 @@ syntax.
 NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
 runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The ones Seraph has tried
 are AdGuard Home, aria2, at, Blocky, code-server, cron, dnscrypt-proxy, endlessh, File Browser, Forgejo, gonic,
-Gotify, i2pd, llama.cpp, MiniDLNA, Mosquitto, Navidrome, Node-RED, ntfy, Ollama, Radicale, Soft Serve, ttyd,
-Unbound, Uptime Kuma, vnStat and WebDAV ([nix/nixos.nix](nix/nixos.nix)). Another of nixpkgs' modules can be
+Gotify, harmonia, i2pd, llama.cpp, MiniDLNA, Mosquitto, Navidrome, Node-RED, ntfy, Ollama, Radicale, Soft Serve,
+ttyd, Unbound, Uptime Kuma, vnStat and WebDAV ([nix/nixos.nix](nix/nixos.nix)). Another of nixpkgs' modules can be
 added by hand, as on NixOS: `imports = [ "${modulesPath}/services/web-apps/foo.nix" ];` (what it needs that the
 phone has not got stops the build and says so). The small files a module makes (its settings) the phone builds
 itself from what cache.nixos.org has; a package itself it never builds.

@@ -1,12 +1,14 @@
 # NixOS's own options that its service modules set or read besides their own (nix/nixos.nix runs those modules on
 # the phone), each with NixOS's name and type, so a module builds here as it does there:
 #   - what the phone does, it does: /etc/hosts (networking.hosts, extraHosts), the DNS servers its services use
-#     (networking.nameservers), environment variables (environment.variables), a unit's targets (systemd.targets,
-#     in nix/units.nix), /etc (nix/etc.nix) and systemd.tmpfiles (nix/tmpfiles.nix);
+#     (networking.nameservers), environment variables (environment.variables), a unit's targets, timers and sockets
+#     (systemd.targets, systemd.timers, systemd.sockets, in nix/units.nix), /etc (nix/etc.nix) and systemd.tmpfiles
+#     (nix/tmpfiles.nix);
 #   - what has nothing to do on a phone is taken and does nothing: a firewall's open ports (a phone has none in the
 #     way), IPv6, PAM's services, the documentation, D-Bus's and udev's packages (Android has neither);
 #   - what it cannot do is there, so a module that only reads it builds, and turning it on stops the build and says
-#     why: a firewall, socket activation, kernel modules, polkit, sudo, another service NixOS has and Seraph not.
+#     why: a firewall, units started when a path changes, mounts, kernel modules, polkit, sudo, another service NixOS
+#     has and Seraph not.
 { config, lib, pkgs, options, ... }:
 let
   inherit (lib) mkOption types;
@@ -49,8 +51,8 @@ let
     allowedUDPPortRanges = taken (types.listOf portRange) [ ] "UDP port ranges the firewall lets in";
   };
 
-  # A unit kind the phone has not got (socket activation, timers, paths, mounts): its options as NixOS's, any of
-  # them taken; one that is there and wanted stops the build.
+  # A unit kind the phone has not got (paths, mounts): its options as NixOS's, any of them taken; one that is there
+  # and wanted stops the build.
   unitKind = kind: what: mkOption {
     type = types.attrsOf (types.submodule {
       freeformType = types.lazyAttrsOf types.anything;
@@ -251,12 +253,23 @@ in
       path = mkOption {
         type = types.package;
         readOnly = true;
-        # With the commands every shell has, as NixOS's has them (cron's jobs run with it as their PATH).
-        default = pkgs.buildEnv {
-          name = "system-path";
-          paths = config.environment.systemPackages ++ (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
-          ignoreCollisions = true;
-        };
+        # With the commands every shell has, as NixOS's has them (cron's jobs run with it as their PATH). Made as
+        # nix-env makes a profile, by Nix itself (nixpkgs' buildEnv would need Perl on the phone): each package with
+        # a priority of its own, so that the first of two with the same file wins, as ignoreCollisions has it.
+        default =
+          let
+            packages = config.environment.systemPackages ++ (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+            outputsOf = package: map (output: package.${output}.outPath or package.outPath) (package.meta.outputsToInstall or [ "out" ]);
+          in
+          derivation {
+            name = "system-path";
+            system = "builtin";
+            builder = "builtin:buildenv";
+            manifest = builtins.toFile "env-manifest.nix" "[ ]";
+            derivations = lib.imap1 (priority: package: [ "true" priority (builtins.length (outputsOf package)) ] ++ outputsOf package) packages;
+            preferLocalBuild = true;
+            allowSubstitutes = false;
+          };
         defaultText = lib.literalExpression "environment.systemPackages, with bash, coreutils, findutils, grep, sed and less";
         description = "The system's packages in one folder, as on NixOS (made on the phone when something uses it).";
       };
@@ -281,8 +294,6 @@ in
     };
 
     systemd = {
-      sockets = unitKind "socket" "socket activation, which the phone has not got: a module's option that starts its service without it (often socketActivation = false) runs it";
-      timers = unitKind "timer" "timers: not on the phone yet";
       paths = unitKind "path" "units started when a path changes: not on the phone";
       slices = anyAttrs;
       mounts = mkOption { type = types.listOf types.anything; default = [ ]; description = "As on NixOS, mount units: not on the phone."; };
@@ -409,8 +420,6 @@ in
       (off "security.rtkit.enable" config.security.rtkit.enable "RealtimeKit is not on the phone.")
       (off "security.apparmor.enable" config.security.apparmor.enable "AppArmor is not on the phone (Android has SELinux).")
       (off "boot.kernelModules" (config.boot.kernelModules != [ ] || config.boot.extraModulePackages != [ ] || config.boot.kernelParams != [ ]) "the phone's kernel is Android's: Seraph loads no modules and sets no parameters.")
-      (off "systemd.sockets" (wanted config.systemd.sockets != [ ]) "${lib.concatStringsSep ", " (wanted config.systemd.sockets)}: socket activation is not on the phone; a module's option that runs its service without it (often socketActivation = false) does.")
-      (off "systemd.timers" (wanted config.systemd.timers != [ ]) "${lib.concatStringsSep ", " (wanted config.systemd.timers)}: timers are not on the phone yet.")
       (off "systemd.paths" (wanted config.systemd.paths != [ ]) "${lib.concatStringsSep ", " (wanted config.systemd.paths)}: path units are not on the phone.")
       (off "systemd.mounts" (config.systemd.mounts != [ ] || config.systemd.automounts != [ ]) "mount units are not on the phone.")
       (off "systemd.packages" (config.systemd.packages != [ ]) "the phone does not read packages' own unit files: give the unit in systemd.services.")

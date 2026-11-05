@@ -61,7 +61,7 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
         setRunning(runner.running)
     }
 
-    /** How a service is: running since when, failed, ... */
+    /** How a service is: running since when, failed, ...; and its timer's next run. */
     private fun line(unit: JSONObject): String {
         val state = unit.optString("state")
         val since = unit.optLong("since")
@@ -78,7 +78,8 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
             },
         )
         return (if (since > 0 && state != "stopped" && state != "not run") activity.getString(R.string.service_state_since, shown, Ui.ago(since)) else shown) +
-            (if (!unit.optBoolean("wanted", true)) activity.getString(R.string.state_not_wanted) else "")
+            (if (!unit.optBoolean("wanted", true) && !unit.has("timer")) activity.getString(R.string.state_not_wanted) else "") +
+            (unit.optLong("next").takeIf { it > 0 }?.let { activity.getString(R.string.state_next_run, Ui.date(it)) } ?: "")
     }
 
     private fun row(unit: JSONObject): View {

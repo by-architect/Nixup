@@ -2,6 +2,8 @@ package dev.seraph.manager.engine
 
 import org.json.JSONObject
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
 import kotlin.system.exitProcess
 
 /**
@@ -61,9 +63,16 @@ import kotlin.system.exitProcess
  *                                 brings a folder's files back, into it or into a new folder
  *   backup-parts <app> <snapshot> what one backup of the app has (--json)
  *   restic <arguments...>         restic itself, with the backups' repository and password
- *   units [--json]                each service of the last build (its systemd.services units), and how it is
+ *   units [--json]                each service of the last build (its systemd.services units), and how it is, and its
+ *                                 timers (systemd.timers) with their next times
  *   unit <start|stop|restart> <name>
  *                                 starts, stops or restarts one, until the next build or restart
+ *   timer-next <timer>            prints the next time a timer of the last build starts its unit (epoch seconds;
+ *                                 nothing when it has none left until the next boot), for its loop (see Timers)
+ *   timer-fire <timer>            starts a timer's unit, as its loop does at its time
+ *   calendar <expression> [--count=<n>] [--after=<epoch seconds>]
+ *                                 the next times (5) of a calendar event (OnCalendar, startAt) after now (or the
+ *                                 time given), as systemd-analyze calendar shows them, or what is wrong with it
  *   audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]
  *                                 plays raw sound from its input with Android's audio, as music (services.snapclient's
  *                                 snapclient writes it), and writes the time Android's audio takes (ms) to the file
@@ -131,10 +140,23 @@ object Main {
                         val units = list.getJSONArray("units")
                         if (units.length() == 0) Out.line("No services: the last build has none (services.*, systemd.services)")
                         for (i in 0 until units.length()) units.getJSONObject(i).let { Out.line("${it.getString("state").padEnd(10)} ${it.getString("name")}  ${it.optString("description")}") }
+                        val timers = list.getJSONArray("timers")
+                        for (i in 0 until timers.length()) timers.getJSONObject(i).let { timer ->
+                            val next = timer.optLong("next").takeIf { it > 0 }?.let { "next ${Out.date(it)}" }
+                                ?: if (timer.optBoolean("done")) "no time left until the next boot" else if (timer.optBoolean("running")) "waiting" else "not running"
+                            val last = timer.optLong("last").takeIf { it > 0 }?.let { ", last ${Out.date(it)}" }.orEmpty()
+                            Out.line("${"timer".padEnd(10)} ${timer.getString("name")}  starts ${timer.getString("unit")}: $next$last")
+                        }
                         0
                     }
                 }
                 "unit" -> Installer.locked(data) { Units(data).control(files.getOrNull(0) ?: usage(), files.getOrNull(1) ?: usage()) }
+                "timer-next" -> Timers(data).next(files.firstOrNull() ?: usage())?.let { println(it) }.let { 0 }
+                "timer-fire" -> Units(data).fire(files.firstOrNull() ?: usage())
+                "calendar" -> calendar(
+                    args.drop(1).filter { !it.startsWith("--") }.joinToString(" ").ifBlank { usage() },
+                    option(args, "count")?.toIntOrNull() ?: 5, option(args, "after")?.toLongOrNull() ?: (System.currentTimeMillis() / 1000),
+                )
                 else -> usage()
             }
         } catch (e: Stop) {
@@ -217,9 +239,29 @@ object Main {
         return 0
     }
 
+    /** The next [count] times of calendar event [expression] after [start], in the phone's time zone and in UTC, as systemd-analyze shows them. */
+    private fun calendar(expression: String, count: Int, start: Long): Int {
+        val calendar = try {
+            Timers.Calendar.parse(expression)
+        } catch (e: IllegalArgumentException) {
+            throw Stop("\"$expression\": ${e.message}", 2)
+        }
+        val zone = ZoneId.systemDefault()
+        var after = start
+        Out.line("  Original form: $expression")
+        repeat(count.coerceIn(1, 1000)) { i ->
+            val next = calendar.next(after, zone) ?: return 0.also { if (i == 0) Out.line("    Next elapse: never") }
+            val at = Instant.ofEpochSecond(next)
+            Out.line("${if (i == 0) "    Next elapse" else "           Iter. #${i + 1}"}: ${at.atZone(zone).toLocalDateTime()} ($zone)")
+            Out.line("       (in UTC): ${at.atZone(ZoneId.of("UTC")).toLocalDateTime()} UTC  $next")
+            after = next
+        }
+        return 0
+    }
+
     /** The value of --<name>=<value>, when it is given. */
     private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
 }

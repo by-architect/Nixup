@@ -31,6 +31,7 @@ let
     forgejo = "services/misc/forgejo.nix";
     gonic = "services/audio/gonic.nix";
     gotify = "services/web-apps/gotify-server.nix";
+    harmonia = "services/networking/harmonia.nix";
     i2pd = "services/networking/i2pd.nix";
     llama-cpp = "services/misc/llama-cpp.nix";
     minidlna = "services/networking/minidlna.nix";

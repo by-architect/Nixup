@@ -4,6 +4,7 @@ import android.system.Os
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.util.concurrent.TimeUnit
@@ -18,7 +19,9 @@ import java.util.concurrent.TimeUnit
  * it says is shown. Like the settings, they are planned and checked first ([plan]) and changed after ([apply]): the
  * units that left the config or changed are stopped, then the ones to start start, in order (after, before, wants,
  * requires). At boot ([start]) the units the last build left start again; when the module goes ([removeAll]) they all
- * stop. A unit's state (/var/lib) stays when it leaves the config, as on NixOS; the module's removal takes it.
+ * stop. A unit's state (/var/lib) stays when it leaves the config, as on NixOS; the module's removal takes it. Its timers
+ * (systemd.timers, startAt) start a unit at their times ([Timers], [fire]); its sockets (systemd.sockets) are opened
+ * for it and handed over as systemd hands them ([listen]).
  */
 class Units(private val data: File) {
     private val dir = File(data, "units")
@@ -39,13 +42,24 @@ class Units(private val data: File) {
     private var leaving: List<String> = emptyList()
     /** Changed units that start so only with their next start (restartIfChanged = false): their files, written now. */
     private var toRefresh: List<String> = emptyList()
+    /** Units nothing starts with the build (a timer's, or one to start by hand) that are new or changed: written, not started. */
+    private var toWrite: List<String> = emptyList()
+    private val timers = Timers(data)
+    /** The units the timers start, each with its timers: they start then, not with the build. */
+    private var timerUnits: Map<String, List<String>> = emptyMap()
 
     /** Whether the plan changes anything. */
-    val changes get() = toStop.isNotEmpty() || toStart.isNotEmpty() || leaving.isNotEmpty() || toRefresh.isNotEmpty() || legacy.exists()
+    val changes get() = toStop.isNotEmpty() || toStart.isNotEmpty() || leaving.isNotEmpty() || toRefresh.isNotEmpty() ||
+        toWrite.isNotEmpty() || timers.changes || legacy.exists()
 
-    /** [secrets]: the files of the secrets the build changes; a unit that names one runs again, as with a changed unit. */
-    fun plan(units: JSONObject?, problems: MutableList<String>, secrets: List<String> = emptyList()) {
+    /**
+     * [secrets]: the files of the secrets the build changes; a unit that names one runs again, as with a changed unit.
+     * [timerSpecs]: the profile's timers (android.timers).
+     */
+    fun plan(units: JSONObject?, problems: MutableList<String>, secrets: List<String> = emptyList(), timerSpecs: JSONObject? = null) {
         wanted = units?.let { json -> json.keys().asSequence().associateWith { json.getJSONObject(it) } } ?: emptyMap()
+        timers.plan(timerSpecs, wanted.keys, problems)
+        timerUnits = timers.unitsStarted()
         val had = applied()
         val active = active(wanted)
         for ((name, unit) in wanted) {
@@ -85,10 +99,13 @@ class Units(private val data: File) {
             start += more
         } while (more.isNotEmpty())
         toStart = order(start, wanted)
-        // A oneshot that stays active after its run (RemainAfterExit) is stopped too, by its ExecStop.
-        toStop = order((had.keys.filter { it in wanted && it !in active } + changed)
+        // A oneshot that stays active after its run (RemainAfterExit) is stopped too, by its ExecStop. A unit its timer
+        // started is left running, unless it changed.
+        toStop = order((had.keys.filter { it in wanted && it !in active && it !in timerUnits } + changed)
             .filter { supervisorPid(it) != null || remains(it, had[it]) }.distinct(), had).reversed()
+        toWrite = wanted.keys.filter { it !in active && (had[it] == null || it in edited) }
         report(had, active, changed)
+        timers.report()
     }
 
     /** Whether [unit] names one of [files] (JSON writes / as \/). */
@@ -107,6 +124,11 @@ class Units(private val data: File) {
             val once = oneshot(unit)
             val what = when {
                 name in leaving -> if (supervisorPid(name) != null) "to stop (it left the config)" else "to remove (it left the config)"
+                name !in active && name in timerUnits -> "started by its timer (${timerUnits.getValue(name).joinToString(", ")})" + when {
+                    name in toStop -> "; to stop now (changed)"
+                    !once && running(name) -> "; running"
+                    else -> ""
+                }
                 name !in active -> if (supervisorPid(name) != null) "to stop (nothing wants it now)" else "not started (nothing wants it)"
                 name in toStart && had[name] == null -> if (once) "to run" else "to start"
                 name in toStart && name in changed -> if (once) "to run again (changed)" else "to start again (changed)"
@@ -124,7 +146,7 @@ class Units(private val data: File) {
     /** Carries the plan out, with the shell of [android] (the profile's android part) as root's; the number of units that did not start. */
     fun apply(android: JSONObject? = null): Int {
         moveLegacy()
-        if (toStart.isEmpty() && toStop.isEmpty() && leaving.isEmpty() && toRefresh.isEmpty()) return 0
+        if (toStart.isEmpty() && toStop.isEmpty() && leaving.isEmpty() && toRefresh.isEmpty() && toWrite.isEmpty() && !timers.changes) return 0
         writeView()
         Etc.write(data, android)
         Tmpfiles.apply(data, android?.optJSONArray("tmpfiles"))
@@ -141,7 +163,16 @@ class Units(private val data: File) {
             File(unitDir, "spec.json").writeText(unit.toString())
             Out.line("✔ $name: changed; the change comes with its next start")
         }
-        return startAll(toStart, wanted)
+        // What nothing starts now is there for its timer, or a start by hand.
+        for (name in toWrite) {
+            val unit = wanted.getValue(name)
+            val unitDir = File(dir, name).apply { mkdirs() }
+            writeScripts(name, unit, unitDir)
+            File(unitDir, "spec.json").writeText(unit.toString())
+        }
+        val failed = startAll(toStart, wanted)
+        // The timers last, as the units they start are there now.
+        return failed + timers.apply()
     }
 
     /** At boot: the units the last build left, started again in order. */
@@ -164,6 +195,7 @@ class Units(private val data: File) {
             if (count == 0) names.joinToString(", ") else broken.joinToString(", "), quiet = true,
         )
         broken.forEach { retryLater(it) }
+        timers.start(had.keys)
         return count
     }
 
@@ -186,6 +218,7 @@ class Units(private val data: File) {
     /** The module is being removed: every unit stops, and what they kept goes with the module's data. */
     fun removeAll(): Int {
         moveLegacy()
+        timers.removeAll()
         val had = applied()
         order(had.keys, had).reversed().forEach { stop(it) }
         dir.deleteRecursively()
@@ -202,6 +235,7 @@ class Units(private val data: File) {
     fun list(): JSONObject {
         val had = applied()
         val active = active(had)
+        val started = timers.unitsStartedNow()
         val units = JSONArray()
         for (name in had.keys.sorted()) {
             val unit = had.getValue(name)
@@ -215,13 +249,48 @@ class Units(private val data: File) {
                 else -> "stopped"
             }
             val since = File(dir, if (once) "$name/status" else if (state == "waiting") "$name/waiting" else "$name/main.pid").lastModified()
-            units.put(
-                JSONObject().put("name", name).put("description", unit.optString("description"))
-                    .put("type", if (once) "oneshot" else "simple").put("state", state).put("wanted", name in active)
-                    .put("since", since).put("log", File(dir, "$name/log").path),
-            )
+            val entry = JSONObject().put("name", name).put("description", unit.optString("description"))
+                .put("type", if (once) "oneshot" else "simple").put("state", state).put("wanted", name in active)
+                .put("since", since).put("log", File(dir, "$name/log").path)
+            // Started by a timer: which, and when next.
+            started[name]?.let { names ->
+                entry.put("timer", names.joinToString(", "))
+                names.mapNotNull { timers.nextTime(it) }.minOrNull()?.let { entry.put("next", it) }
+            }
+            units.put(entry)
         }
-        return JSONObject().put("units", units)
+        return JSONObject().put("units", units).put("timers", timers.list())
+    }
+
+    /**
+     * Timer [timer]'s time (see Timers): its unit starts, as systemd's timer starts it, once a build running now has
+     * ended (it changes the units); a simple unit running already is left as it is.
+     */
+    fun fire(timer: String): Int {
+        val name = timers.spec(timer)?.optString("unit") ?: throw Stop("there is no timer $timer in the last build", 2)
+        waitForBuild()
+        val unit = applied()[name] ?: throw Stop("its unit $name is not in the last build", 2)
+        if (waiting(name) || (!oneshot(unit) && running(name))) {
+            Out.line("$name is running already")
+            return 0
+        }
+        // As at boot: the view, and Seraph's /etc with the network's DNS servers of now.
+        writeView()
+        Etc.write(data)
+        Tmpfiles.apply(data, current()?.optJSONArray("tmpfiles"))
+        return if (start(name, unit)) 0 else 1
+    }
+
+    /** Waits while a build or update runs, for an hour at most. */
+    private fun waitForBuild() {
+        val until = System.currentTimeMillis() + 3_600_000
+        while (System.currentTimeMillis() < until) {
+            val free = runCatching {
+                RandomAccessFile(File(data, "build.lock"), "rw").use { file -> file.channel.tryLock()?.also { it.release() } != null }
+            }.getOrDefault(true)
+            if (free) return
+            Thread.sleep(5000)
+        }
     }
 
     /**
@@ -608,6 +677,8 @@ class Units(private val data: File) {
         val shell = unit.optString("shell")
         val user = unit.string("user")
         val rootSteps = unit.optBoolean("rootSteps")
+        // The fd its user reads a script from: after its sockets' (see listen).
+        val fd = 3 + unit.strings("sockets").size
         var scripts = 0
         fun line(step: JSONObject, how: String, root: Boolean = false): String {
             val (ignore, wrapped) = if (step.has("script")) {
@@ -615,8 +686,8 @@ class Units(private val data: File) {
                 val file = "script-${scripts++}.sh"
                 files[file] = step.getString("script")
                 val args = step.string("args")?.let { parse(name, unit, "/ $it", arguments = true).shell(env, runtime(unit)).drop(1) }.orEmpty()
-                // A user cannot read Seraph's folders: its script comes open, as its fd 3.
-                false to if (asUser) "${setpriv(unit)} -- " + (listOf(quote(shell), "'-e'", "/dev/fd/3") + args).joinToString(" ") + " 3< ${quote(File(unitDir, file).path)}"
+                // A user cannot read Seraph's folders: its script comes open, as its fd 3 (or the first after its sockets).
+                false to if (asUser) "${setpriv(unit)} -- " + (listOf(quote(shell), "'-e'", "/dev/fd/$fd") + args).joinToString(" ") + " $fd< ${quote(File(unitDir, file).path)}"
                 else (listOf(quote(shell), "'-e'", quote(File(unitDir, file).path)) + args).joinToString(" ")
             } else {
                 val parsed = parse(name, unit, step.getString("command"))
@@ -624,7 +695,7 @@ class Units(private val data: File) {
                 parsed.ignore to if (user != null && !root && !parsed.privileged) "${setpriv(unit)} -- $words" else words
             }
             return when {
-                how == "exec" -> "exec $wrapped"
+                how == "exec" -> listen(unit, wrapped)
                 how == "condition" -> "$wrapped || { c=${'$'}?; if [ ${'$'}c -ge 1 ] && [ ${'$'}c -le 254 ]; then echo \"$name: its ExecCondition said no (${'$'}c)\" > ${quote(File(unitDir, "skipped").path)}; exit 0; fi; exit ${'$'}c; }"
                 ignore || how == "stop" -> "$wrapped || true"
                 else -> "$wrapped || exit \$?"
@@ -650,6 +721,26 @@ class Units(private val data: File) {
         return files
     }
 
+    /**
+     * The start of a simple unit's program ([wrapped]: as its user, through setpriv), and of one with sockets
+     * (systemd.sockets) first systemfd's, which opens them as root and hands them over as systemd does (as fds 3 and
+     * on, with LISTEN_FDS and LISTEN_PID): each execs the next, so the process stays the one started. A unix socket's
+     * file is made anew, readable and writable by all as systemd makes it (the program gets the unit's umask back);
+     * with StandardInput = "socket" the first socket is its input too.
+     */
+    private fun listen(unit: JSONObject, wrapped: String): String {
+        val specs = unit.strings("sockets")
+        if (specs.isEmpty()) return "exec $wrapped"
+        val prepare = specs.filter { it.startsWith("unix::") }.map { it.removePrefix("unix::") }.joinToString("") { path ->
+            "/system/bin/mkdir -p ${quote(File(path).parent ?: "/")} && { [ ! -S ${quote(path)} ] || /system/bin/rm -f ${quote(path)}; } || exit 1\n"
+        }
+        val input = if (unit.optBoolean("stdinSocket")) " <&3" else ""
+        val restore = quote("umask \"\$1\"; shift; exec \"\$@\"$input")
+        return prepare + "seraph_umask=${'$'}(umask)\numask 0111\n" +
+            "exec ${quote(unit.getString("systemfd"))} '-q' '-b' '4096' ${specs.joinToString(" ") { "'-s' ${quote(it)}" }} '--' " +
+            "/system/bin/sh -c $restore seraph-socket \"${'$'}seraph_umask\" $wrapped"
+    }
+
     /** setpriv's words for running a step as its user: its uid and gid, its groups, its ambient capabilities. */
     private fun setpriv(unit: JSONObject): String {
         val user = unit.getString("user")
@@ -669,9 +760,9 @@ class Units(private val data: File) {
 
     /**
      * What each of its scripts does first, as root in the view: its environment, its user (looked up in Seraph's
-     * /etc/passwd: HOME, USER, ...), its WorkingDirectory, UMask, Limit*, OOMScoreAdjust, BindPaths, EnvironmentFile,
-     * UnsetEnvironment and credentials (LoadCredential, SetCredential: in a folder of its own only it may read, in its
-     * view's memory).
+     * /etc/passwd: HOME, USER, ...), the shared storage for a user of Android's storage groups ([STORAGE]), BindPaths,
+     * its WorkingDirectory, UMask, Limit*, OOMScoreAdjust, EnvironmentFile, UnsetEnvironment and credentials
+     * (LoadCredential, SetCredential: in a folder of its own only it may read, in its view's memory).
      */
     private fun head(name: String, unit: JSONObject, env: Map<String, String>): String = buildString {
         append("# $name, as Seraph runs it (the config's systemd.services.$name): ${unit.optString("description")}\n")
@@ -686,18 +777,10 @@ class Units(private val data: File) {
                 append("[ \"${'$'}seraph_name\" = ${quote(group)} ] || { echo \"$name: its group $group is not in Seraph's /etc/group\" >&2; exit 1; }\n")
             }
         }
-        val workingDirectory = unit.string("workingDirectory")
-        val optional = workingDirectory?.startsWith("-") == true
-        val directory = workingDirectory?.removePrefix("-")
-        val cd = when (directory) {
-            null -> quote("/")
-            "~" -> if (user != null) "\"${'$'}HOME\"" else quote(File(data, "home").path)
-            else -> quote(directory)
-        }
-        append(if (optional) "cd $cd 2> /dev/null || cd /\n" else "cd $cd || exit 1\n")
-        if (runtime(unit)) append("set -f\n")
         // Busybox's mount (Android's toybox cannot remount a bind read-only).
-        if (unit.has("binds") || unit.has("credentials")) append("seraph_b=${quote(busybox())}\n")
+        if (unit.has("binds") || unit.has("credentials") || unit.optBoolean("storage")) append("seraph_b=${quote(busybox())}\n")
+        // The mounts first, as systemd makes them before it goes into the unit's WorkingDirectory.
+        if (unit.optBoolean("storage")) append(STORAGE)
         unit.optJSONArray("binds")?.let { binds ->
             for (i in 0 until binds.length()) {
                 val bind = binds.getJSONObject(i)
@@ -710,6 +793,16 @@ class Units(private val data: File) {
                 append("; else $missing; fi\n")
             }
         }
+        val workingDirectory = unit.string("workingDirectory")
+        val optional = workingDirectory?.startsWith("-") == true
+        val directory = workingDirectory?.removePrefix("-")
+        val cd = when (directory) {
+            null -> quote("/")
+            "~" -> if (user != null) "\"${'$'}HOME\"" else quote(File(data, "home").path)
+            else -> quote(directory)
+        }
+        append(if (optional) "cd $cd 2> /dev/null || cd /\n" else "cd $cd || exit 1\n")
+        if (runtime(unit)) append("set -f\n")
         unit.optJSONArray("environmentFiles")?.let { files ->
             append(ENVIRONMENT_FILE)
             for (i in 0 until files.length()) {
@@ -911,9 +1004,6 @@ class Units(private val data: File) {
 
     // --- The view and the loop.
 
-    private fun busybox() = BUSYBOXES.firstOrNull { File(it).canExecute() }
-        ?: throw Stop("there is no busybox (Magisk's or KernelSU's) to run the services with", 1)
-
     /** The view alone (see VIEW), for what runs in it without a build (backups). */
     private fun viewText() = VIEW.replace("@BUSYBOX@", busybox()).replace("@DATA@", data.path)
 
@@ -1103,11 +1193,27 @@ class Units(private val data: File) {
         private const val MARK = "seraph-unit:"
         private val BUSYBOXES = listOf("/data/adb/magisk/busybox", "/data/adb/ksu/bin/busybox", "/data/adb/ap/bin/busybox")
 
+        /** The root solution's busybox, which runs the services (and the timers' loops). */
+        fun busybox() = BUSYBOXES.firstOrNull { File(it).canExecute() }
+            ?: throw Stop("there is no busybox (Magisk's or KernelSU's) to run the services with", 1)
+
+        /**
+         * The shared storage in a unit's view, for a user of Android's storage groups (media_rw, sdcard_rw,
+         * external_storage: see nix/units.nix): the phone's /storage lets no user in but the apps' (it is Android's
+         * FUSE), so the view gets a /storage of its own with what Android's has, the real folders under it as Android
+         * keeps them (the phone's own storage, /data/media/0, and each SD card in /mnt/media_rw), which media_rw may use;
+         * /sdcard leads there too. As root, before the unit's own steps.
+         */
+        private val STORAGE = """
+            "${'$'}seraph_b" mount -t tmpfs -o mode=0755,nosuid,nodev seraph-storage /storage && /system/bin/mkdir -p /storage/emulated/0 /storage/self && "${'$'}seraph_b" mount --bind /data/media/0 /storage/emulated/0 && /system/bin/ln -s /storage/emulated/0 /storage/self/primary || exit 1
+            ( set +f; for c in /mnt/media_rw/*; do [ -d "${'$'}c" ] || continue; /system/bin/mkdir -p "/storage/${'$'}{c##*/}" && "${'$'}seraph_b" mount --bind "${'$'}c" "/storage/${'$'}{c##*/}"; done )
+        """.trimIndent() + "\n"
+
         /**
          * Runs a unit's script ($1) as root in Seraph's view of the phone: a root of its own, in a mount namespace of
          * its own, with Android's own folders as they are, /nix (Seraph's store), Seraph's /etc, /var and /run (the
-         * units' state, which stays), /home (the normal users' homes, Seraph's users folder) and a /tmp of its own,
-         * and Android's time zone as TZ (its offset from UTC, "<+0300>-03:00": glibc does not read Android's zones).
+         * units' state, which stays), /home (the normal users' homes, Seraph's users folder) and a /tmp of its own;
+         * Android's time zone is Seraph's /etc/localtime (see Etc), else TZ, its offset from UTC ("<+0300>-03:00").
          * Each step execs the next, so the script's own process is the one started.
          */
         private val VIEW = """
@@ -1135,7 +1241,7 @@ class Units(private val data: File) {
               done
               mkdir -p "${'$'}v/tmp"
               "${'$'}b" mount -t tmpfs -o mode=1777 tmp "${'$'}v/tmp"
-              if [ -z "${'$'}TZ" ]; then
+              if [ -z "${'$'}TZ" ] && [ ! -s "${'$'}data/etc/localtime" ]; then
                 off=${'$'}(/system/bin/date +%z 2> /dev/null)
                 case ${'$'}off in
                   [+-][0-9][0-9][0-9][0-9])
