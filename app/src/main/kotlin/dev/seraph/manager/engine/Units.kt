@@ -466,6 +466,7 @@ class Units(private val data: File) {
         val devNull = File("/dev/null")
         File(unitDir, "run.conf").writeText(runConf(unit, unitDir))
         File(unitDir, "ready").delete()
+        File(unitDir, "unready").delete()
         if (!background.isFile) writeView()
         // Below the apps on the screen (see BACKGROUND), its loop and so all it starts.
         ProcessBuilder(
@@ -474,8 +475,17 @@ class Units(private val data: File) {
         ).directory(unitDir).redirectInput(devNull).redirectOutput(devNull).redirectError(devNull).apply { unitEnvironment(environment()) }.start()
         // A forking one has started once its start has ended and its service is found; a notify one once it says so.
         if (unit.optString("type") == "forking" || unit.optBoolean("notify")) {
-            val until = System.currentTimeMillis() + 1000L * timeout(unit, "timeoutStart", 90).coerceAtMost(120)
-            while (System.currentTimeMillis() < until && !File(unitDir, "ready").isFile && supervisorPid(name) != null) Thread.sleep(300)
+            // Its loop first (its pid file comes a moment after it starts).
+            var tries = 0
+            while (supervisorPid(name) == null && tries++ < 30) Thread.sleep(100)
+            // (Longer than its loop waits, so a start that took too long is seen ended, not running.)
+            val until = System.currentTimeMillis() + 1000L * (timeout(unit, "timeoutStart", 90).coerceAtMost(120) + 15)
+            while (System.currentTimeMillis() < until && !File(unitDir, "ready").isFile && !File(unitDir, "unready").isFile && supervisorPid(name) != null) Thread.sleep(300)
+        }
+        if (File(unitDir, "unready").isFile) {
+            Out.line("✘ $name: it did not say it was ready (READY=1) in ${timeout(unit, "timeoutStart", 90).coerceAtMost(600)} s; its log: ${log.path}")
+            if (notifies(unit)) Notify.event("service", "error", "$name did not start", "It did not say it was ready", "service:$name", quiet = quietFailures)
+            return false
         }
         Thread.sleep(1500)
         // One started at its first connection: until its sockets are open and waiting.
@@ -1475,7 +1485,7 @@ class Units(private val data: File) {
                 rm -f "${'$'}unit/waiting"
               fi
               echo "${'$'}(date '+%F %T') ${'$'}name: starting" >> "${'$'}log"
-              rm -f "${'$'}unit/skipped" "${'$'}unit/ns" "${'$'}unit/watchdog-fired" "${'$'}unit/listening"
+              rm -f "${'$'}unit/skipped" "${'$'}unit/ns" "${'$'}unit/watchdog-fired" "${'$'}unit/listening" "${'$'}unit/unready"
               [ -n "${'$'}notifylog" ] && rm -f "${'$'}notifylog"
               "${'$'}b" sh "${'$'}view" "${'$'}start" >> "${'$'}log" 2>&1 < /dev/null &
               child=${'$'}!
@@ -1511,11 +1521,11 @@ class Units(private val data: File) {
                   kill -0 ${'$'}child 2> /dev/null || break
                   if [ ${'$'}i -ge ${'$'}((timeout_start * 5)) ]; then
                     echo "${'$'}(date '+%F %T') ${'$'}name: it did not say it was ready (READY=1) in ${'$'}timeout_start s: ended" >> "${'$'}log"
-                    unready=1; end; break
+                    unready=1; : > "${'$'}unit/unready"; end; break
                   fi
                   sleep 0.2; i=${'$'}((i + 1))
                 done
-                : > "${'$'}unit/ready"
+                [ -n "${'$'}unready" ] || : > "${'$'}unit/ready"
                 if [ -z "${'$'}unready" ] && [ -n "${'$'}watchdog" ]; then
                   (
                     last=${'$'}(date +%s) seen=0

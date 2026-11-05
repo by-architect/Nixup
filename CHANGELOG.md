@@ -36,6 +36,8 @@ section after the version, and its text is what the Magisk app shows as the upda
 - A module that adds `boot.kernelModules` (nginx's `tls`) builds, with a warning: the phone loads no modules.
 - Fixed: stopping a service took up to minutes on a phone with many processes (each of them was looked at with
   a command of its own); one look at all of them takes a moment now.
+- Fixed: a build did not wait for a forking service to have started before it said so (it looked before the
+  service's loop was there); a notify service that never says it is ready is told as not started.
 - Services and the jobs cron starts have the phone's time zone in Seraph's `/etc/localtime`, out of Android's
   time zone data, so summer time comes too; cron's jobs ran in UTC before.
 - `system.path` (cron's `PATH`) is made by Nix itself, without Perl.
