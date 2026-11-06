@@ -49,6 +49,8 @@ section after the version, and its text is what the Magisk app shows as the upda
 - Sockets are handed over with their names (`FileDescriptorName`, else their socket unit's, as `LISTEN_FDNAMES`), and
   a unix socket's folder is made with its `DirectoryMode`.
 - The build's messages name a user's unit where the config gives it (`home-manager.users.<name>.systemd.user...`).
+- Fixed: a specifier only known when a unit runs (its user's `%h`, `%U`, `%G`, a user's unit's `%t`) stayed empty in a
+  command's single quotes (`bash -c 'echo %t'`); it is filled in there too, as systemd fills specifiers in everywhere.
 - NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
   runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 67 Nixup has tried
   (AdGuard Home, Caddy, cron, Forgejo, Gitea, Gotify, Grafana, harmonia, Jellyfin, Navidrome, nginx, ntfy, Redis,

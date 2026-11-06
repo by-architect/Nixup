@@ -1859,11 +1859,13 @@ class Units(private val data: File) {
                 }
                 rest = rest.substring(1)
             }
+            // A specifier's value only known when the unit runs (its user's HOME, uid: ${'$'}{NAME}) is marked, so it stays
+            // the shell's in quotes too, as systemd fills specifiers in everywhere.
             val specified = buildString {
                 var i = 0
                 while (i < rest.length) {
                     if (rest[i] == '%' && i + 1 < rest.length) {
-                        append(specifier(rest[i + 1]))
+                        append(SPECIFIED_VARIABLE.replace(specifier(rest[i + 1])) { "\u0001" + it.groupValues[1] + "\u0002" })
                         i += 2
                     } else {
                         append(rest[i++])
@@ -1889,6 +1891,12 @@ class Units(private val data: File) {
                 while (i < s.length && (quote != null || !s[i].isWhitespace())) {
                     val c = s[i]
                     when {
+                        c == '\u0001' -> {
+                            val end = s.indexOf('\u0002', i)
+                            if (text.isNotEmpty()) parts += Part.Text(text.toString()).also { text.clear() }
+                            parts += Part.Variable(s.substring(i + 1, end), split = false)
+                            i = end
+                        }
                         quote == null && (c == '"' || c == '\'') -> quote = c
                         quote != null && c == quote -> quote = null
                         c == '\\' && i + 1 < s.length && quote != '\'' -> {
