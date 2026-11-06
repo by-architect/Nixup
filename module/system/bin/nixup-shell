@@ -42,7 +42,13 @@ mkdir -p "$DATA/tmp"
   # Root's shell, as the engine wrote it for the profile in place.
   echo 'if [ -x /etc/nixup/login ]; then'
   if [ $# -gt 0 ]; then
-    printf "  exec /etc/nixup/login -c 'exec \"\$0\" \"\$@\"'"
+    # The command as it is, whatever root's shell is (users.defaultUserShell: fish's -c takes no sh); a login an older
+    # engine wrote takes it through the shell's -c.
+    if grep -q -- --nixup-exec "$DATA/etc/nixup/login" 2> /dev/null; then
+      printf "  exec /etc/nixup/login --nixup-exec"
+    else
+      printf "  exec /etc/nixup/login -c 'exec \"\$0\" \"\$@\"'"
+    fi
     for word; do quoted "$word"; done
     echo
   else

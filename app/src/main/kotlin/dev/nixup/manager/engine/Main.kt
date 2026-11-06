@@ -28,6 +28,8 @@ import kotlin.system.exitProcess
  *                                 config makes are built from on the phone, or a path the config added); with --kept,
  *                                 the paths the phone keeps but fetches from nowhere (android.nix.kept: the flakes of
  *                                 Nix's registry, the config's nixpkgs among them, which a build brings)
+ *   builders <profile>            prints the folder of the ssh Nix reaches the profile's build machines with, then its
+ *                                 machines file (nix.buildMachines, with nix.distributedBuilds); nothing without them
  *   secrets <file> <folder> [--store=<root>]
  *                                 puts the secrets a build on the phone gives (<file>: each one's file or text) in
  *                                 <folder>, readable by root alone, as a PC sends them (--store: Nixup's store, for
@@ -76,7 +78,8 @@ import kotlin.system.exitProcess
  *                                 starts, stops or restarts one, until the next build or restart
  *   timer-next <timer>            prints the next time a timer of the last build starts its unit (epoch seconds;
  *                                 nothing when it has none left until the next boot), for its loop (see Timers)
- *   timer-fire <timer>            starts a timer's unit, as its loop does at its time
+ *   timer-fire <timer>            starts a timer's unit, as its loop does at its time (or runs its job: build.sh's
+ *                                 upgrade, ..., when the phone's conditions for it hold)
  *   path-fire <path unit>         starts a path unit's unit, as its loop does when its paths say so (see Paths)
  *   calendar <expression> [--count=<n>] [--after=<epoch seconds>]
  *                                 the next times (5) of a calendar event (OnCalendar, startAt) after now (or the
@@ -135,6 +138,13 @@ object Main {
                         }
                     }
                     ?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
+                // nix.buildMachines (with nix.distributedBuilds): the folder of the ssh Nix reaches them with, then Nix's
+                // machines file; nothing when the profile has none.
+                "builders" -> JSONObject(File(files.firstOrNull() ?: usage()).readText()).getJSONObject("android")
+                    .optJSONObject("builders")?.let { builders ->
+                        println(builders.getString("ssh"))
+                        print(builders.getString("machines"))
+                    }.let { 0 }
                 "updates" -> Updates(data).check()
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
                 "self-update" -> SelfUpdate(data).let { if ("--install" in args) it.install() else it.check() }
@@ -292,5 +302,5 @@ object Main {
     private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | dns-update | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | path-fire <path unit> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | builders <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | dns-update | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | path-fire <path unit> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
 }

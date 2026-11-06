@@ -11,7 +11,39 @@ section after the version, and its text is what the Magisk app shows as the upda
   `ftpProxy`, `rsyncProxy`, `allProxy`, `noProxy`): the files' lines go into the `/etc/hosts` of Nixup's
   services and shells (Android's apps keep Android's), and the proxy into every shell session, Nix's daemon and
   the phone's own builds' downloads.
+- The shells as on NixOS, with nixpkgs' own modules: `environment.shellAliases`, `shellInit`, `loginShellInit`,
+  `interactiveShellInit`, `localBinInPath`, `homeBinInPath`, `shells` and `profiles`, and `programs.bash`,
+  `programs.zsh`, `programs.fish` and `programs.xonsh` with their options and plugins (bash's completion, zsh's
+  autosuggestions and syntax highlighting, oh-my-zsh, ...). With Nix packages, `/etc/profile`, `/etc/bashrc`,
+  `/etc/zshrc`, `/etc/fish` and `/etc/set-environment` are NixOS's own, the prompt is NixOS's (with the phone's name),
+  and PATH is made of the profiles, as on NixOS: the user's own, `/etc/profiles/per-user/<user>`, root's, and
+  `/run/current-system/sw` (`system.path`), with Android's commands after them. `users.defaultUserShell` is the
+  users' shell (bash, as `programs.bash` makes it), and a user whose shell is zsh, fish or xonsh needs its
+  `programs.<shell>.enable`, as on NixOS. Each user that logs in gets a `/run/user/<uid>` (`XDG_RUNTIME_DIR`).
+  Without Nix packages the phone's shell stays Android's sh, with `environment.variables` and `extraInit`.
 
+- The system's version, as on NixOS: each generation keeps its label (`system.nixos.label`, with
+  `system.nixos.tags` and the nixpkgs version) and the config's commit (`system.configurationRevision`), which
+  the app's Generations shows; `system.copySystemConfiguration = true;` keeps a copy of the configuration.nix
+  with each generation. `nixos-version` tells them (`--revision`, `--configuration-revision`, `--json`),
+  `/etc/os-release` and `/etc/lsb-release` are in Nixup's view, and `system.build.toplevel` is the profile.
+- Scripts, as on NixOS: `system.activationScripts` run as root with each build and each start of the phone, in
+  Nixup's view, before the services start (in the order their `deps` say; a dry run runs those with
+  `supportsDryActivation`, with `NIXOS_ACTION=dry-activate`); `system.preSwitchChecks` run before a build changes
+  anything, and one that fails stops it (`NIXOS_NO_CHECK=1` leaves them out); `system.userActivationScripts` run
+  as each normal user when they change and at each start of the phone, through NixOS's `nixos-activation` unit. A script's `undo` (Nixup's own) runs once when it
+  leaves the config and when Nixup is removed, so the phone gets back what it changed. NixOS's modules that have
+  activation scripts build now.
+- The phone builds its config by itself, as NixOS's `system.autoUpgrade`: at `dates` (with `randomizedDelaySec`,
+  `fixedRandomDelay` and `persistent`) it builds again with everything at its newest (`upgrade = false`: as locked),
+  the picked config (a git clone gets its new commits first) or `flake`, with `channel` for a configuration.nix
+  alone, keeping the specialisation in use, and frees up space after (`runGarbageCollection`). Only on Wi-Fi unless
+  `android.autoUpgrade.onlyOnUnmetered = false`, only while charging with `android.autoUpgrade.onlyWhileCharging`,
+  and never on a low battery.
+- `nix.buildMachines` with `nix.distributedBuilds`, as on NixOS: a package cache.nixos.org has not got (an overlay's,
+  an unfree one) is built on those machines over ssh and sent back, where the build stopped at it before; the
+  shells' builds go to them too (`/etc/nix/machines`).
+- systemd timers' `FixedRandomDelay` works (it was taken and did nothing).
 - Seraph is now called Nixup: the app (`dev.nixup.manager`), the Magisk module (`nixup`), its data
   (`/data/adb/nixup`), `nixup-rebuild`, `nixup-play-login`, `nixup-shell`, `nixup-backup`, and the flake
   (`github:by-architect/Nixup`, `nixup.lib.nixupSystem`, `nixupConfigurations`). Installing Nixup takes a
@@ -27,8 +59,8 @@ section after the version, and its text is what the Magisk app shows as the upda
 - NixOS's `nix.*` options do what they do on NixOS: `nix.enable`, `nix.package`, `nix.settings` and `nix.extraOptions`
   (`/etc/nix/nix.conf`; flakes on, the sandbox off, as Android's kernels lack its namespaces), `nix.registry`,
   `nix.nixPath`, `nix.channel.enable`, `nix.nrBuildUsers` (builds run as `nixbld` users with uids from 400 to 999),
-  `nix.gc` and `nix.optimise` at their times. Nix's daemon runs for the other users that log in. `nix.buildMachines`,
-  `nix.distributedBuilds`, `nix.sshServe` and `nix.checkConfig` are there too, so a NixOS module that sets them builds.
+  `nix.gc` and `nix.optimise` at their times. Nix's daemon runs for the other users that log in. `nix.sshServe` and
+  `nix.checkConfig` are there too, so a NixOS module that sets them builds.
 - A shell another program starts (`nix shell`'s, tmux's) keeps its PATH and gets the same prompt: `SHELL` is the shell
   itself, as on NixOS, and `/etc/bashrc` has the prompt.
 - Free up space runs in Nixup's view, where the users' own Nix profiles are roots it keeps.

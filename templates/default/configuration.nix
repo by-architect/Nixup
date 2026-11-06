@@ -708,6 +708,7 @@
 
   environment.etc = { };                          # files in Nixup's /etc, like { "foo/foo.conf".text = "a = 1"; }
   environment.variables = { };                    # variables of every shell session, like { EDITOR = "nano"; }
+  environment.shellAliases = { };                 # aliases of every shell, like { ll = "ls -l"; } (with Nix packages, as on NixOS)
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
   networking.hosts = { };                         # names in Nixup's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
   networking.nameservers = [ ];                   # DNS servers of Nixup's services ([ ]: the network's), like [ "9.9.9.9" ]
@@ -730,7 +731,30 @@
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)
   nixpkgs.hostPlatform = "aarch64-linux";         # the phone's processor: 64-bit ARM
 
-  system.activationScripts = { };                 # scripts at each build: not on the phone yet
+  system.autoUpgrade.enable = false;              # true: builds again by itself at dates ("04:40"), on Wi-Fi, as NixOS's
+  nix.distributedBuilds = false;                  # true: nix.buildMachines build what cache.nixos.org has not got, over ssh
+
+  # Scripts, as NixOS's: each build and each start of the phone runs system.activationScripts as root (in Nixup's view,
+  # before the services start); system.preSwitchChecks run before a build changes anything (one that fails stops it);
+  # each normal user runs system.userActivationScripts. Examples (each would run on the phone, so they are comments):
+  #   system.activationScripts.stay-awake = {
+  #     text = "settings put global stay_on_while_plugged_in 3";   # what it does (bash): idempotent and fast
+  #     deps = [ "users" ];                                        # the scripts it runs after (NixOS's names too)
+  #     supportsDryActivation = false;                             # true: a dry run runs it too (NIXOS_ACTION=dry-activate)
+  #     undo = "settings put global stay_on_while_plugged_in 0";   # Nixup's own: puts it back when it leaves the config, or Nixup goes
+  #   };
+  #   system.preSwitchChecks.battery = ''[ "$(cat /sys/class/power_supply/battery/capacity)" -ge 20 ]'';   # $1: the profile, $2: switch or dry-activate
+  #   system.userActivationScripts.notes = "mkdir -p ~/notes";   # as each normal user, when it changes and at each start
+  system.activationScripts = { };                 # scripts at each build and start, as root
+  system.preSwitchChecks = { };                   # checks before a build changes anything
+  system.userActivationScripts = { };             # scripts each normal user runs
+
+  # The system's version and where it was built from, as on NixOS: the app's Generations shows each one's label and
+  # the config's commit, nixos-version tells them, and /etc/os-release has them (nix/version.nix).
+  system.stateVersion = "26.05";                  # the release of your first build: leave it there (NixOS's modules keep its defaults)
+  system.nixos.tags = [ ];                        # words before the version in each generation's label, like [ "travel" ]
+  system.configurationRevision = null;            # the config's git commit; in a flake: self.rev or self.dirtyRev or null
+  system.copySystemConfiguration = false;         # true: each generation keeps a copy of this configuration.nix (not with a flake)
 
   # Other versions of this config, built with it: switch with ⋮ → Specialisations (no new build),
   # or build.sh / nixup-rebuild --specialisation work. The phone keeps the one picked, also after

@@ -157,7 +157,7 @@ let
   check = assertion: message: { inherit assertion message; };
 in
 {
-  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./etc.nix ./tmpfiles.nix ./nixos-compat.nix ./nix.nix ./nixos.nix ./home-manager.nix ./services.nix ./syncthing.nix ./snapcast.nix ./users.nix ./terminal.nix ./openssh.nix ./adb.nix ./backup.nix ./playstore.nix ./secrets.nix ./specialisation.nix ./renamed.nix ./build.nix ];
+  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./etc.nix ./tmpfiles.nix ./nixos-compat.nix ./shells.nix ./nix.nix ./nixos.nix ./home-manager.nix ./services.nix ./syncthing.nix ./snapcast.nix ./users.nix ./terminal.nix ./openssh.nix ./adb.nix ./backup.nix ./playstore.nix ./auto-upgrade.nix ./secrets.nix ./specialisation.nix ./version.nix ./renamed.nix ./activation.nix ./build.nix ];
 
   options = {
     assertions = mkOption {

@@ -49,8 +49,8 @@
 #
 # Timers (systemd.timers, and startAt, which makes one as on NixOS) start their unit at their times:
 # OnCalendar (systemd.time(7)'s calendar events, with the phone's time zone or one of their own),
-# OnBootSec, OnStartupSec, OnActiveSec, OnUnitActiveSec, OnUnitInactiveSec, Persistent and
-# RandomizedDelaySec (Timers.kt). A phone asleep runs nothing: a time that passed while it slept
+# OnBootSec, OnStartupSec, OnActiveSec, OnUnitActiveSec, OnUnitInactiveSec, Persistent,
+# RandomizedDelaySec and FixedRandomDelay (Timers.kt). A phone asleep runs nothing: a time that passed while it slept
 # comes once it wakes, as with systemd's timers without WakeSystem.
 #
 # Sockets (systemd.sockets: listenStreams, listenDatagrams, socketConfig.ListenStream and
@@ -608,7 +608,8 @@ let
         example = { OnCalendar = "daily"; Persistent = true; };
         description = ''
           The [Timer] section of its unit: OnCalendar, OnBootSec, OnStartupSec, OnActiveSec, OnUnitActiveSec,
-          OnUnitInactiveSec, Persistent, RandomizedDelaySec and Unit (AccuracySec, WakeSystem and the like are taken).
+          OnUnitInactiveSec, Persistent, RandomizedDelaySec, FixedRandomDelay and Unit (AccuracySec, WakeSystem and the like
+          are taken).
         '';
       };
       unitConfig = mkOption {
@@ -828,6 +829,7 @@ let
       onCalendar = reset (strings (tc.OnCalendar or [ ]));
     }
     // lib.optionalAttrs (boolean (tc.Persistent or false)) { persistent = true; }
+    // lib.optionalAttrs (boolean (tc.FixedRandomDelay or false)) { fixedRandomDelay = true; }
     // lib.mapAttrs' (key: field: lib.nameValuePair field (toString (lib.last (listOf tc.${key}))))
       (lib.filterAttrs (key: _: key != "OnCalendar" && tc ? ${key}) timerKeys);
   timerProfile = lib.mapAttrs toTimer timers;

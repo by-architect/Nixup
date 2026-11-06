@@ -15,11 +15,13 @@ import java.util.TimeZone
  * users.users and the services' own ([Ids]), the phone's time zone ([writeTimeZone]), and the config's own files
  * (environment.etc). They run in a mount namespace of their own with it over /etc (see Units).
  *
- * The users' shell there (users.users, root's too) is /etc/nixup/login ([LOGIN]): the profile's shell, with
- * environment.systemPackages on PATH, started the same way for an ssh session (services.openssh), the app's terminal
- * and nixup-shell. What every session starts with ([SET_ENVIRONMENT]: PATH, a user's own packages first, the time
- * zone, environment.extraInit) /etc/profile and /etc/zshenv give a user's own shell too (users.users.<name>.shell).
- * Nix's commands are in /etc/nixup/bin ([writeNixCommands]).
+ * The users' shell there (users.users, root's too) is /etc/nixup/login ([LOGIN]): the profile's shell
+ * (users.defaultUserShell, else bash), with environment.systemPackages on PATH, started the same way for an ssh session
+ * (services.openssh), the app's terminal and nixup-shell. What every session starts with ([SET_ENVIRONMENT]: PATH, a
+ * user's own packages first, the time zone, environment.extraInit) /etc/profile and /etc/zshenv give a user's own shell
+ * too (users.users.<name>.shell). With NixOS's shells' environment (nix/shells.nix) its /etc/set-environment and
+ * shells' files are the config's, and Nixup's own then only adds what the phone has ([writeSystem]: /run/current-system,
+ * Android's commands, the phone's name, the users' /run/user). Nix's commands are in /etc/nixup/bin ([writeNixCommands]).
  */
 object Etc {
     /**
@@ -38,10 +40,12 @@ object Etc {
         // app's uid on this phone, and left out while the app is not there.
         val users = profile?.optJSONObject("users")
         val uids = Ids(data, users?.string("passwd").orEmpty(), users?.string("group").orEmpty())
-        File(etc, "passwd").writeText(users?.string("passwd")?.let { uids.fill(it) }
-            ?: "root:x:0:0:root:${home.path}:/etc/nixup/login\nsshd:x:74:74:sshd privilege separation:/var/empty:/system/bin/false\n")
+        val passwd = users?.string("passwd")?.let { uids.fill(it) }
+            ?: "root:x:0:0:root:${home.path}:/etc/nixup/login\nsshd:x:74:74:sshd privilege separation:/var/empty:/system/bin/false\n"
+        File(etc, "passwd").writeText(passwd)
         File(etc, "group").writeText(users?.string("group")?.let { uids.fill(it) } ?: "root:x:0:\nsshd:x:74:\n")
         uids.keep()
+        writeRuntimeDirs(data, passwd)
         // The home of service users and NixOS's empty folder.
         File(data, "var/empty").mkdirs()
         // /home of the view: normal users' homes.
@@ -94,9 +98,14 @@ object Etc {
             machineId.writeText(java.util.UUID.randomUUID().toString().replace("-", "") + "\n")
         }
         writeLogin(etc, home, profile?.optJSONObject("shell"))
+        writeSystem(data, profile?.optJSONObject("shell"))
+        // Android's own commands' folders, which NixOS's /etc/set-environment puts on PATH after the Nix ones
+        // (nix/shells.nix).
+        File(etc, "nixup/path").writeText(androidPath().joinToString(":") + "\n")
         writeNixCommands(etc, profile?.optJSONObject("nix"))
         // What every session runs first (environment.extraInit).
         File(etc, "nixup/environment").writeText(profile?.string("extraInit") ?: "")
+        writeVersion(etc, profile?.optJSONObject("version"))
         // The app's terminal: its font and colors (terminal.font, terminal.colors), read by the app when it opens.
         val terminal = File(etc, "nixup/terminal.json")
         val look = profile?.optJSONObject("terminal")
@@ -106,12 +115,30 @@ object Etc {
         val name = profile?.optJSONObject("system")?.optJSONObject("settings")?.optJSONObject("global")?.string("device_name")
             ?: Device.run("settings", "get", "global", "device_name").second.trim().takeIf { it.isNotEmpty() && it != "null" } ?: "phone"
         val hostName = name.replace(Regex("[^A-Za-z0-9._-]"), "-")
-        File(etc, "profile").writeText(PROFILE)
-        File(etc, "zshenv").writeText(ZSHENV)
-        // Every interactive bash's (nix shell's too), unless environment.etc has a bashrc of its own.
+        // For NixOS's prompt (NIXUP_HOSTNAME, nix/shells.nix), as the kernel's name is Android's own.
+        File(etc, "nixup/hostname").writeText("$hostName\n")
+        // Nixup's own shells' files, unless environment.etc has them (NixOS's programs.bash and programs.zsh write theirs:
+        // nix/shells.nix); bashrc for every interactive bash (nix shell's too).
         val own = profile?.optJSONArray("etc")?.let { entries -> (0 until entries.length()).map { entries.getJSONObject(it).getString("target").trim('/') } }.orEmpty()
+        if ("profile" !in own) File(etc, "profile").writeText(PROFILE)
+        if ("zshenv" !in own) File(etc, "zshenv").writeText(ZSHENV)
         if ("bashrc" !in own) File(etc, "bashrc").writeText(BASHRC.replace("@NAME@", hostName))
         return etc
+    }
+
+    /**
+     * /etc/nixup/version: the system's version and the config's revision ([version], a profile's version part:
+     * system.nixos.version, label, ..., system.configurationRevision; nix/version.nix), as "name=value" lines, which
+     * nixos-version tells and each generation keeps (module/common.sh). None for a profile without it.
+     */
+    private fun writeVersion(etc: File, version: JSONObject?) {
+        val file = File(etc, "nixup/version")
+        if (version == null) {
+            file.delete()
+            return
+        }
+        val names = listOf("version", "release", "codeName", "revision", "label", "configurationRevision")
+        file.writeText(names.joinToString("") { name -> "$name=${version.string(name).orEmpty().replace("\n", " ")}\n" })
     }
 
     /**
@@ -452,6 +479,50 @@ object Etc {
         }
     }
 
+    /**
+     * /run/current-system/sw, as on NixOS: system.path ([shell]'s system: environment.systemPackages with the shells'
+     * packages), whose bin folder NixOS's /etc/set-environment puts on PATH (nix/shells.nix); gone when the profile has
+     * none. [data]'s run is the view's /run.
+     */
+    private fun writeSystem(data: File, shell: JSONObject?) {
+        val system = shell?.string("system")
+        link(File(data, "run/current-system/sw"), system)
+        if (system == null) File(data, "run/current-system").delete()
+    }
+
+    /** [file] made a link to [target] (whole or not at all), or one there removed when [target] is null. */
+    private fun link(file: File, target: String?) {
+        if (target == null) {
+            if (Files.isSymbolicLink(file.toPath())) file.delete()
+            return
+        }
+        if (runCatching { Os.readlink(file.path) }.getOrNull() == target) return
+        val dir = file.parentFile ?: return
+        dir.mkdirs()
+        val next = File(dir, ".${file.name}.new")
+        next.delete()
+        Os.symlink(target, next.path)
+        if (!next.renameTo(file)) next.delete()
+    }
+
+    /**
+     * Each user that logs in (a shell in /etc/passwd) has a /run/user/<uid> of its own, as logind makes it on NixOS: its
+     * XDG_RUNTIME_DIR (nix/shells.nix), where tmux keeps its socket and ssh-agent its own. [data]'s run is the view's
+     * /run.
+     */
+    private fun writeRuntimeDirs(data: File, passwd: String) {
+        for (line in passwd.lineSequence()) {
+            val f = line.split(':')
+            if (f.size < 7 || f[6].isEmpty() || f[6] == "/system/bin/false") continue
+            val uid = f[2].toIntOrNull() ?: continue
+            val gid = f[3].toIntOrNull() ?: uid
+            val dir = File(data, "run/user/$uid")
+            if (!dir.isDirectory && !dir.mkdirs()) continue
+            runCatching { Os.chown(dir.path, uid, gid) }
+            runCatching { Os.chmod(dir.path, "700".toInt(8)) }
+        }
+    }
+
     /** The android part of the profile in place, if there is one. */
     private fun current(data: File): JSONObject? =
         runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull()
@@ -477,15 +548,18 @@ object Etc {
 
     private val APP = Regex("@app:([A-Za-z0-9._]+)@")
 
-    /**
-     * The profile's PATH, then the rest of Android's own (the engine's, as Android starts programs: /product/bin,
-     * /system/xbin, the APEXes, ...), where a root solution may keep su.
-     */
+    /** The profile's PATH, then the rest of Android's own ([androidPath]). */
     private fun path(profile: String): String {
         val dirs = profile.split(':')
-        val android = ANDROID_PATH + (System.getenv("PATH") ?: "").split(':')
-        return (dirs + android.filter { it.isNotEmpty() && it !in dirs }.distinct()).joinToString(":")
+        return (dirs + androidPath().filter { it !in dirs }).joinToString(":")
     }
+
+    /**
+     * Android's own PATH (the engine's, as Android starts programs: /product/bin, /system/xbin, the APEXes, ...), where a
+     * root solution may keep su.
+     */
+    private fun androidPath(): List<String> =
+        (ANDROID_PATH + (System.getenv("PATH") ?: "").split(':')).filter { it.isNotEmpty() }.distinct()
 
     /** Android's own PATH, as its init sets it (a boot script's may be shorter). */
     private val ANDROID_PATH = listOf(
@@ -521,6 +595,9 @@ object Etc {
         fi
         # environment.extraInit.
         [ -r /etc/nixup/environment ] && . /etc/nixup/environment
+        # NixOS's shells' environment (nix/shells.nix), when the config has it: environment.variables, the profiles'
+        # PATH, environment.extraInit (which has the phone's own settings and Android's commands).
+        [ -r /etc/set-environment ] && . /etc/set-environment
         return 0
     """.trimIndent() + "\n"
 
@@ -565,8 +642,13 @@ object Etc {
         # root's home; another user's is the one sshd gave it, from /etc/passwd.
         [ "${'$'}(/system/bin/id -u)" = 0 ] && export HOME=@HOME@
         # What every session starts with (PATH, the time zone, environment.extraInit), anew.
-        unset __NIXUP_SET_ENVIRONMENT_DONE
+        unset __NIXUP_SET_ENVIRONMENT_DONE __NIXOS_SET_ENVIRONMENT_DONE __ETC_PROFILE_DONE
         . /etc/nixup/set-environment
+        # nixup-shell's one command, run as it is, whatever the shell is (fish's -c takes no sh).
+        if [ "${'$'}{1:-}" = --nixup-exec ]; then
+          shift
+          exec "${'$'}@"
+        fi
         [ ${'$'}# -gt 0 ] && exec @SHELL@ "${'$'}@"
         cd "${'$'}HOME" 2> /dev/null
         exec @SHELL@ -l

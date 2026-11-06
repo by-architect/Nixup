@@ -4,10 +4,10 @@
 # They come down to the phone's own settings as those settings' defaults, so an android.settings
 # option set too wins: networking.hostName is android.settings.deviceName unless that is set.
 #
-# environment.systemPackages are Nix packages the phone fetches (nix/nixpkgs.nix); scripts
-# (system.activationScripts) have their name here already, with NixOS's type, and using it is an
-# error until they come. The services, with NixOS's names too, are in nix/units.nix and
-# nix/services.nix.
+# environment.systemPackages are Nix packages the phone fetches (nix/nixpkgs.nix). The services,
+# with NixOS's names too, are in nix/units.nix and nix/services.nix; the scripts
+# (system.activationScripts, userActivationScripts, preSwitchChecks) in nix/activation.nix; the shells'
+# environment (environment.variables, extraInit, shellAliases, ..., programs.bash, zsh, fish) in nix/shells.nix.
 { config, lib, options, ... }:
 let
   inherit (lib) mkOption types;
@@ -28,27 +28,6 @@ let
   language =
     if parts == null then null
     else lib.concatStringsSep "-" (lib.filter (p: p != null) [ (part 0) script (part 2) ]);
-
-  # As NixOS's system.activationScripts takes each script: its text, or the text with what it
-  # comes after.
-  scriptType = types.either types.str (types.submodule {
-    options = {
-      deps = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-        description = "The scripts this one runs after.";
-      };
-      text = mkOption {
-        type = types.lines;
-        description = "The script.";
-      };
-      supportsDryActivation = mkOption {
-        type = types.bool;
-        default = false;
-        description = "Whether it may run in a dry run too, changing nothing.";
-      };
-    };
-  });
 in
 {
   options = {
@@ -103,24 +82,6 @@ in
       '';
     };
 
-    environment.extraInit = mkOption {
-      type = types.lines;
-      default = "";
-      example = ''export PATH="$PATH:/data/data/com.termux/files/usr/bin"'';
-      description = ''
-        Shell commands every session in Nixup's view runs first, as NixOS's environment.extraInit: an ssh login or
-        command, the app's terminal and nixup-shell, for root and every user (plain sh).
-      '';
-    };
-
-    system.activationScripts = mkOption {
-      type = types.attrsOf scriptType;
-      default = { };
-      description = ''
-        Scripts each build runs as root, as NixOS's system.activationScripts. Not on the phone yet:
-        they come in a later step, and until then setting it stops the build.
-      '';
-    };
   };
 
   config = {
@@ -134,10 +95,6 @@ in
       {
         assertion = locale == null || noLanguage || parts != null;
         message = "i18n.defaultLocale: \"${toString locale}\" is not a locale like \"tr_TR.UTF-8\" (or set android.settings.language, like \"tr-TR\").";
-      }
-      {
-        assertion = config.system.activationScripts == { };
-        message = "system.activationScripts: scripts are not on the phone yet; they come in a later step.";
       }
     ];
 

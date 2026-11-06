@@ -427,6 +427,17 @@ object Device {
         return last.mapValues { (_, value) -> Use(value.first, value.second) }
     }
 
+    /** The battery's level, in percent. */
+    fun batteryLevel(): Int? = Regex("""level: (\d+)""").find(run("dumpsys", "battery").second)?.groupValues?.get(1)?.toIntOrNull()
+
+    /** Whether the network Android uses now is unmetered (Wi-Fi, as a rule; not mobile data). */
+    fun unmetered(): Boolean = try {
+        val connectivity = context?.getSystemService(ConnectivityManager::class.java)
+        connectivity?.getNetworkCapabilities(connectivity.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+    } catch (e: Throwable) {
+        false
+    }
+
     /** Whether the phone is charging (or full, on a charger). */
     fun charging(): Boolean = Regex("""status: (\d+)""").find(run("dumpsys", "battery").second)?.groupValues?.get(1) in setOf("2", "5")
 

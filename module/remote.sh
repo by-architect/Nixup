@@ -51,6 +51,8 @@ at_exit 'rm -rf "$IN"'
 GEN_SOURCE=$(head -n 1 "$IN/source" 2> /dev/null)
 GEN_BUILT_ON=$(head -n 1 "$IN/built-on" 2> /dev/null)
 [ -f "$IN/flake.lock" ] && GEN_LOCK=$IN/flake.lock
+# The configuration.nix it was built from (system.copySystemConfiguration), for the generation.
+[ -f "$IN/configuration.nix" ] && GEN_CONFIG=$IN/configuration.nix
 [ -n "$GEN_SOURCE" ] || GEN_SOURCE="a build on ${GEN_BUILT_ON:-a PC}"
 run_open build "Build from ${GEN_BUILT_ON:-a PC}"
 # What was sent stays until it is applied: a restart in the middle applies it after (resume.sh).
