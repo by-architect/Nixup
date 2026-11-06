@@ -1,0 +1,304 @@
+#!/usr/bin/env bash
+# nixup-rebuild: builds a phone's Nixup config on this machine and makes the phone match it, as
+# nixos-rebuild --target-host does for NixOS. Nix runs here, not on the phone, so the config can be
+# a flake with private inputs and secrets the phone never fetches. The phone brings the indexes of
+# the config's repositories up to date first (the package names come from them), then applies the
+# profile built here, with the config's secrets (android.secrets) sent along.
+#
+#   nixup-rebuild switch        [options]   build it here, then apply it on the phone
+#   nixup-rebuild dry-activate  [options]   build it here, and show what the phone would change
+#   nixup-rebuild build         [options]   build it here into ./result.json; the phone only lends its
+#                                            indexes
+# Options:
+#   --flake <flake>[#<name>]   the config as a flake (default: the flake in this folder, when there is one),
+#                              its nixupConfigurations.<name>; without #<name>, the one named after the
+#                              phone (its device name), or the only one
+#   --file <configuration.nix> a configuration.nix built alone (default: ./configuration.nix, when there is
+#                              no flake.nix); its nixpkgs (lib and packages) comes from NIX_PATH
+#   --target-host <phone>      adb (the phone adb sees, the default), adb:<serial>, or [user@]host for ssh
+#                              (whose user can run su on the phone: root, or a user of Nixup's own app,
+#                              users.users.<name>.androidApp = "dev.nixup.manager")
+#   --specialisation <name>    apply the config's specialisation <name> (specialisation.<name>) instead of the
+#                              config itself, as nixos-rebuild --specialisation; the phone keeps it until a build
+#                              picks another (it can switch between them later without a PC: build.sh again
+#                              --specialisation <name>, or the app's Specialisations)
+#   --upgrade                  a flake's inputs at their newest first (nix flake update, for a flake in a
+#                              folder here), and the indexes and releases fetched again
+#   --override-input <input> <flake>
+#                              a flake's input from elsewhere for this build, as nixos-rebuild takes it (like
+#                              --override-input nixup path:../Nixup, for Nixup's own working copy)
+#   --show-trace               Nix's whole trace when the config has an error
+# Needs nix (with flakes), adb or ssh, and the Nixup module on the phone.
+set -euo pipefail
+# What it writes here (a secret given as text among it) is for its user alone.
+umask 077
+
+usage() { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; }
+die() { echo "nixup-rebuild: $*" >&2; exit 1; }
+say() { echo "$*" >&2; }
+
+# Nixup's own files (nix/), next to this script's folder: in its repository, its flake's copy, or the
+# package (pkgs.nixup-rebuild).
+nixup_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+action="${1:-}"
+[[ $# -gt 0 ]] && shift
+case $action in
+  switch | dry-activate | build) ;;
+  "" | -h | --help | help) usage; exit 0 ;;
+  *) die "no such action: $action (switch, dry-activate or build; --help says more)" ;;
+esac
+flake="" file="" target="adb" upgrade=0 trace=() overrides=() specialisation=""
+while (($#)); do
+  case $1 in
+    --flake) [[ $# -ge 2 ]] || die "--flake needs a flake"; flake=$2; shift 2 ;;
+    --flake=*) flake=${1#--flake=}; shift ;;
+    --file) [[ $# -ge 2 ]] || die "--file needs a configuration.nix"; file=$2; shift 2 ;;
+    --file=*) file=${1#--file=}; shift ;;
+    --target-host) [[ $# -ge 2 ]] || die "--target-host needs a phone"; target=$2; shift 2 ;;
+    --target-host=*) target=${1#--target-host=}; shift ;;
+    --specialisation) [[ $# -ge 2 ]] || die "--specialisation needs a name"; specialisation=$2; shift 2 ;;
+    --specialisation=*) specialisation=${1#--specialisation=}; shift ;;
+    --upgrade) upgrade=1; shift ;;
+    --override-input) [[ $# -ge 3 ]] || die "--override-input needs an input and a flake"; overrides+=(--override-input "$2" "$3"); shift 3 ;;
+    --show-trace) trace=(--show-trace); shift ;;
+    -h | --help) usage; exit 0 ;;
+    *) die "no such option: $1 (--help says which there are)" ;;
+  esac
+done
+if [[ -z $flake && -z $file ]]; then
+  if [[ -f flake.nix ]]; then flake=.
+  elif [[ -f configuration.nix ]]; then file=configuration.nix
+  else die "there is no flake.nix or configuration.nix here: give --flake or --file"
+  fi
+fi
+[[ -z $flake || -z $file ]] || die "give --flake or --file, not both"
+[[ -z $file || ${#overrides[@]} -eq 0 ]] || die "--override-input is for a flake (--flake)"
+[[ -z $specialisation || $specialisation =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "--specialisation: \"$specialisation\" is not a specialisation's name (letters, digits and _ . -)"
+command -v nix > /dev/null || die "there is no nix here"
+
+# --- The phone: through adb, or ssh.
+serial="" host=""
+case $target in
+  adb)
+    # The phones adb sees; one phone seen several ways (USB, and Wi-Fi) is one phone, taken by USB.
+    mapfile -t seen < <(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
+    ((${#seen[@]})) || die "adb sees no phone: connect it (USB debugging on), or give --target-host"
+    declare -A phones=()
+    for s in "${seen[@]}"; do
+      id="$(adb -s "$s" shell getprop ro.serialno < /dev/null 2> /dev/null | tr -d '\r')"
+      id=${id:-$s}
+      [[ -n ${phones[$id]:-} && ${phones[$id]} != *:* ]] || phones[$id]=$s
+    done
+    ((${#phones[@]} == 1)) || die "adb sees ${#phones[@]} phones (${seen[*]}): pick one with --target-host adb:<serial>"
+    serial="${phones[*]}" ;;
+  adb:*) serial=${target#adb:} ;;
+  *) host=$target ;;
+esac
+
+# A word for the phone's shell, quoted.
+q() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
+# Runs a command as root on the phone: what it says comes here, and so does its exit status.
+as_root() {
+  if [[ -n $serial ]]; then adb -s "$serial" shell -T "su -c $(q "$1")" < /dev/null
+  else ssh -o BatchMode=yes "$host" "su -c $(q "$1")" < /dev/null
+  fi
+}
+# Its output as it is, for files (tar).
+from_root() {
+  if [[ -n $serial ]]; then adb -s "$serial" exec-out "su -c $(q "$1")" < /dev/null
+  else ssh -o BatchMode=yes "$host" "su -c $(q "$1")" < /dev/null
+  fi
+}
+# A file from here into a file on the phone that root alone can read (it waits until it is all there).
+send() {
+  local command="umask 077; cat > $(q "$2")"
+  if [[ -n $serial ]]; then adb -s "$serial" shell -T "su -c $(q "$command")" < "$1"
+  else ssh -o BatchMode=yes "$host" "su -c $(q "$command")" < "$1"
+  fi
+}
+
+by=adb
+[[ -n $host ]] && by=ssh
+incoming=/data/adb/nixup/incoming
+# The newest module: the update waiting for a restart, else the running one.
+module='d=/data/adb/modules_update/nixup; [ -f $d/remote.sh ] || d=/data/adb/modules/nixup; [ -f $d/remote.sh ] || exit 3; '
+status=0
+as_root "${module}id -u" > /dev/null || status=$?
+case $status in
+  0) ;;
+  3) die "the phone has no Nixup module that builds from a PC (remote.sh): install the newest one" ;;
+  *) die "no root on the phone through $by: let it use su (Magisk: Superuser)" ;;
+esac
+phone_name="$(as_root "settings get global device_name" | tr -d '\r')"
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# --- The config, evaluated here: a flake's nixupConfigurations.<name>, or a configuration.nix alone.
+nixx() { nix --extra-experimental-features 'nix-command flakes' "$@" "${trace[@]}"; }
+if [[ -n $flake ]]; then
+  ref=${flake%%#*} name=""
+  [[ $flake == *#* ]] && name=${flake#*#}
+  if ((upgrade)); then
+    case $ref in
+      . | ./* | ../* | /* | path:* | git+file:*) say "== Updating the flake's inputs (flake.lock)"; nixx flake update --flake "$ref" "${overrides[@]}" ;;
+      *) say "(--upgrade: $ref is not a folder here, so its flake.lock stays as its repository has it)" ;;
+    esac
+  fi
+  # seraphConfigurations in a flake made when Nixup was called Seraph, which builds as it is.
+  configs=nixupConfigurations
+  if ! nixx eval "${overrides[@]}" "$ref#nixupConfigurations" --apply 'c: true' > /dev/null 2>&1 \
+    && nixx eval "${overrides[@]}" "$ref#seraphConfigurations" --apply 'c: true' > /dev/null 2>&1; then
+    configs=seraphConfigurations
+  fi
+  if [[ -z $name ]]; then
+    listed="$(nixx eval "${overrides[@]}" --raw "$ref#$configs" --apply 'c: builtins.concatStringsSep "\n" (builtins.attrNames c)')" \
+      || die "$ref has no $configs (Nix says why above)"
+    mapfile -t names < <(printf '%s\n' "$listed" | grep .)
+    for n in "${names[@]}"; do [[ $n == "$phone_name" ]] && name=$n; done
+    if [[ -z $name ]]; then
+      ((${#names[@]} == 1)) || die "$ref has ${#names[@]} $configs (${names[*]}), and none is named after the phone ($phone_name): give --flake '$ref#<name>'"
+      name=${names[0]}
+    fi
+  fi
+  built="$ref#$configs.\"$name\".config.system.build"
+  # SERAPH_REPOS too, for a flake.lock that still pins Nixup from when it was called Seraph.
+  evaluate() { NIXUP_REPOS="$work/repos" SERAPH_REPOS="$work/repos" nixx eval "${overrides[@]}" --impure "$@" "$built.$what"; }
+  what_built="$ref#$name"
+else
+  [[ -f $file ]] || die "there is no $file"
+  file="$(readlink -f "$file")"
+  nixpkgs=()
+  nix-instantiate --find-file nixpkgs > /dev/null 2>&1 || nixpkgs=(-I nixpkgs=flake:nixpkgs)
+  evaluate() {
+    nixx eval "${nixpkgs[@]}" --impure "$@" --expr \
+      "(import (/. + \"$nixup_dir/nix/eval.nix\") { lib = import <nixpkgs/lib>; nixpkgs = <nixpkgs>; modules = [ (/. + \"$file\") ]; reposDir = \"$work/repos\"; }).config.system.build.$what"
+  }
+  what_built="$file"
+fi
+mkdir -p "$work/repos"
+say "== Config: $what_built (for ${phone_name:-the phone}, through $by)"
+
+# The repositories first (they need no package names), whose indexes the phone brings up to date; their
+# package names come back here.
+what=repos evaluate --json > "$work/repos.json" || die "the config did not build (Nix says why above); nothing was changed"
+as_root "rm -rf $incoming && mkdir -p $incoming && chmod 700 $incoming" || die "could not make $incoming on the phone"
+send "$work/repos.json" "$incoming/repos.json" || die "could not send the repositories to the phone"
+index_mode=""
+((upgrade)) && index_mode=update
+as_root "${module}sh \$d/remote.sh $by index $index_mode" || die "the phone could not bring the indexes up to date (see above)"
+from_root 'cd /data/adb/nixup/repos && set -- */tree.json && [ -f "$1" ] && tar -cf - "$@"' | tar -C "$work/repos" -xf - 2> /dev/null || true
+
+# The profile, built here with those names; and the secrets' files, by name.
+say "== Evaluating $what_built"
+what=profile evaluate --json > "$work/profile.json" || die "the config did not build (Nix says why above); nothing was changed"
+# Its specialisations, by name; the one asked for must be among them.
+specialisations="$(nixx eval --raw --impure --expr \
+  "builtins.concatStringsSep \" \" (builtins.attrNames ((builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json"))).specialisation or { }))")" \
+  || die "the built profile could not be read (Nix says why above)"
+if [[ -n $specialisation && " $specialisations " != *" $specialisation "* ]]; then
+  die "the config has no specialisation named $specialisation (its specialisations: ${specialisations:-none}); nothing was changed"
+fi
+what=secrets evaluate --raw --apply 's: builtins.concatStringsSep "\n" (map (n: n + "\t" + (if s.${n}.text then "text\t" else if s.${n}.file != null then "file\t" + s.${n}.file else "none\t")) (builtins.attrNames s))' \
+  > "$work/secrets.txt" || die "the config's secrets could not be read (Nix says why above)"
+
+# The small files the config makes (a service's settings file, a script) are derivations
+# cache.nixos.org has not got, which the phone builds: theirs go along, with all they need
+# (the derivations they are made with) and the files the config put in the store itself, as
+# nix-store --export writes them. So do the flakes Nix's registry names (the config's nixpkgs,
+# for nix shell nixpkgs#… on the phone), which no cache has either, when the phone has not got
+# them yet: it keeps them. Compressed, when the phone's module takes them so. The specialisations' too,
+# so the phone can switch to one without a PC.
+ship_paths() {
+  local list=() drvs=() sources=() build=() kept=() item
+  mapfile -t list < <(nixx eval --raw --impure --expr \
+    "let p = builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json")); in
+      builtins.concatStringsSep \"\\n\" (builtins.concatMap (part: part.android.derivations or [ ]) ([ p ] ++ builtins.attrValues (p.specialisation or { })))" | sort -u)
+  for item in "${list[@]}"; do
+    case $item in
+      *.drv^*) drvs+=("$item") ;;
+      /nix/store/*) sources+=("$item") ;;
+    esac
+  done
+  # What it would have to build: those the cache has not.
+  if ((${#drvs[@]})); then
+    mapfile -t build < <(nixx build --dry-run --no-link "${drvs[@]}" 2>&1 | sed -n '/will be built:$/,/^[^ ]/s/^ *\(\/nix\/store\/[^ ]*\.drv\)$/\1/p')
+  fi
+  mapfile -t kept < <(nixx eval --raw --impure --expr \
+    "let nix = (builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json"))).android.nix or null; in builtins.concatStringsSep \"\\n\" (if nix == null then [ ] else nix.kept or [ ])")
+  for item in "${kept[@]}"; do
+    [[ $item == /nix/store/* ]] || continue
+    case "$(as_root "[ -e /data/adb/nixup/nix$item ] && echo here || echo missing" | tr -d '\r')" in
+      here) continue ;;
+      missing) ;;
+      *) die "could not ask the phone whether it has $item (is it still connected?)" ;;
+    esac
+    say "== The phone has not got $item (Nix's registry names it: the config's nixpkgs): it goes along, once"
+    sources+=("$item")
+  done
+  ((${#build[@]} + ${#sources[@]})) || return 0
+  say "== Files the config makes, for the phone to build: ${#build[@]}"
+  if as_root "${module}grep -q paths.nar.gz \$d/remote.sh"; then
+    nix-store --export $(nix-store --query --requisites "${build[@]}" "${sources[@]}") | gzip > "$work/paths.nar.gz"
+  else
+    nix-store --export $(nix-store --query --requisites "${build[@]}" "${sources[@]}") > "$work/paths.nar"
+  fi
+}
+
+if [[ $action == build ]]; then
+  as_root "rm -rf $incoming" || true
+  cp "$work/profile.json" result.json
+  say "Built: $(pwd)/result.json (nothing went to the phone)"
+  exit 0
+fi
+ship_paths || die "the files the config makes could not be gathered (Nix says why above); nothing was changed"
+
+# What it was built from, for the phone's generation: the flake as Nix resolved it, at its commit, with its lock.
+built_on="$(hostname 2> /dev/null || uname -n)"
+printf '%s\n' "$built_on" > "$work/built-on"
+if [[ -n $flake ]] && nixx flake metadata "${overrides[@]}" --json "$ref" > "$work/metadata.json" 2> /dev/null; then
+  metadata() { nixx eval --raw --impure --expr "let m = builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/metadata.json")); in $1"; }
+  url="$(metadata 'm.resolvedUrl or m.originalUrl or ""' 2> /dev/null || true)"
+  revision="$(metadata 'm.revision or ""' 2> /dev/null || true)"
+  dirty="$(metadata 'm.dirtyRevision or ""' 2> /dev/null || true)"
+  source="${url:-$ref}#$name"
+  if [[ -n $revision ]]; then source+=" (commit $revision)"
+  elif [[ -n $dirty ]]; then source+=" (commit ${dirty%-dirty}, with changes not committed)"
+  fi
+  metadata 'builtins.toJSON m.locks' > "$work/flake.lock" 2> /dev/null || rm -f "$work/flake.lock"
+else
+  source="$what_built"
+fi
+printf '%s\n' "$source" > "$work/source"
+
+say "== Sending it to the phone"
+for part in profile.json source built-on flake.lock paths.nar paths.nar.gz; do
+  [[ -f $work/$part ]] || continue
+  send "$work/$part" "$incoming/$part" || die "could not send $part to the phone"
+done
+as_root "mkdir -p $incoming/secrets && chmod 700 $incoming/secrets" || die "could not make $incoming/secrets on the phone"
+# (Nix's --raw ends the last line with no newline, which read would leave out.)
+while IFS=$'\t' read -r secret kind path || [[ -n $secret ]]; do
+  [[ -n $secret ]] || continue
+  case $kind in
+    file) [[ -r $path ]] || die "android.secrets.$secret: there is no $path here to send (nothing was changed)" ;;
+    text)
+      # Its text, into a file of this run's own (readable by its user alone), sent like a file.
+      path="$work/secret-$secret"
+      what="secretTexts.\"$secret\"" evaluate --raw > "$path" || die "android.secrets.$secret: its text could not be read (Nix says why above)" ;;
+    *)
+      say "Secret $secret: not sent (it has no file or text: the phone must have it already)"
+      continue ;;
+  esac
+  send "$path" "$incoming/secrets/$secret" || die "could not send the secret $secret to the phone"
+  say "Secret $secret: sent"
+done < "$work/secrets.txt"
+
+case $action in
+  dry-activate) mode=dry ;;
+  *) if ((upgrade)); then mode=update; else mode=switch; fi ;;
+esac
+status=0
+as_root "${module}sh \$d/remote.sh $by $mode${specialisation:+ --specialisation $specialisation}" || status=$?
+exit $status

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Seraph's icon: its wings and flame (drawable/ic_launcher_foreground), on night blue; in one color where the launcher themes icons. -->
+<!-- Nixup's icon: its wings and flame (drawable/ic_launcher_foreground), on night blue; in one color where the launcher themes icons. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />

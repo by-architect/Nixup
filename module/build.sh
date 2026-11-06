@@ -14,30 +14,55 @@
 # The config's Nix packages (its services' programs, environment.systemPackages) are
 # fetched from cache.nixos.org before anything changes (fetch_packages in common.sh).
 #   again    the last profile applied again as it is, nothing evaluated: after a build
-#            on a PC (seraph-rebuild), whose config the phone may not have
+#            on a PC (nixup-rebuild), whose config the phone may not have
 #   gc       frees up space, as nix-collect-garbage: the Nix packages no root keeps go (the last
-#            build's packages, nixpkgs and git stay; an older generation fetches its own again)
-#   optimise makes Seraph's store smaller, as nix-store --optimise: files that are the same, kept
-#            once (nix.optimise's timer)
-# switch and update take these too (system.autoUpgrade's timer gives them):
-#   --source=<config>   another config than the one picked, for this build (a flake's address)
-#   --channel=<url>     the nixexprs.tar.xz a configuration.nix alone gets its nixpkgs from
-#   --pull              a picked config in a git clone (the app's Git) gets its repository's new
-#                       commits first (git.sh pull)
-#   --gc                once the build has worked, as gc
+#            build's packages, nixpkgs and git stay, and what the users installed with nix profile
+#            or nix-env; an older generation fetches its own again)
 #   generation <n> [dry]
 #            generation n's profile applied again, nothing evaluated, as nix-env
 #            --switch-generation and nixos-rebuild --rollback go back to one: its settings,
 #            apps (at their newest versions) and services; it becomes the newest generation
 #            (dry: only says what would change)
+# and, after any of switch, dry, update, again and generation:
+#   --specialisation <name>
+#            applies the build's specialisation <name> (nix/specialisation.nix) instead of the
+#            config itself, as nixos-rebuild --specialisation; the phone keeps it, across
+#            restarts too, until a build picks another. Without it, switch, dry and update apply
+#            the config itself, and again and generation the specialisation they had
+#   --no-specialisation
+#            the config itself, for again and generation
+# switch and update take these too (system.autoUpgrade's timer gives them; its build keeps the
+# specialisation in use, unless one is asked for):
+#   --source=<config>   another config than the one picked, for this build (a flake's address)
+#   --channel=<url>     the nixexprs.tar.xz a configuration.nix alone gets its nixpkgs from
+#   --pull              a picked config in a git clone (the app's Git) gets its repository's new
+#                       commits first (git.sh pull)
+#   --gc                once the build has worked, as gc
 # The config is what the app's Config picked (config_source in common.sh): a
 # configuration.nix, built alone; a flake.nix, whose folder is the flake (as
 # nixos-rebuild --flake reads /etc/nixos); or a flake's address, like github:owner/repo,
-# fetched. Seraph keeps no config folder of its own.
+# fetched. Nixup keeps no config folder of its own.
 MODDIR=${0%/*}
+# The specialisation asked for (--specialisation <name>, --no-specialisation), wherever it is among the arguments; the
+# others, plain words, stay in their order.
+SPECIALISATION= SPECIALISATION_GIVEN= SPECIALISATION_ARGS= rest=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --specialisation) SPECIALISATION=$2 SPECIALISATION_GIVEN=1; shift; [ $# -gt 0 ] && shift ;;
+    --specialisation=*) SPECIALISATION=${1#*=} SPECIALISATION_GIVEN=1; shift ;;
+    --no-specialisation) SPECIALISATION= SPECIALISATION_GIVEN=1; shift ;;
+    *) rest="$rest $1"; shift ;;
+  esac
+done
+set -- $rest
 BY=${1:-manual}
 MODE=${2:-switch}
 . "$MODDIR/common.sh"
+case "$SPECIALISATION" in
+  *[!A-Za-z0-9_.-]* | [!A-Za-z0-9]*) fail "--specialisation: \"$SPECIALISATION\" is not a specialisation's name (letters, digits and _ . -)" ;;
+esac
+[ -n "$SPECIALISATION_GIVEN" ] && SPECIALISATION_ARGS=${SPECIALISATION:+--specialisation $SPECIALISATION}
+[ -n "$SPECIALISATION_GIVEN" ] && [ -z "$SPECIALISATION" ] && SPECIALISATION_ARGS=--no-specialisation
 
 # switch's and update's options (see above), kept for a run picked up after a restart (resumable).
 OPTIONS= PULL= THEN_GC=
@@ -46,15 +71,21 @@ case "$MODE" in
     if [ $# -ge 2 ]; then shift 2; else set --; fi
     for option; do
       case "$option" in
-        --source=*) SERAPH_SOURCE=${option#--source=} ;;
-        --channel=*) SERAPH_CHANNEL=${option#--channel=} ;;
+        --source=*) NIXUP_SOURCE=${option#--source=} ;;
+        --channel=*) NIXUP_CHANNEL=${option#--channel=} ;;
         --pull) PULL=1 ;;
         --gc) THEN_GC=1 ;;
         *) fail "build.sh $MODE: no such option: $option (--source=, --channel=, --pull, --gc)" ;;
       esac
       OPTIONS="$OPTIONS $option"
     done
-    export SERAPH_SOURCE SERAPH_CHANNEL ;;
+    export NIXUP_SOURCE NIXUP_CHANNEL
+    # An automatic upgrade (system.autoUpgrade) keeps the specialisation in use, as again does: a phone put in
+    # another mode by hand stays in it. A run picked up after a restart has it among its arguments already.
+    if [ -n "$OPTIONS" ] && [ "$BY" = timer ] && [ -z "$SPECIALISATION_GIVEN" ] && [ -s "$SPECIALISATION_IN_USE" ]; then
+      SPECIALISATION=$(head -n 1 "$SPECIALISATION_IN_USE") SPECIALISATION_GIVEN=1
+      SPECIALISATION_ARGS="--specialisation $SPECIALISATION"
+    fi ;;
 esac
 
 # The run: its log, and what the app is told (see run_open in common.sh).
@@ -72,7 +103,6 @@ case "$MODE" in
     run_open build "Generation $3"
     if [ "$4" = dry ]; then event build start "Trying generation $3"; else event build start "Going back to generation $3"; fi ;;
   gc) run_open build "Freeing up space"; event build start "Freeing up space" ;;
-  optimise) run_open build "Making the store smaller"; event build start "Making Seraph's store smaller (nix.optimise)" ;;
 esac
 # The profile it builds, its own (a dry run next to a build does not touch the build's), until
 # switch_to makes it the phone's.
@@ -80,9 +110,9 @@ NEW=$PROFILE.new-$$
 at_exit 'rm -f "$NEW"'
 # A restart (or a kill) in the middle: it starts again after (see resume.sh).
 case "$MODE" in
-  switch | update) resumable build build.sh "$MODE" $OPTIONS ;;
-  again) resumable build build.sh "$MODE" ;;
-  generation) resumable build build.sh generation "$3" ${4:+"$4"} ;;
+  switch | update) resumable build build.sh "$MODE" $OPTIONS $SPECIALISATION_ARGS ;;
+  again) resumable build build.sh "$MODE" $SPECIALISATION_ARGS ;;
+  generation) resumable build build.sh generation "$3" ${4:+"$4"} $SPECIALISATION_ARGS ;;
 esac
 
 case "$MODE" in
@@ -90,7 +120,9 @@ case "$MODE" in
   again)
     [ -f "$PROFILE" ] || fail "there is no build to apply again"
     log "== The last build again"
-    cp "$PROFILE" "$NEW"
+    # The whole of it (with its specialisations), and the specialisation in use unless another is asked for.
+    if [ -f "$SYSTEM" ]; then cp "$SYSTEM" "$NEW"; else cp "$PROFILE" "$NEW"; fi
+    [ -n "$SPECIALISATION_GIVEN" ] || SPECIALISATION=$(head -n 1 "$SPECIALISATION_IN_USE" 2> /dev/null)
     switch_to "$NEW" switch
     exit 0 ;;
   generation)
@@ -106,47 +138,41 @@ case "$MODE" in
     GEN_LOCK=
     [ -f "$g/flake.lock" ] && GEN_LOCK=$g/flake.lock
     [ -n "$GEN_SOURCE" ] || GEN_SOURCE="generation $n"
+    # The specialisation it had, unless another is asked for.
+    [ -n "$SPECIALISATION_GIVEN" ] || SPECIALISATION=$(head -n 1 "$g/specialisation" 2> /dev/null)
     cp "$g/profile.json" "$NEW"
     switch_to "$NEW" "$how"
     exit 0 ;;
   gc)
     # As nix-collect-garbage: what no root keeps goes (the last build's packages, nixpkgs and git stay).
-    [ -d "$DATA/nix/nix/store" ] || { log "Seraph's store is empty: nothing to free"; run_end info "Nothing to free up" "Seraph's store is empty"; exit 0; }
+    [ -d "$DATA/nix/nix/store" ] || { log "Nixup's store is empty: nothing to free"; run_end info "Nothing to free up" "Nixup's store is empty"; exit 0; }
     nix_env
     before=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
     log "== Freeing up space: the Nix packages the last build does not use"
-    nix_store store gc || fail "Nix could not free up space (it says why above)"
+    # In Nixup's view, as its shells see the store: there the users' own profiles (nix profile, in
+    # their /home) are roots, which Nix would take for links to nothing outside of it, and remove.
+    nix_view nix store gc || fail "Nix could not free up space (it says why above)"
     after=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
     freed=$(( (${before:-0} - ${after:-0}) / 1024 ))
-    log "Freed $freed MB; Seraph's store has $(( ${after:-0} / 1024 )) MB"
-    run_end ok "Freed up $freed MB" "Seraph's store has $(( ${after:-0} / 1024 )) MB left"
+    log "Freed $freed MB; Nixup's store has $(( ${after:-0} / 1024 )) MB"
+    run_end ok "Freed up $freed MB" "Nixup's store has $(( ${after:-0} / 1024 )) MB left"
     exit 0 ;;
-  optimise)
-    # As nix-store --optimise: files that are the same, kept once (hard links), at the lowest priority.
-    [ -d "$DATA/nix/nix/store" ] || { log "Seraph's store is empty: nothing to make smaller"; run_end info "Nothing to make smaller" "Seraph's store is empty"; exit 0; }
-    nix_env
-    before=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
-    log "== Making the store smaller: files that are the same, kept once"
-    nix_store store optimise || fail "Nix could not make the store smaller (it says why above)"
-    after=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
-    saved=$(( (${before:-0} - ${after:-0}) / 1024 ))
-    log "Saved $saved MB; Seraph's store has $(( ${after:-0} / 1024 )) MB"
-    run_end ok "Saved $saved MB" "Seraph's store has $(( ${after:-0} / 1024 )) MB"
-    exit 0 ;;
-  *) fail "build.sh: no such thing to do: $MODE (switch, dry, update, again, generation, gc, optimise)" ;;
+  *) fail "build.sh: no such thing to do: $MODE (switch, dry, update, again, generation, gc)" ;;
 esac
 
 # --pull: a picked config in a git clone gets its repository's new commits first (as the app's Pull and build).
-if [ -n "$PULL" ] && [ -z "$SERAPH_SOURCE" ]; then
-  case "$(config_source)" in
+# (Its real folder: a config picked before the rename names it through /data/adb/seraph, a link to $DATA.)
+if [ -n "$PULL" ] && [ -z "$NIXUP_SOURCE" ]; then
+  picked=$(config_source)
+  case "$(readlink -f "${picked%%#*}" 2> /dev/null)" in
     "$DATA/git/"*) sh "$MODDIR/git.sh" "$BY" pull < /dev/null || fail "the repository's new commits could not be pulled (see above); nothing was changed" ;;
   esac
 fi
 
 SRC=$(config_source)
-[ -n "$SRC" ] || fail "there is no config yet: in the Seraph app, Config picks your configuration.nix or flake.nix (New makes one), or takes a flake's address, like github:you/phone"
+[ -n "$SRC" ] || fail "there is no config yet: in the Nixup app, Config picks your configuration.nix or flake.nix (New makes one), or takes a flake's address, like github:you/phone"
 # A phone set up before the config could be picked keeps the one it had, now as picked.
-if [ -z "$SERAPH_SOURCE" ] && [ ! -s "$SOURCE" ]; then
+if [ -z "$NIXUP_SOURCE" ] && [ ! -s "$SOURCE" ]; then
   printf '%s\n' "$SRC" > "$SOURCE"
   log "The config is $SRC, as before (the app's Config picks another)"
 fi
@@ -229,41 +255,54 @@ esac
 nix_env
 
 # configuration.nix alone: Nix evaluates it with nixpkgs' lib, packed in the module, and
-# for a config that uses Nix packages, with the phone's copy of nixpkgs (NIXPKGS). It
-# needs no store (dummy://): read-only, it works out the packages' store paths without
-# writing any, and the phone fetches them after.
+# for a config that uses Nix packages, with the phone's copy of nixpkgs (NIXPKGS); one that
+# imports Home Manager's NixOS module (<home-manager/nixos>) has the phone's copy of Home
+# Manager (HOME_MANAGER) as <home-manager>. It needs no store (dummy://): read-only, it
+# works out the packages' store paths without writing any, and the phone fetches them after.
 nix_eval() {
-  # With nixpkgs, in Seraph's store: the small files the config makes (a service's settings)
+  # With nixpkgs, in Nixup's store: the small files the config makes (a service's settings)
   # are derivations the phone builds, which the evaluation writes there.
   store="--readonly-mode --store dummy://"
   [ -n "$NIXPKGS" ] && [ "$1" != --arg ] && store="--read-write-mode --store $DATA/nix"
   "$MODDIR/bin/nix-instantiate" --eval --strict --json $store -I nixpkgs="$MODDIR/nixpkgs" \
+    ${HOME_MANAGER:+-I home-manager="$HOME_MANAGER"} \
     "$MODDIR/nix/profile.nix" --argstr configFile "$CONFIG" --argstr nixpkgs "$NIXPKGS" "$@"
 }
 
-# A flake, as `nixos-rebuild --flake`: Nix fetches its inputs (Seraph's options,
+# A flake, as `nixos-rebuild --flake`: Nix fetches its inputs (Nixup's options,
 # nixpkgs' lib) as flake.lock pins them, and a flake named by its address itself, into a
 # store of its own ($DATA/nix), in a namespace with its own /etc (nix_run). The
-# repositories' package names come from the indexes here (SERAPH_REPOS, so --impure):
+# repositories' package names come from the indexes here (NIXUP_REPOS, so --impure):
 # always the latest, not pinned. A flake on the phone is named by its real folder: Nix
 # takes no path through a symlink, and /sdcard is one (to /storage/emulated/0).
 nix_flake() { nix_run "$MODDIR/bin/nix" --store "$DATA/nix" "$@" $LOCKED; }
 
+# Where the flake keeps its configurations: nixupConfigurations, or seraphConfigurations in a
+# flake made when Nixup was called Seraph, which builds as it is.
+flake_configs() {
+  if ! nix_flake eval $REFRESH "$FLAKE#nixupConfigurations" --apply 'c: true' > /dev/null 2>&1 \
+    && nix_flake eval "$FLAKE#seraphConfigurations" --apply 'c: true' > /dev/null 2>&1; then
+    echo seraphConfigurations
+  else
+    echo nixupConfigurations
+  fi
+}
+
 # The configuration to build: the one named after the #, else the flake's only
-# seraphConfigurations, or the one named after the phone (its device name), as NixOS
+# nixupConfigurations, or the one named after the phone (its device name), as NixOS
 # takes the hostname.
 flake_name() {
   [ -n "$NAME" ] && echo "$NAME" && return 0
-  names=$(nix_flake eval --json $REFRESH "$FLAKE#seraphConfigurations" --apply builtins.attrNames) || return 1
+  names=$(nix_flake eval --json $REFRESH "$FLAKE#$CONFIGS" --apply builtins.attrNames) || return 1
   set -- $(echo "$names" | tr -d '[]"' | tr ',' ' ')
   [ $# -eq 1 ] && echo "$1" && return 0
   device=$(settings get global device_name < /dev/null)
   for name; do [ "$name" = "$device" ] && echo "$name" && return 0; done
   # Said on stderr: what this says (its stdout) is the name.
   if [ $# -eq 0 ]; then
-    log "The flake has no seraphConfigurations (one made by a file it imports, from a submodule not cloned? Clone it again with its submodules)" >&2
+    log "The flake has no $CONFIGS (one made by a file it imports, from a submodule not cloned? Clone it again with its submodules)" >&2
   else
-    log "The flake has $# seraphConfigurations ($*), and none is named after this phone ($device): name one after a # in the app's Config" >&2
+    log "The flake has $# $CONFIGS ($*), and none is named after this phone ($device): name one after a # in the app's Config" >&2
   fi
   return 1
 }
@@ -272,11 +311,12 @@ eval_repos() {
   if [ -n "$FLAKE" ]; then nix_flake eval --json --impure "$BUILT.repos"; else nix_eval --arg reposOnly true; fi
 }
 eval_profile() {
-  if [ -n "$FLAKE" ]; then SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.profile"
+  # SERAPH_REPOS too, for a flake.lock that still pins Nixup from when it was called Seraph.
+  if [ -n "$FLAKE" ]; then NIXUP_REPOS=$DATA/repos SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.profile"
   else nix_eval --argstr reposDir "$DATA/repos"; fi
 }
 eval_secrets() {
-  if [ -n "$FLAKE" ]; then SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.secretsToDeliver"
+  if [ -n "$FLAKE" ]; then NIXUP_REPOS=$DATA/repos SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.secretsToDeliver"
   else nix_eval --argstr reposDir "$DATA/repos" --argstr part secretsToDeliver; fi
 }
 
@@ -287,8 +327,9 @@ if [ -n "$FLAKE" ]; then
   if [ "$MODE" = update ] && [ -n "$DIR" ] && [ -z "$CLONE" ]; then
     nix_flake flake update --flake "$FLAKE" || fail "flake.lock could not be updated (Nix says why above); nothing was changed"
   fi
+  CONFIGS=$(flake_configs)
   name=$(flake_name) || fail "the flake did not build (Nix says why above); nothing was changed"
-  BUILT="$FLAKE#seraphConfigurations.$name.config.system.build"
+  BUILT="$FLAKE#$CONFIGS.$name.config.system.build"
   CONFIG="$WHERE#$name"
   GEN_SOURCE="$WHERE#$name"
   if [ -n "$DIR" ] && [ -z "$CLONE" ]; then
@@ -315,11 +356,19 @@ fi
 # The repositories are in the config: they come first (they need no package
 # names), so their indexes are here when the whole config is evaluated. A
 # configuration.nix alone gets the phone's copy of nixpkgs when it has it; one that
-# imports NixOS's modules (modulesPath) needs it, and has it fetched first.
+# imports NixOS's modules (modulesPath) needs it, and has it fetched first; one that
+# imports Home Manager's NixOS module (<home-manager/nixos>) has Home Manager fetched
+# first too, with nixpkgs (its users' modules need it).
 log "== Repositories"
 [ -z "$FLAKE" ] && [ -d "$DATA/channels/nixpkgs/" ] && NIXPKGS=$(readlink -f "$DATA/channels/nixpkgs")
+[ -z "$FLAKE" ] && [ -d "$DATA/channels/home-manager/" ] && HOME_MANAGER=$(readlink -f "$DATA/channels/home-manager")
 if ! eval_repos > "$DATA/tmp/repos.json" 2> "$DATA/tmp/repos.err"; then
-  if [ -z "$FLAKE" ] && grep -q 'seraph:needs-nixpkgs' "$DATA/tmp/repos.err"; then
+  if [ -z "$FLAKE" ] && grep -q "file 'home-manager[/']" "$DATA/tmp/repos.err"; then
+    channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
+    home_manager_channel "$MODE" || fail "Home Manager could not be fetched (Nix says why above); nothing was changed"
+    eval_repos > "$DATA/tmp/repos.json" \
+      || fail "the config did not build (Nix says why above); nothing was changed"
+  elif [ -z "$FLAKE" ] && grep -q 'nixup:needs-nixpkgs' "$DATA/tmp/repos.err"; then
     channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
     eval_repos > "$DATA/tmp/repos.json" \
       || fail "the config did not build (Nix says why above); nothing was changed"
@@ -334,9 +383,12 @@ if [ "$MODE" = update ]; then engine index --force "$DATA/tmp/repos.json"; else 
   || log "Building with the indexes there are (a repository without one: its apps cannot be named)"
 
 # A configuration.nix alone that uses Nix packages needs the phone's copy of nixpkgs (a
-# flake has its own, as an input).
+# flake has its own, as an input); with update, the newest, and Home Manager's with it.
 if [ -z "$FLAKE" ] && grep -q '"needsNixpkgs":true' "$DATA/tmp/repos.json"; then
   channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
+  if [ -n "$HOME_MANAGER" ] && [ "$MODE" = update ]; then
+    home_manager_channel update || fail "Home Manager could not be fetched (Nix says why above); nothing was changed"
+  fi
 fi
 
 log "== Evaluating $CONFIG"

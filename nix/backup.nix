@@ -6,7 +6,7 @@
 #   android.backup.folders = [ "/storage/emulated/0/DCIM" ];
 # An app's backup is its APK (and splits) and its data (include picks which). It is made by itself:
 # "auto" when the app was left in the background for quietTime (and at least once a schedule),
-# "schedule" once a schedule, "manual" only with seraph-backup now. Only what changed is read again
+# "schedule" once a schedule, "manual" only with nixup-backup now. Only what changed is read again
 # and stored, an idle app's processes are paused for the moment of the copy (so its files are whole;
 # one in use is read as it is), and the backups kept follow keep. Before each backup the repository's
 # storage is checked (there, with room), and an automatic one also waits while the phone is short of
@@ -16,7 +16,7 @@
 # APK that is not on the phone (one from the Play Store, say) is installed from its backup, with its
 # data; an app this phone backed up and that was removed since stays removed (the Backups tab brings
 # it back by hand). Backups stay when they, or the module, leave the config.
-# The engine does it (see Backup.kt); by hand, the app's Backups tab and seraph-backup (list, now,
+# The engine does it (see Backup.kt); by hand, the app's Backups tab and nixup-backup (list, now,
 # restore, restic) back up any app or folder, and bring back an app's APK and data, or a folder.
 { config, lib, pkgs, options, ... }:
 let
@@ -66,7 +66,7 @@ let
       description = ''
         When it is backed up: "auto" (after it was used: once it stayed in the background for
         android.backup.quietTime, and at least once a android.backup.schedule, for apps that work in the background),
-        "schedule" (once a android.backup.schedule) or "manual" (only with seraph-backup now). An app is backed up
+        "schedule" (once a android.backup.schedule) or "manual" (only with nixup-backup now). An app is backed up
         again when it was updated too, unless it is "manual".
       '';
     };
@@ -78,7 +78,7 @@ let
         back from its newest backup (of a version not newer than the one installed), unless the app has data already;
         and an app backed up with its APK that is not on the phone and in no list of android.packages is installed
         from its backup. Never for an app this phone backed up and that was removed since: that one comes back only
-        by hand (the Backups tab, seraph-backup restore).
+        by hand (the Backups tab, nixup-backup restore).
       '';
     };
   };
@@ -213,7 +213,7 @@ in
       schedule = seconds cfg.schedule;
       quietTime = seconds cfg.quietTime;
       apps = resolved;
-      # For an app backed up by hand that the config does not name (seraph-backup now, the app's Backups tab).
+      # For an app backed up by hand that the config does not name (nixup-backup now, the app's Backups tab).
       defaults = { inherit (cfg.defaults) apk data include when autoRestore; };
     };
     system.build.backupStorePaths = lib.optionals (repository != null)

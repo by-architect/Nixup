@@ -17,7 +17,7 @@ android {
                 cFlags += listOf("-std=c11", "-Wall", "-Wextra", "-Os", "-fno-stack-protector", "-Wl,--gc-sections")
             }
         }
-        // Seraph runs on 64-bit ARM phones.
+        // Nixup runs on 64-bit ARM phones.
         ndk {
             abiFilters += "arm64-v8a"
         }

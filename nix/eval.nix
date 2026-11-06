@@ -1,4 +1,4 @@
-# Evaluates a Seraph configuration, Seraph's options and the user's modules, as
+# Evaluates a Nixup configuration, Nixup's options and the user's modules, as
 # nixpkgs.lib.nixosSystem does for NixOS. The result's config.system.build.profile is what the
 # phone applies (see build.nix).
 #
@@ -9,7 +9,7 @@
 # reposDir holds, for each repository the phone has an index of, <name>/tree.json: the tree of
 # its package names, seen by the configuration as pkgs.<name>.
 #
-# Its modules are of the class "seraph", as NixOS's are "nixos": a module that says it is another
+# Its modules are of the class "nixup", as NixOS's are "nixos": a module that says it is another
 # class's (_class = "nixos";) is refused by name, before any of its options are looked at. As on
 # NixOS, modulesPath is nixpkgs' nixos/modules (see nix/nixos.nix): a configuration.nix's first
 # look, which has no nixpkgs yet, stops at it with a word the build knows, and fetches nixpkgs.
@@ -19,14 +19,19 @@ let
   repoTrees =
     if reposDir == "" || !builtins.pathExists reposDir then { }
     else lib.mapAttrs (name: _: lib.importJSON "${reposDir}/${name}/tree.json") (lib.filterAttrs hasTree (builtins.readDir reposDir));
-in
-lib.evalModules {
-  class = "seraph";
-  modules = [ ./options.nix ] ++ modules;
-  specialArgs = {
-    _seraph = { inherit nixpkgs repoTrees; };
+  args = {
+    # noUserModules: Nixup's options without the config's modules, as NixOS's, for a specialisation of its own lines
+    # alone (nix/specialisation.nix).
+    _nixup = { inherit nixpkgs repoTrees noUserModules; };
     modulesPath =
-      if nixpkgs == null then throw "modulesPath is nixpkgs' NixOS modules, which this build fetches first [seraph:needs-nixpkgs]"
+      if nixpkgs == null then throw "modulesPath is nixpkgs' NixOS modules, which this build fetches first [nixup:needs-nixpkgs]"
       else (nixpkgs.outPath or nixpkgs) + "/nixos/modules";
   } // specialArgs;
-}
+  evaluate = modules: lib.evalModules {
+    class = "nixup";
+    modules = [ ./options.nix ] ++ modules;
+    specialArgs = args;
+  };
+  noUserModules = evaluate [ ];
+in
+evaluate modules

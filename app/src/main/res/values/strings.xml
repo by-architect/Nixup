@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Seraph</string>
+    <string name="app_name">Nixup</string>
     <string name="tab_build">Build</string>
     <string name="tab_updates">Updates</string>
     <string name="tab_backups">Backups</string>
@@ -32,15 +32,15 @@
         <item quantity="one">%1$d of %2$d lines matches</item>
         <item quantity="other">%1$d of %2$d lines match</item>
     </plurals>
-    <string name="source_invalid">Not one Seraph can build: a .nix file\'s full path, or a flake\'s address like github:you/phone (each may end in #name).</string>
+    <string name="source_invalid">Not one Nixup can build: a .nix file\'s full path, or a flake\'s address like github:you/phone (each may end in #name).</string>
     <string name="not_a_phone_file">That file is not on the phone\'s storage or an SD card (a cloud drive\'s?): copy it there and pick it again.</string>
     <string name="not_nix">Pick a .nix file: your configuration.nix, or a flake.nix.</string>
     <string name="not_readable">Root cannot read %1$s: is it still there?</string>
-    <string name="no_template">The module\'s default config is missing: is the Seraph module installed?</string>
+    <string name="no_template">The module\'s default config is missing: is the Nixup module installed?</string>
     <string name="not_written">Could not write the new config there.</string>
     <string name="last_build">Last build: generation %1$s, from %2$s</string>
     <string name="last_build_unknown">Last build: generation %1$s</string>
-    <string name="last_build_on">Last build: generation %1$s, from %2$s, built on %3$s (seraph-rebuild)</string>
+    <string name="last_build_on">Last build: generation %1$s, from %2$s, built on %3$s (nixup-rebuild)</string>
     <string name="built_elsewhere_title">The last build came from %1$s</string>
     <string name="built_elsewhere_message">Apply that build again as it is, or build the config picked here, which replaces it?</string>
     <string name="apply_again">Apply again</string>
@@ -58,8 +58,8 @@
     <string name="upgrade_message">The app lists and releases are fetched again, a flake\'s inputs go to their newest (its flake.lock is updated), and a configuration.nix alone gets the newest nixpkgs; then the config is built, as Build does.</string>
     <string name="done">✔ Done</string>
     <string name="failed">✘ Failed (exit %1$d)</string>
-    <string name="not_owner_title">Open Seraph in the main user</string>
-    <string name="not_owner_message">This copy of Seraph runs in an app clone, work profile or another user. Magisk gives root only to the phone owner\'s apps, so here it is refused without asking. Open Seraph from the main user\'s home screen (not the clone\'s icon). Reinstalling the module removes this copy.</string>
+    <string name="not_owner_title">Open Nixup in the main user</string>
+    <string name="not_owner_message">This copy of Nixup runs in an app clone, work profile or another user. Magisk gives root only to the phone owner\'s apps, so here it is refused without asking. Open Nixup from the main user\'s home screen (not the clone\'s icon). Reinstalling the module removes this copy.</string>
     <string name="no_root">✘ No root: the phone has no su (is Magisk installed?)</string>
     <string name="no_folder_app">No app here opens folders: install a file manager.</string>
 
@@ -74,6 +74,11 @@
     <string name="switch_to">Switch to it</string>
     <string name="switching">Switching to generation %1$s…</string>
     <string name="generation_dry">Seeing what generation %1$s would change (nothing changes)…</string>
+    <string name="specialisations">Specialisations</string>
+    <string name="no_specialisations">The last build has no specialisations (specialisation.&lt;name&gt; in the config makes them).</string>
+    <string name="specialisation_none">The config itself (no specialisation)</string>
+    <string name="specialisation_switching">Switching to specialisation %1$s…</string>
+    <string name="specialisation_leaving">Switching back to the config itself…</string>
     <string name="unknown">unknown</string>
 
     <!-- Updates. -->
@@ -263,7 +268,7 @@
     <string name="git_name_hint">Configuration (#name; empty: phone\'s)</string>
     <string name="git_token_hint">Token (private repositories)</string>
     <string name="git_submodules">Clone its submodules too (private ones use the same token)</string>
-    <string name="git_note">The repository: https://github.com/you/phone, github:you/phone or you/phone (GitHub), or any git address. It is cloned into Seraph\'s own folder (/data/adb/seraph/git); the terminal can change files there. A token is kept where only root reads it, as Nix\'s for the same site.</string>
+    <string name="git_note">The repository: https://github.com/you/phone, github:you/phone or you/phone (GitHub), or any git address. It is cloned into Nixup\'s own folder (/data/adb/nixup/git); the terminal can change files there. A token is kept where only root reads it, as Nix\'s for the same site.</string>
     <string name="git_clone">Clone</string>
     <string name="git_invalid">Not a repository address: like https://github.com/you/phone or you/phone, with no spaces or quotes; the other fields take letters, digits and . _ / -.</string>
     <string name="git_replace_title">Replace the clone?</string>
@@ -285,22 +290,22 @@
 
     <!-- Free up space -->
     <string name="free_space_title">Free up space?</string>
-    <string name="free_space_message">Removes the Nix packages Seraph keeps that the last build does not use (older generations\' ones, a service turned off). Going back to an older generation fetches its packages again.</string>
+    <string name="free_space_message">Removes the Nix packages Nixup keeps that the last build does not use (older generations\' ones, a service turned off). Going back to an older generation fetches its packages again.</string>
     <string name="free_space">Free up space</string>
     <string name="freeing_space">Freeing up space…</string>
-    <!-- Seraph's own updates -->
-    <string name="seraph_update">Seraph %1$s is out (this phone has %2$s)</string>
-    <string name="seraph_install">Install</string>
-    <string name="seraph_install_title">Install Seraph %1$s?</string>
-    <string name="seraph_install_message">It is downloaded from Seraph\'s releases and checked first: Seraph\'s module, newer, with its app signed by the same key as the app on this phone. The phone uses it from its next restart.</string>
-    <string name="seraph_whats_new">What\'s new</string>
-    <string name="seraph_installing">Installing Seraph %1$s…</string>
+    <!-- Nixup's own updates -->
+    <string name="nixup_update">Nixup %1$s is out (this phone has %2$s)</string>
+    <string name="nixup_install">Install</string>
+    <string name="nixup_install_title">Install Nixup %1$s?</string>
+    <string name="nixup_install_message">It is downloaded from Nixup\'s releases and checked first: Nixup\'s module, newer, with its app signed by the same key as the app on this phone. The phone uses it from its next restart.</string>
+    <string name="nixup_whats_new">What\'s new</string>
+    <string name="nixup_installing">Installing Nixup %1$s…</string>
     <!-- The Google Play account -->
     <string name="google_sign_in_title">Sign in to Google Play</string>
-    <string name="play_offline">Google\'s sign-in page cannot load: this app has no internet. Either the phone is offline, or Network access is off for Seraph (App info, Mobile data and Wi-Fi, Network access). Turn it on, then come back here; once you are signed in it can go off again (the downloads do not need it).</string>
-    <string name="play_page_failed">Google\'s sign-in page did not load (%1$s). Is the phone online, and Network access on for Seraph (App info, Mobile data and Wi-Fi)?</string>
+    <string name="play_offline">Google\'s sign-in page cannot load: this app has no internet. Either the phone is offline, or Network access is off for Nixup (App info, Mobile data and Wi-Fi, Network access). Turn it on, then come back here; once you are signed in it can go off again (the downloads do not need it).</string>
+    <string name="play_page_failed">Google\'s sign-in page did not load (%1$s). Is the phone online, and Network access on for Nixup (App info, Mobile data and Wi-Fi)?</string>
     <string name="app_info">App info</string>
-    <string name="play_account_none">No account is signed in. A build whose config lists apps from Google Play (android.packages.playstore) stops until one is.\n\nSign in here, on Google\'s own page, or give the config the account\'s token (android.playstore.tokenFile; seraph-play-login makes one on a PC). The phone keeps the token where root alone reads it. Better an account of its own for this: Google may block an account that downloads with an unofficial client.</string>
+    <string name="play_account_none">No account is signed in. A build whose config lists apps from Google Play (android.packages.playstore) stops until one is.\n\nSign in here, on Google\'s own page, or give the config the account\'s token (android.playstore.tokenFile; nixup-play-login makes one on a PC). The phone keeps the token where root alone reads it. Better an account of its own for this: Google may block an account that downloads with an unofficial client.</string>
     <string name="play_account_signed_in">Signed in as %1$s: the config\'s apps from Google Play (android.packages.playstore) are its downloads.\n\nShow token gives its token, for a config on a PC. Sign out takes it off the phone; Google\'s account page (Security, Your devices) can end its sign-in too.</string>
     <string name="play_sign_in">Sign in</string>
     <string name="play_show_token">Show token</string>

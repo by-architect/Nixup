@@ -105,7 +105,7 @@ in
         (hostConfig.tailscale.key, tskey-…), or a file a module shared with NixOS makes with
         pkgs.writeText (by its text), which each build puts on the phone as a file readable by root
         alone, never in the profile or Nix's store; or, as a string, the full path of a file already
-        on the phone. (On NixOS it is a file only; the key's text is Seraph's.)
+        on the phone. (On NixOS it is a file only; the key's text is Nixup's.)
       '';
     };
 
@@ -208,7 +208,7 @@ in
           [ -n "$state" ] && [ "$state" != NoState ] && break
           sleep 0.2
         done
-        [ -n "$state" ] || { echo "tailscaled does not answer (its log: /data/adb/seraph/units/tailscaled/log)"; exit 1; }
+        [ -n "$state" ] || { echo "tailscaled does not answer (its log: /data/adb/nixup/units/tailscaled/log)"; exit 1; }
         host=${hostName}
         login=()
         ${lib.optionalString (keyFile != null) ''
@@ -229,13 +229,13 @@ in
             url=$(echo "$status" | jq -r '.AuthURL // ""')
             if [ -n "$url" ]; then echo "! Tailscale: waiting for its login: open $url (on any device) and log in"
             elif [ ''${#login[@]} -gt 0 ]; then echo "! Tailscale: not logged in: the control server refused its auth key (said above); put a new one in its authKeyFile"
-            else echo "! Tailscale: not logged in, and it gave no link to log in with (its log: /data/adb/seraph/units/tailscaled/log)"; fi ;;
+            else echo "! Tailscale: not logged in, and it gave no link to log in with (its log: /data/adb/nixup/units/tailscaled/log)"; fi ;;
           *) echo "Tailscale: $(echo "$status" | jq -r .BackendState)" ;;
         esac
       '';
     };
 
-    # Seraph's own: tells, in a notification, when Tailscale connects or its connection drops (and
+    # Nixup's own: tells, in a notification, when Tailscale connects or its connection drops (and
     # when it needs a login), from what tailscaled says every 20 seconds. A change counts once it
     # holds for two looks in a row, so a switch between Wi-Fi and mobile data tells nothing; its
     # first state after a start is told only when it needs a login.
@@ -252,7 +252,7 @@ in
       script = ''
         ts() { tailscale --socket=${socket} "$@"; }
         # (It runs with bash -e: a notification that cannot go out stops nothing.)
-        tell() { if [ -n "$SERAPH_NOTIFY" ]; then sh "$SERAPH_NOTIFY" connection "$1" "$2" "$3" connection:tailscale || true; fi; }
+        tell() { if [ -n "$NIXUP_NOTIFY" ]; then sh "$NIXUP_NOTIFY" connection "$1" "$2" "$3" connection:tailscale || true; fi; }
         told= seen= times=0
         while :; do
           status=$(ts status --json --peers=false 2> /dev/null) || status=
@@ -289,7 +289,7 @@ in
       }
       {
         assertion = !lib.any (flag: builtins.match "--?(tun|statedir|state|socket)(=.*)?" flag != null) cfg.extraDaemonFlags;
-        message = "services.tailscale.extraDaemonFlags: Seraph sets --tun (userspace mode), --statedir and --socket itself.";
+        message = "services.tailscale.extraDaemonFlags: Nixup sets --tun (userspace mode), --statedir and --socket itself.";
       }
     ];
   };

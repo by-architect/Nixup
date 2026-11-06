@@ -18,17 +18,17 @@
 #   parts <app> <snapshot>   what one backup of the app has
 #   restic <arguments>       restic itself, with the repository and its password
 # status, list and parts with --json say it as one line of JSON, for the app, without logging it.
-# (SERAPH_PROFILE: another profile's backups for one command, with its own record of what was
+# (NIXUP_PROFILE: another profile's backups for one command, with its own record of what was
 # backed up when, next to it: tests.)
 MODDIR=${0%/*}
 BY=${1:-manual}
 MODE=${2:-now}
 [ $# -ge 2 ] && shift 2
 . "$MODDIR/common.sh"
-[ -n "$SERAPH_PROFILE" ] && PROFILE=$SERAPH_PROFILE
+[ -n "$NIXUP_PROFILE" ] && PROFILE=$NIXUP_PROFILE
 
 # Straight to the engine: what the app reads, and restic, which may ask or show more than lines.
-direct() { CLASSPATH="$MODDIR/app.apk" exec /system/bin/app_process /system/bin dev.seraph.manager.engine.Main "$@"; }
+direct() { CLASSPATH="$MODDIR/app.apk" exec /system/bin/app_process /system/bin dev.nixup.manager.engine.Main "$@"; }
 case " $* " in
   *" --json "*)
     case "$MODE" in

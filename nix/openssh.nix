@@ -1,9 +1,9 @@
-# OpenSSH's server, as NixOS's services.openssh: sshd, a unit run by root in Seraph's view of the phone (see
-# nix/units.nix), so a session is a shell there, the one the app's terminal and seraph-shell open:
+# OpenSSH's server, as NixOS's services.openssh: sshd, a unit run by root in Nixup's view of the phone (see
+# nix/units.nix), so a session is a shell there, the one the app's terminal and nixup-shell open:
 # environment.systemPackages on PATH, /nix, and Android's own commands. Logins are root's or those of the users in
 # users.users (nix/users.nix), with keys only: users.users.<name>.openssh.authorizedKeys, as on NixOS,
 # ~/.ssh/authorized_keys in the user's home, or authorizedKeysFiles. Its host keys are made on its first start, in
-# /etc/ssh (/data/adb/seraph/etc/ssh on the phone itself), and kept, also when it is turned off; a hostKeys path
+# /etc/ssh (/data/adb/nixup/etc/ssh on the phone itself), and kept, also when it is turned off; a hostKeys path
 # that is there already (a secret the build puts on the phone) is used as it is.
 #
 # Its options are NixOS's, with the same names, types and meanings; one the phone cannot do is there too, and setting
@@ -47,7 +47,7 @@ let
     in "ListenAddress ${host}${lib.optionalString (port != null) ":${toString port}"}\n";
 
   sshdConfig = ''
-    # Seraph's sshd_config, from services.openssh (see nix/openssh.nix).
+    # Nixup's sshd_config, from services.openssh (see nix/openssh.nix).
     ${lib.concatMapStrings (port: "Port ${toString port}\n") cfg.ports}${lib.concatMapStrings listen cfg.listenAddresses}${lib.concatMapStrings (key: "HostKey ${key.path}\n") cfg.hostKeys}PidFile none
     PrintLastLog no
     ${lib.optionalString cfg.allowSFTP "Subsystem sftp ${cfg.sftpServerExecutable} ${lib.concatStringsSep " " cfg.sftpFlags}\n"}${lib.optionalString (!(settings ? AuthorizedKeysFile)) "AuthorizedKeysFile ${lib.optionalString cfg.authorizedKeysInHomedir "%h/.ssh/authorized_keys "}/etc/ssh/authorized_keys.d/%u ${lib.concatStringsSep " " cfg.authorizedKeysFiles}\n"}
@@ -64,7 +64,7 @@ in
 {
   options.services.openssh = {
     enable = lib.mkEnableOption ''
-      OpenSSH's server (sshd), as NixOS's services.openssh: run by root in Seraph's view, where a session gets root's
+      OpenSSH's server (sshd), as NixOS's services.openssh: run by root in Nixup's view, where a session gets root's
       shell with environment.systemPackages, as the app's terminal has it. It starts with each build and at boot'';
 
     package = lib.mkPackageOption pkgs "openssh" { };
@@ -133,7 +133,7 @@ in
       ];
       description = ''
         sshd's host keys, made on its first start where they are not yet (type, path, and bits, rounds, comment), as
-        on NixOS. /etc/ssh is /data/adb/seraph/etc/ssh on the phone.
+        on NixOS. /etc/ssh is /data/adb/nixup/etc/ssh on the phone.
       '';
     };
 
@@ -156,7 +156,7 @@ in
     authorizedKeysInHomedir = mkOption {
       type = types.bool;
       default = true;
-      description = "Read ~/.ssh/authorized_keys too: root's, in /data/adb/seraph/home/.ssh.";
+      description = "Read ~/.ssh/authorized_keys too: root's, in /data/adb/nixup/home/.ssh.";
     };
 
     authorizedKeysCommand = mkOption {
@@ -221,7 +221,7 @@ in
           LogLevel = mkOption {
             type = types.nullOr (types.enum [ "QUIET" "FATAL" "ERROR" "INFO" "VERBOSE" "DEBUG" "DEBUG1" "DEBUG2" "DEBUG3" ]);
             default = "INFO";
-            description = "How much sshd logs (in /data/adb/seraph/units/sshd/log).";
+            description = "How much sshd logs (in /data/adb/nixup/units/sshd/log).";
           };
           GatewayPorts = mkOption {
             type = types.nullOr types.str;

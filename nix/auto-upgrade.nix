@@ -8,7 +8,7 @@
 #   - runGarbageCollection: after an upgrade that worked, the Nix packages no build keeps go (build.sh gc);
 #   - a phone's own conditions (android.autoUpgrade): on an unmetered network (Wi-Fi) only, unless told otherwise, and
 #     never on a low battery; a time that comes while they do not hold is skipped, and the next one tried.
-# Seraph never changes the phone's kernel, so a build needs no restart: allowReboot and rebootWindow are taken and do
+# Nixup never changes the phone's kernel, so a build needs no restart: allowReboot and rebootWindow are taken and do
 # nothing; operation = "boot" (applied at the next start) is not on the phone. nixos-rebuild's flags are not either.
 { config, lib, ... }:
 let
@@ -41,7 +41,7 @@ in
       default = null;
       example = "github:you/phone#logos";
       description = ''
-        The flake to build, as on NixOS: an address (github:you/phone, with #name for one of its seraphConfigurations)
+        The flake to build, as on NixOS: an address (github:you/phone, with #name for one of its nixupConfigurations)
         or a flake.nix on the phone. null: the config the app's Config picked.
       '';
     };
@@ -82,7 +82,7 @@ in
       type = types.bool;
       default = false;
       description = ''
-        As on NixOS, a restart into a build with another kernel. Taken: Seraph never changes the phone's kernel, so a
+        As on NixOS, a restart into a build with another kernel. Taken: Nixup never changes the phone's kernel, so a
         build needs no restart.
       '';
     };
@@ -127,7 +127,7 @@ in
     };
   };
 
-  # Seraph's own: what a phone needs besides a time.
+  # Nixup's own: what a phone needs besides a time.
   options.android.autoUpgrade = {
     onlyOnUnmetered = mkOption {
       type = types.bool;
@@ -188,6 +188,6 @@ in
     warnings = lib.optional (cfg.enable && cfg.flags != [ ])
       "system.autoUpgrade.flags: nixos-rebuild's flags are not on the phone (${lib.concatStringsSep " " cfg.flags}): left out."
       ++ lib.optional (cfg.enable && cfg.allowReboot)
-      "system.autoUpgrade.allowReboot: Seraph never changes the phone's kernel, so a build needs no restart: the phone never restarts for one.";
+      "system.autoUpgrade.allowReboot: Nixup never changes the phone's kernel, so a build needs no restart: the phone never restarts for one.";
   };
 }
