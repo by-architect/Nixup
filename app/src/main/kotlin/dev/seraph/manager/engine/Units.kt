@@ -1453,6 +1453,8 @@ class Units(private val data: File) {
          * its own, with Android's own folders as they are, /nix (Seraph's store), Seraph's /etc, /var and /run (the
          * units' state, which stays), /home (the normal users' homes, Seraph's users folder) and a /tmp of its own;
          * Android's time zone is Seraph's /etc/localtime (see Etc), else TZ, its offset from UTC ("<+0300>-03:00").
+         * /proc/sys/kernel/modprobe and poweroff_cmd are empty there: Nix's garbage collector reads them with a read
+         * Android's 4.x kernels may refuse ("Out of memory"), which stops it.
          * Each step execs the next, so the script's own process is the one started.
          */
         private val VIEW = """
@@ -1480,6 +1482,11 @@ class Units(private val data: File) {
               done
               mkdir -p "${'$'}v/tmp"
               "${'$'}b" mount -t tmpfs -o mode=1777 tmp "${'$'}v/tmp"
+              # Kernel files the garbage collector of Nix reads (for store paths in them), of which an Android kernel
+              # may refuse a big read (Out of memory), which stops it: empty ones here, as containers have them.
+              for k in modprobe fbsplash poweroff_cmd; do
+                [ -e "${'$'}v/proc/sys/kernel/${'$'}k" ] && "${'$'}b" mount --bind /dev/null "${'$'}v/proc/sys/kernel/${'$'}k" 2> /dev/null || true
+              done
               if [ -z "${'$'}TZ" ] && [ ! -s "${'$'}data/etc/localtime" ]; then
                 off=${'$'}(/system/bin/date +%z 2> /dev/null)
                 case ${'$'}off in

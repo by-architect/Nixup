@@ -359,21 +359,6 @@ in
       avahi = absent "Avahi (Android has its own mDNS)" { };
     };
 
-    nix = {
-      enable = taken types.bool true "Nix's daemon (Seraph runs Nix itself)";
-      package = mkOption {
-        type = types.package;
-        default = pkgs.nix;
-        defaultText = lib.literalExpression "pkgs.nix";
-        description = "As on NixOS (a module may use its tools).";
-      };
-      settings = anyAttrs;
-      extraOptions = taken types.lines "" "Nix's settings";
-      gc = anyAttrs;
-      nixPath = taken (types.listOf types.str) [ ] "NIX_PATH";
-      registry = anyAttrs;
-    };
-
     hardware = {
       graphics = absent "the GPU's drivers" { };
     };

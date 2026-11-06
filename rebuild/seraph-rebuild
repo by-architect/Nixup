@@ -185,9 +185,11 @@ what=secrets evaluate --raw --apply 's: builtins.concatStringsSep "\n" (map (n: 
 # The small files the config makes (a service's settings file, a script) are derivations
 # cache.nixos.org has not got, which the phone builds: theirs go along, with all they need
 # (the derivations they are made with) and the files the config put in the store itself, as
-# nix-store --export writes them.
+# nix-store --export writes them. So do the flakes Nix's registry names (the config's nixpkgs,
+# for nix shell nixpkgs#… on the phone), which no cache has either, when the phone has not got
+# them yet: it keeps them. Compressed, when the phone's module takes them so.
 ship_paths() {
-  local list=() drvs=() sources=() build=() item
+  local list=() drvs=() sources=() build=() kept=() item
   mapfile -t list < <(nixx eval --raw --impure --expr \
     "builtins.concatStringsSep \"\\n\" ((builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json"))).android.derivations or [ ])")
   for item in "${list[@]}"; do
@@ -200,9 +202,25 @@ ship_paths() {
   if ((${#drvs[@]})); then
     mapfile -t build < <(nixx build --dry-run --no-link "${drvs[@]}" 2>&1 | sed -n '/will be built:$/,/^[^ ]/s/^ *\(\/nix\/store\/[^ ]*\.drv\)$/\1/p')
   fi
+  mapfile -t kept < <(nixx eval --raw --impure --expr \
+    "let nix = (builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json"))).android.nix or null; in builtins.concatStringsSep \"\\n\" (if nix == null then [ ] else nix.kept or [ ])")
+  for item in "${kept[@]}"; do
+    [[ $item == /nix/store/* ]] || continue
+    case "$(as_root "[ -e /data/adb/seraph/nix$item ] && echo here || echo missing" | tr -d '\r')" in
+      here) continue ;;
+      missing) ;;
+      *) die "could not ask the phone whether it has $item (is it still connected?)" ;;
+    esac
+    say "== The phone has not got $item (Nix's registry names it: the config's nixpkgs): it goes along, once"
+    sources+=("$item")
+  done
   ((${#build[@]} + ${#sources[@]})) || return 0
   say "== Files the config makes, for the phone to build: ${#build[@]}"
-  nix-store --export $(nix-store --query --requisites "${build[@]}" "${sources[@]}") > "$work/paths.nar"
+  if as_root "${module}grep -q paths.nar.gz \$d/remote.sh"; then
+    nix-store --export $(nix-store --query --requisites "${build[@]}" "${sources[@]}") | gzip > "$work/paths.nar.gz"
+  else
+    nix-store --export $(nix-store --query --requisites "${build[@]}" "${sources[@]}") > "$work/paths.nar"
+  fi
 }
 
 if [[ $action == build ]]; then
@@ -232,7 +250,7 @@ fi
 printf '%s\n' "$source" > "$work/source"
 
 say "== Sending it to the phone"
-for part in profile.json source built-on flake.lock paths.nar; do
+for part in profile.json source built-on flake.lock paths.nar paths.nar.gz; do
   [[ -f $work/$part ]] || continue
   send "$work/$part" "$incoming/$part" || die "could not send $part to the phone"
 done

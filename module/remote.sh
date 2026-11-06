@@ -12,7 +12,8 @@
 #                           nothing; update: the releases asked for again too);
 #                           incoming/source says what it was built from, incoming/built-on
 #                           on which machine, and incoming/flake.lock is the flake's lock,
-#                           all three for the generation
+#                           all three for the generation; incoming/paths.nar.gz (or
+#                           paths.nar) is what it sent of Nix's store
 MODDIR=${0%/*}
 BY=${1:-manual}
 MODE=${2:-}
@@ -45,8 +46,11 @@ else event build start "Applying a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURC
 log "== Built on ${GEN_BUILT_ON:-a PC}: $GEN_SOURCE"
 log "Profile: $(cat "$IN/profile.json")"
 SECRETS_IN=$IN/secrets
-# The derivations of the files the config makes, which this phone builds (common.sh).
-import_paths "$IN/paths.nar" || fail "what the PC sent of Nix's store could not be taken in (Nix says why above); nothing was changed"
+# The derivations of the files the config makes, which this phone builds, and the config's
+# nixpkgs when the phone had not got it (common.sh); compressed by a newer seraph-rebuild.
+for nar in "$IN/paths.nar.gz" "$IN/paths.nar"; do
+  import_paths "$nar" || fail "what the PC sent of Nix's store could not be taken in (Nix says why above); nothing was changed"
+done
 # Its own (see build.sh), until switch_to makes it the phone's.
 NEW=$PROFILE.new-$$
 at_exit 'rm -f "$NEW"'

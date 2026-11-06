@@ -150,9 +150,14 @@ in
             paths = config.system.build.paths;
             etc = config.system.build.etc;
             inherit (config.system.build) network tmpfiles;
-            storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths
-              ++ config.system.build.terminalStorePaths);
+            # (Without the paths the phone keeps but no cache has: the registry's nixpkgs, which /etc's
+            # registry.json names. See nix below.)
+            storePaths = lib.subtractLists (if config.system.build.nix == null then [ ] else config.system.build.nix.kept)
+              (lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths ++ config.system.build.terminalStorePaths));
             inherit derivations;
+            # Nix on the shells (nix/nix.nix): its commands, and the paths the phone keeps (the
+            # registry's flakes, the config's nixpkgs among them); null with nix.enable = false.
+            inherit (config.system.build) nix;
             # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
             # NixOS has them; none without Nix packages.
             shell = if config.environment.systemPackages == [ ] then null else {

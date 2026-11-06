@@ -32,8 +32,12 @@ set_perm "$MODPATH/notify.sh" 0 0 0755
 # seraph-shell and seraph-backup, in /system/bin once Magisk mounts the module (from the next start).
 set_perm "$MODPATH/system/bin/seraph-shell" 0 0 0755
 set_perm "$MODPATH/system/bin/seraph-backup" 0 0 0755
-ln -sf nix "$MODPATH/bin/nix-instantiate"
-ln -sf nix "$MODPATH/bin/nix-store"
+# Nix's other commands are nix itself by another name (it acts as the one it is run by): the module's scripts run
+# nix-instantiate and nix-store, and nix-channel finds nix-env next to it (the shells' are in /etc/seraph/bin).
+for name in nix-build nix-channel nix-collect-garbage nix-copy-closure nix-daemon nix-env nix-hash nix-instantiate \
+  nix-prefetch-url nix-shell nix-store; do
+  ln -sf nix "$MODPATH/bin/$name"
+done
 
 # Streamed in, so the installer does not need to read the module's folder.
 ui_print "- Installing the app"

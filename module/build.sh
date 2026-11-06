@@ -16,7 +16,8 @@
 #   again    the last profile applied again as it is, nothing evaluated: after a build
 #            on a PC (seraph-rebuild), whose config the phone may not have
 #   gc       frees up space, as nix-collect-garbage: the Nix packages no root keeps go (the last
-#            build's packages, nixpkgs and git stay; an older generation fetches its own again)
+#            build's packages, nixpkgs and git stay, and what the users installed with nix profile
+#            or nix-env; an older generation fetches its own again)
 #   generation <n> [dry]
 #            generation n's profile applied again, nothing evaluated, as nix-env
 #            --switch-generation and nixos-rebuild --rollback go back to one: its settings,
@@ -82,7 +83,9 @@ case "$MODE" in
     nix_env
     before=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
     log "== Freeing up space: the Nix packages the last build does not use"
-    nix_store store gc || fail "Nix could not free up space (it says why above)"
+    # In Seraph's view, as its shells see the store: there the users' own profiles (nix profile, in
+    # their /home) are roots, which Nix would take for links to nothing outside of it, and remove.
+    nix_view nix store gc || fail "Nix could not free up space (it says why above)"
     after=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
     freed=$(( (${before:-0} - ${after:-0}) / 1024 ))
     log "Freed $freed MB; Seraph's store has $(( ${after:-0} / 1024 )) MB"
