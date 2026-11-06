@@ -17,7 +17,8 @@ import java.util.TimeZone
  *
  * The users' shell there (users.users, root's too) is /etc/nixup/login ([LOGIN]): the profile's shell, with
  * environment.systemPackages on PATH, started the same way for an ssh session (services.openssh), the app's terminal
- * and nixup-shell.
+ * and nixup-shell. What every session starts with ([SET_ENVIRONMENT]: PATH, a user's own packages first, the time
+ * zone, environment.extraInit) /etc/profile and /etc/zshenv give a user's own shell too (users.users.<name>.shell).
  */
 object Etc {
     /**
@@ -93,6 +94,7 @@ object Etc {
         val name = profile?.optJSONObject("system")?.optJSONObject("settings")?.optJSONObject("global")?.string("device_name")
             ?: Device.run("settings", "get", "global", "device_name").second.trim().takeIf { it.isNotEmpty() && it != "null" } ?: "phone"
         File(etc, "profile").writeText(PROFILE.replace("@NAME@", name.replace(Regex("[^A-Za-z0-9._-]"), "-")))
+        File(etc, "zshenv").writeText(ZSHENV)
         return etc
     }
 
@@ -367,14 +369,17 @@ object Etc {
     private fun current(data: File): JSONObject? =
         runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull()
 
-    /** /etc/nixup/login, for [shell] (the profile's: its PATH and bash), or Android's sh when the config has no Nix packages. */
+    /**
+     * /etc/nixup/login, for [shell] (the profile's: its PATH and bash), or Android's sh when the config has no Nix
+     * packages; and /etc/nixup/set-environment, with that PATH.
+     */
     private fun writeLogin(etc: File, home: File, shell: JSONObject?) {
         val dir = File(etc, "nixup").apply { mkdirs() }
+        File(dir, "set-environment").writeText(SET_ENVIRONMENT.replace("@PATH@", quote(path(shell?.string("path") ?: "/system/bin:/system/xbin"))))
         val login = File(dir, "login")
         val fresh = File(dir, ".login.new")
         fresh.writeText(
-            LOGIN.replace("@PATH@", quote(path(shell?.string("path") ?: "/system/bin:/system/xbin")))
-                .replace("@HOME@", quote(home.path))
+            LOGIN.replace("@HOME@", quote(home.path))
                 .replace("@SHELL@", quote(shell?.string("bash") ?: "/system/bin/sh")),
         )
         Os.chmod(fresh.path, "755".toInt(8))
@@ -401,13 +406,51 @@ object Etc {
         "/system/xbin", "/odm/bin", "/vendor/bin", "/vendor/xbin",
     )
 
-    /** What bash reads in a login shell: a prompt with the phone's name, and ~/.bashrc, as distributions have it. */
+    /**
+     * What every session in the view starts with, once: the profile's PATH, with the user's own packages first (its
+     * profile, /etc/profiles/per-user/<user>: users.users.<name>.packages, Home Manager's) and Android's commands after;
+     * the time zone; environment.extraInit. Sourced by /etc/nixup/login, /etc/profile and /etc/zshenv.
+     */
+    private val SET_ENVIRONMENT = """
+        # What every session in Nixup's view starts with, once (written by the engine: Etc.kt): PATH (the user's own
+        # packages, then environment.systemPackages, then Android's commands), the time zone, environment.extraInit.
+        [ -n "${'$'}{__NIXUP_SET_ENVIRONMENT_DONE:-}" ] && return 0
+        export __NIXUP_SET_ENVIRONMENT_DONE=1
+        export PATH=@PATH@
+        nixup_user=${'$'}{USER:-${'$'}(/system/bin/id -un 2> /dev/null)}
+        [ -n "${'$'}nixup_user" ] && [ -d "/etc/profiles/per-user/${'$'}nixup_user/bin" ] && PATH="/etc/profiles/per-user/${'$'}nixup_user/bin:${'$'}PATH"
+        unset nixup_user
+        export LANG="${'$'}{LANG:-C.UTF-8}" TERM="${'$'}{TERM:-xterm-256color}"
+        # Android's time zone is /etc/localtime (its zones in /etc/zoneinfo); without it, its offset from UTC
+        # (POSIX: "<+0300>-03:00").
+        [ -d /etc/zoneinfo ] && export TZDIR=/etc/zoneinfo
+        if [ -z "${'$'}{TZ:-}" ] && [ ! -s /etc/localtime ]; then
+          off=${'$'}(/system/bin/date +%z)
+          case ${'$'}off in
+            +[0-9][0-9][0-9][0-9]) export TZ="<${'$'}off>-${'$'}{off:1:2}:${'$'}{off:3:2}" ;;
+            -[0-9][0-9][0-9][0-9]) export TZ="<${'$'}off>+${'$'}{off:1:2}:${'$'}{off:3:2}" ;;
+          esac
+          unset off
+        fi
+        # environment.extraInit.
+        [ -r /etc/nixup/environment ] && . /etc/nixup/environment
+        return 0
+    """.trimIndent() + "\n"
+
+    /** What bash reads in a login shell: what every session starts with, a prompt with the phone's name, and ~/.bashrc, as distributions have it. */
     private val PROFILE = """
         # Nixup's /etc/profile, for login shells in its view (written by the engine: Etc.kt).
+        [ -r /etc/nixup/set-environment ] && . /etc/nixup/set-environment
         if [ -n "${'$'}BASH_VERSION" ] && [ -n "${'$'}PS1" ]; then
           PS1='\[\e[1;32m\]\u@@NAME@\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\${'$'} '
           [ -r "${'$'}HOME/.bashrc" ] && . "${'$'}HOME/.bashrc"
         fi
+    """.trimIndent() + "\n"
+
+    /** What zsh reads first, in any session: what every session starts with, as /etc/profile gives it to bash. */
+    private val ZSHENV = """
+        # Nixup's /etc/zshenv, for zsh in its view (written by the engine: Etc.kt).
+        [ -r /etc/nixup/set-environment ] && emulate sh -c '. /etc/nixup/set-environment'
     """.trimIndent() + "\n"
 
     /**
@@ -417,23 +460,14 @@ object Etc {
     private val LOGIN = """
         #!/system/bin/sh
         # The users' shell in Nixup's view of the phone, for ssh sessions, the app's terminal and nixup-shell: the
-        # profile's (environment.systemPackages on PATH, then Android's commands). Written by the engine (Etc.kt).
-        export PATH=@PATH@ SHELL=/etc/nixup/login
+        # profile's (the user's own packages and environment.systemPackages on PATH, then Android's commands). Written
+        # by the engine (Etc.kt).
+        export SHELL=/etc/nixup/login
         # root's home; another user's is the one sshd gave it, from /etc/passwd.
         [ "${'$'}(/system/bin/id -u)" = 0 ] && export HOME=@HOME@
-        export LANG="${'$'}{LANG:-C.UTF-8}" TERM="${'$'}{TERM:-xterm-256color}"
-        # Android's time zone is /etc/localtime (its zones in /etc/zoneinfo); without it, its offset from UTC
-        # (POSIX: "<+0300>-03:00").
-        [ -d /etc/zoneinfo ] && export TZDIR=/etc/zoneinfo
-        if [ -z "${'$'}TZ" ] && [ ! -s /etc/localtime ]; then
-          off=${'$'}(/system/bin/date +%z)
-          case ${'$'}off in
-            +[0-9][0-9][0-9][0-9]) export TZ="<${'$'}off>-${'$'}{off:1:2}:${'$'}{off:3:2}" ;;
-            -[0-9][0-9][0-9][0-9]) export TZ="<${'$'}off>+${'$'}{off:1:2}:${'$'}{off:3:2}" ;;
-          esac
-        fi
-        # environment.extraInit.
-        [ -r /etc/nixup/environment ] && . /etc/nixup/environment
+        # What every session starts with (PATH, the time zone, environment.extraInit), anew.
+        unset __NIXUP_SET_ENVIRONMENT_DONE
+        . /etc/nixup/set-environment
         [ ${'$'}# -gt 0 ] && exec @SHELL@ "${'$'}@"
         cd "${'$'}HOME" 2> /dev/null
         exec @SHELL@ -l

@@ -6,6 +6,25 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- Home Manager, as on NixOS: import its NixOS module (a flake's `home-manager.nixosModules.home-manager`, or
+  `<home-manager/nixos>` in a configuration.nix alone, which the phone then fetches as it fetches nixpkgs) and
+  `home-manager.users.<name>` has all of Home Manager's options. Each user's Home Manager runs as the user at each
+  build that changes it and at the phone's start (`home-manager-<name>` in the Services tab), linking its files into
+  its home; the services it makes (every `services.*` module's, `systemd.user.services` of one's own) run as the
+  user's own (`user-<name>-<service>`); its packages are the user's profile. Taking a user out takes Home Manager's
+  links out of its home again. No desktop session or D-Bus session bus on a phone: what needs one is not started, or
+  fails; the manual page, the desktop's file types and the locales but UTF-8's are off by default.
+- A user's packages (`users.users.<name>.packages`) are its own profile now, `/etc/profiles/per-user/<name>`, on its
+  `PATH` before `environment.systemPackages`, as on NixOS; before, they were on everyone's `PATH`. A user's own shell
+  (`users.users.<name>.shell`, bash or zsh) gets the same `PATH`, time zone and `environment.extraInit` as Nixup's
+  login shell (`/etc/profile`, `/etc/zshenv`).
+- Users' own units (`systemd.user`) run as each user's `systemd --user` would: `%t` is its `/run/user/<uid>`, `%S`,
+  `%C`, `%E` and `%L` are in its home, and so are its `StateDirectory`, `CacheDirectory`, `LogsDirectory` and
+  `ConfigurationDirectory` (`RuntimeDirectory` in `/run/user/<uid>`); its sockets and their folders are the user's,
+  and the user's profile is on their `PATH`. A unix socket's path may start with a specifier (`%t/foo.sock`).
+- Sockets are handed over with their names (`FileDescriptorName`, else their socket unit's, as `LISTEN_FDNAMES`), and
+  a unix socket's folder is made with its `DirectoryMode`.
+- The build's messages name a user's unit where the config gives it (`home-manager.users.<name>.systemd.user...`).
 - Seraph is now called Nixup: the app (`dev.nixup.manager`), the Magisk module (`nixup`), its data
   (`/data/adb/nixup`), `nixup-rebuild`, `nixup-play-login`, `nixup-shell`, `nixup-backup`, and the flake
   (`github:by-architect/Nixup`, `nixup.lib.nixupSystem`, `nixupConfigurations`). Installing Nixup takes a

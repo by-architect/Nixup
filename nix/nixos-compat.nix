@@ -279,6 +279,7 @@ in
         defaultText = lib.literalExpression "environment.systemPackages, with bash, coreutils, findutils, grep, sed and less";
         description = "The system's packages in one folder, as on NixOS (made on the phone when something uses it).";
       };
+      userActivationScripts = taken (types.attrsOf types.anything) { } "scripts run in each user's session, as Home Manager's startAsUserService sets them (the phone has no user sessions)";
       checks = taken (types.listOf types.package) [ ] "builds that check the system";
       extraDependencies = taken (types.listOf types.unspecified) [ ] "paths kept with the system";
       extraSystemBuilderCmds = taken types.lines "" "commands the system's build runs";
@@ -376,6 +377,13 @@ in
 
     hardware = {
       graphics = absent "the GPU's drivers" { };
+    };
+
+    # (Home Manager's fontconfig follows it for its default.)
+    fonts.fontconfig.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = "As on NixOS, the system's fontconfig: the phone has none (Android draws its own text), so it is off (NixOS's is on).";
     };
 
     documentation = {

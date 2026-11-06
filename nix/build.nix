@@ -9,8 +9,14 @@
 #                                 neither, which nixup-rebuild sends; never in the profile
 { config, options, lib, pkgs, ... }:
 let
+  # Whether there are Nix packages for a shell: environment.systemPackages, or a user's (its profile: nix/users.nix).
+  anyPackages = config.environment.systemPackages != [ ] || lib.any (user: user.packages != [ ]) (lib.attrValues config.users.users);
   # What a shell has besides environment.systemPackages, as on NixOS.
-  shellPackages = lib.optionals (config.environment.systemPackages != [ ]) (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+  shellPackages = lib.optionals anyPackages (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+  # Whether a user has packages (users.users.<name>.packages), asked of the definitions alone: their packages need
+  # nixpkgs, which a configuration.nix's first look has not got.
+  userPackagesGiven = lib.any (def: builtins.isAttrs def && lib.any (user:
+    builtins.isAttrs user && (user ? packages || (user.content or { }) ? packages)) (lib.attrValues def)) options.users.users.definitions;
 
   repos = lib.mapAttrs (_: repo: { url = repo.address; fingerprint = repo.signingKey; }) config.android.repos;
 
@@ -73,11 +79,14 @@ in
   config.system.build = {
     # needsNixpkgs: whether the config uses Nix packages, which a configuration.nix alone gets from
     # the phone's copy of nixpkgs (fetched the first time one does). Asked without the packages
-    # themselves, which need it: whether a module sets environment.systemPackages or the
-    # terminal's font, whether a unit is there, and whether there are backups (restic).
+    # themselves, which need it: whether there is a user of Home Manager, whether a module sets
+    # environment.systemPackages, a user's packages or the terminal's font, whether a unit is
+    # there, and whether there are backups (restic).
     repos = {
       android = { inherit repos; };
-      needsNixpkgs = options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
+      needsNixpkgs = (options ? home-manager.users && config.home-manager.users != { })
+        || options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
+        || userPackagesGiven
         || options.terminal.font.highestPrio < (lib.mkOptionDefault null).priority
         || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { }
         || config.android.backup.repository != null
@@ -153,9 +162,9 @@ in
             storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths
               ++ config.system.build.terminalStorePaths);
             inherit derivations;
-            # nixup-shell's PATH (environment.systemPackages first) and its bash, as a shell on
-            # NixOS has them; none without Nix packages.
-            shell = if config.environment.systemPackages == [ ] then null else {
+            # nixup-shell's PATH (environment.systemPackages first; a user's profile goes before it) and
+            # its bash, as a shell on NixOS has them; none without Nix packages.
+            shell = if !anyPackages then null else {
               path = builtins.unsafeDiscardStringContext
                 "${lib.makeBinPath (config.environment.systemPackages ++ shellPackages)}:/system/bin";
               bash = builtins.unsafeDiscardStringContext "${pkgs.bashInteractive}/bin/bash";

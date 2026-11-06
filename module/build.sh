@@ -177,15 +177,17 @@ esac
 nix_env
 
 # configuration.nix alone: Nix evaluates it with nixpkgs' lib, packed in the module, and
-# for a config that uses Nix packages, with the phone's copy of nixpkgs (NIXPKGS). It
-# needs no store (dummy://): read-only, it works out the packages' store paths without
-# writing any, and the phone fetches them after.
+# for a config that uses Nix packages, with the phone's copy of nixpkgs (NIXPKGS); one that
+# imports Home Manager's NixOS module (<home-manager/nixos>) has the phone's copy of Home
+# Manager (HOME_MANAGER) as <home-manager>. It needs no store (dummy://): read-only, it
+# works out the packages' store paths without writing any, and the phone fetches them after.
 nix_eval() {
   # With nixpkgs, in Nixup's store: the small files the config makes (a service's settings)
   # are derivations the phone builds, which the evaluation writes there.
   store="--readonly-mode --store dummy://"
   [ -n "$NIXPKGS" ] && [ "$1" != --arg ] && store="--read-write-mode --store $DATA/nix"
   "$MODDIR/bin/nix-instantiate" --eval --strict --json $store -I nixpkgs="$MODDIR/nixpkgs" \
+    ${HOME_MANAGER:+-I home-manager="$HOME_MANAGER"} \
     "$MODDIR/nix/profile.nix" --argstr configFile "$CONFIG" --argstr nixpkgs "$NIXPKGS" "$@"
 }
 
@@ -276,11 +278,19 @@ fi
 # The repositories are in the config: they come first (they need no package
 # names), so their indexes are here when the whole config is evaluated. A
 # configuration.nix alone gets the phone's copy of nixpkgs when it has it; one that
-# imports NixOS's modules (modulesPath) needs it, and has it fetched first.
+# imports NixOS's modules (modulesPath) needs it, and has it fetched first; one that
+# imports Home Manager's NixOS module (<home-manager/nixos>) has Home Manager fetched
+# first too, with nixpkgs (its users' modules need it).
 log "== Repositories"
 [ -z "$FLAKE" ] && [ -d "$DATA/channels/nixpkgs/" ] && NIXPKGS=$(readlink -f "$DATA/channels/nixpkgs")
+[ -z "$FLAKE" ] && [ -d "$DATA/channels/home-manager/" ] && HOME_MANAGER=$(readlink -f "$DATA/channels/home-manager")
 if ! eval_repos > "$DATA/tmp/repos.json" 2> "$DATA/tmp/repos.err"; then
-  if [ -z "$FLAKE" ] && grep -q 'nixup:needs-nixpkgs' "$DATA/tmp/repos.err"; then
+  if [ -z "$FLAKE" ] && grep -q "file 'home-manager[/']" "$DATA/tmp/repos.err"; then
+    channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
+    home_manager_channel "$MODE" || fail "Home Manager could not be fetched (Nix says why above); nothing was changed"
+    eval_repos > "$DATA/tmp/repos.json" \
+      || fail "the config did not build (Nix says why above); nothing was changed"
+  elif [ -z "$FLAKE" ] && grep -q 'nixup:needs-nixpkgs' "$DATA/tmp/repos.err"; then
     channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
     eval_repos > "$DATA/tmp/repos.json" \
       || fail "the config did not build (Nix says why above); nothing was changed"
@@ -295,9 +305,12 @@ if [ "$MODE" = update ]; then engine index --force "$DATA/tmp/repos.json"; else 
   || log "Building with the indexes there are (a repository without one: its apps cannot be named)"
 
 # A configuration.nix alone that uses Nix packages needs the phone's copy of nixpkgs (a
-# flake has its own, as an input).
+# flake has its own, as an input); with update, the newest, and Home Manager's with it.
 if [ -z "$FLAKE" ] && grep -q '"needsNixpkgs":true' "$DATA/tmp/repos.json"; then
   channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
+  if [ -n "$HOME_MANAGER" ] && [ "$MODE" = update ]; then
+    home_manager_channel update || fail "Home Manager could not be fetched (Nix says why above); nothing was changed"
+  fi
 fi
 
 log "== Evaluating $CONFIG"

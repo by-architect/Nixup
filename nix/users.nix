@@ -18,6 +18,10 @@
 #
 # Android checks a process's groups for some of what it may do: network sockets need inet (3003) on some phones, the
 # shared storage's folders media_rw (1023). users.groups has those, with Android's numbers, for extraGroups.
+#
+# A user's packages (users.users.<name>.packages, and its Home Manager's: nix/home-manager.nix) are its profile, in
+# /etc/profiles/per-user/<name> as on NixOS: on its PATH (its sessions', and its own units'), before
+# environment.systemPackages.
 { config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
@@ -117,7 +121,7 @@ let
         type = types.listOf types.package;
         default = [ ];
         example = lib.literalExpression "[ pkgs.htop ]";
-        description = "Nix packages for the user, as on NixOS; on the phone they join environment.systemPackages.";
+        description = "Nix packages for the user, as on NixOS: its profile, /etc/profiles/per-user/<name>, on its PATH.";
       };
       openssh = {
         authorizedKeys = {
@@ -213,7 +217,19 @@ let
   groupLine = name: group: "${name}:x:${toString group.gid}:${lib.concatStringsSep "," (members name)}";
 
   userList = lib.attrValues users;
-  userPackages = lib.concatMap (user: user.packages) userList;
+  # A user's packages in one folder, its profile: made as nix-env makes one, by Nix itself (nixpkgs' buildEnv would need
+  # Perl on the phone), the first of two with the same file winning, as system.path is (nix/nixos-compat.nix).
+  profileOf = user:
+    let outputsOf = package: map (output: package.${output}.outPath or package.outPath) (package.meta.outputsToInstall or [ "out" ]); in
+    derivation {
+      name = "user-environment";
+      system = "builtin";
+      builder = "builtin:buildenv";
+      manifest = builtins.toFile "env-manifest.nix" "[ ]";
+      derivations = lib.imap1 (priority: package: [ "true" priority (builtins.length (outputsOf package)) ] ++ outputsOf package) user.packages;
+      preferLocalBuild = true;
+      allowSubstitutes = false;
+    };
   missingUid = map (user: user.name) (lib.filter (user: !hasUid user) userList);
   bothUids = map (user: user.name) (lib.filter (user: user.uid != null && user.androidApp != null && user.name != "root") userList);
   unknownGroups = lib.concatMap (user: map (group: "${user.name}: ${group}")
@@ -269,8 +285,9 @@ in
       description = lib.mkDefault "Unprivileged account (don't use!)";
     };
 
-    # (Only when there are some: a config without Nix packages needs no nixpkgs.)
-    environment.systemPackages = lib.mkIf (userPackages != [ ]) userPackages;
+    # Each user's profile, as NixOS makes /etc/profiles/per-user/<name>.
+    environment.etc = lib.mapAttrs' (_: user: lib.nameValuePair "profiles/per-user/${user.name}" { source = profileOf user; })
+      (lib.filterAttrs (_: user: user.packages != [ ]) users);
 
     # The view's /etc/passwd and /etc/group (the engine writes them), and the homes to make.
     system.build.users = {

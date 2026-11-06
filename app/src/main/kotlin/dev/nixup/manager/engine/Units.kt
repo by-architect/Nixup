@@ -162,6 +162,7 @@ class Units(private val data: File) {
         toStop.forEach { stop(it) }
         for (name in leaving) {
             stop(name)
+            cleanUp(name)
             File(dir, name).deleteRecursively()
             Out.line("✔ $name: removed (it left the config)")
         }
@@ -403,7 +404,7 @@ class Units(private val data: File) {
             }
         }
         val gid = unit.string("group")?.let { accounts.groups[it] } ?: account?.gid
-        prepareDirectories(name, unit, account?.uid, gid)
+        prepareDirectories(name, unit, account?.uid, gid, account?.home)
         writeScripts(name, unit, unitDir)
         File(unitDir, "spec.json").writeText(unit.toString())
         // The storage it needs (unitConfig.RequiresMountsFor), one path a line, for its loop.
@@ -414,18 +415,28 @@ class Units(private val data: File) {
 
     /**
      * Its folders, as systemd makes them (StateDirectory in /var/lib, CacheDirectory in /var/cache, LogsDirectory in
-     * /var/log, RuntimeDirectory in /run, ConfigurationDirectory in /etc), with their modes (0755 unless *Mode says),
-     * owned by its user, and what is in them too when they were someone else's. RuntimeDirectory starts empty. A
-     * DynamicUser's state, cache and logs are also there as /var/lib/private/<name>, where systemd keeps them (and some of
-     * NixOS's modules look).
+     * /var/log, RuntimeDirectory in /run, ConfigurationDirectory in /etc; a user's own unit's in its home, [home], and
+     * its /run/user/<uid>, as its systemd --user makes them), with their modes (0755 unless *Mode says), owned by its
+     * user, and what is in them too when they were someone else's. RuntimeDirectory starts empty. A DynamicUser's state,
+     * cache and logs are also there as /var/lib/private/<name>, where systemd keeps them (and some of NixOS's modules
+     * look).
      */
-    private fun prepareDirectories(name: String, unit: JSONObject, uid: Int?, gid: Int?) {
+    private fun prepareDirectories(name: String, unit: JSONObject, uid: Int?, gid: Int?, home: String?) {
         val modes = unit.optJSONObject("directoryModes")
-        for ((kind, key, base) in directories()) {
+        val mine = unit.optBoolean("userManager")
+        for ((kind, key, base) in directories(unit, uid, home)) {
             val mode = modes?.string(kind)?.toIntOrNull(8) ?: "755".toInt(8)
             for (relative in unit.strings(key)) {
                 val path = File(base, relative)
                 if (kind == "Runtime") remove(path)
+                // A user's own: the folders on the way that are not there yet are its own too (its /run/user/<uid> only
+                // it may open, as systemd makes it; /run/user is root's).
+                if (mine && kind == "Runtime") {
+                    base.parentFile?.mkdirs()
+                    makeOwned(base, base, uid, gid, "700".toInt(8))
+                } else if (mine) {
+                    path.parentFile?.let { makeOwned(Etc.outside(data, home ?: File(data, "home").path), it, uid, gid, "755".toInt(8)) }
+                }
                 path.mkdirs()
                 runCatching {
                     if (uid != null) {
@@ -452,14 +463,41 @@ class Units(private val data: File) {
         runCatching { Os.symlink("../".repeat(relative.count { it == '/' } + 1) + relative, link.path) }
     }
 
-    /** The kinds of a unit's folders: its key in serviceConfig (a profile's list) and where they are. */
-    private fun directories() = listOf(
-        Triple("State", "stateDirectories", File(varDir, "lib")),
-        Triple("Cache", "cacheDirectories", File(varDir, "cache")),
-        Triple("Logs", "logsDirectories", File(varDir, "log")),
-        Triple("Runtime", "runtimeDirectories", runDir),
-        Triple("Configuration", "configurationDirectories", File(data, "etc")),
-    )
+    /**
+     * [dir] and the folders on the way to it below [top] that are not there yet, made with [mode], [uid]'s (a user's own
+     * unit's folders, in its home).
+     */
+    private fun makeOwned(top: File, dir: File, uid: Int?, gid: Int?, mode: Int) {
+        if (dir.isDirectory) return
+        dir.parentFile?.takeIf { it.path.startsWith(top.path + "/") }?.let { makeOwned(top, it, uid, gid, mode) }
+        if (!dir.mkdir()) return
+        runCatching {
+            if (uid != null) Os.chown(dir.path, uid, gid ?: uid)
+            Os.chmod(dir.path, mode)
+        }
+    }
+
+    /**
+     * The kinds of a unit's folders: its key in serviceConfig (a profile's list) and where they are; a user's own unit's
+     * ([unit]'s userManager) in its [home] and its /run/user/<[uid]> (root's: /data/adb/nixup/home, /run/user/0).
+     */
+    private fun directories(unit: JSONObject? = null, uid: Int? = null, home: String? = null): List<Triple<String, String, File>> {
+        if (unit?.optBoolean("userManager") != true) return listOf(
+            Triple("State", "stateDirectories", File(varDir, "lib")),
+            Triple("Cache", "cacheDirectories", File(varDir, "cache")),
+            Triple("Logs", "logsDirectories", File(varDir, "log")),
+            Triple("Runtime", "runtimeDirectories", runDir),
+            Triple("Configuration", "configurationDirectories", File(data, "etc")),
+        )
+        val own = Etc.outside(data, home ?: File(data, "home").path)
+        return listOf(
+            Triple("State", "stateDirectories", File(own, ".local/state")),
+            Triple("Cache", "cacheDirectories", File(own, ".cache")),
+            Triple("Logs", "logsDirectories", File(own, ".local/state/log")),
+            Triple("Runtime", "runtimeDirectories", File(runDir, "user/${uid ?: 0}")),
+            Triple("Configuration", "configurationDirectories", File(own, ".config")),
+        )
+    }
 
     /** A simple (or forking) unit, under its loop; told about at once if it stops at once (a wrong command, a missing file). */
     private fun launch(name: String, unit: JSONObject, unitDir: File): Boolean {
@@ -687,8 +725,26 @@ class Units(private val data: File) {
         File(unitDir, "supervisor.pid").delete()
         File(unitDir, "main.pid").delete()
         if (spec?.optString("runtimeDirectoryPreserve") !in listOf("yes", "true", "1", "restart")) {
-            spec?.strings("runtimeDirectories")?.forEach { remove(File(runDir, it)) }
+            // A user's own unit's are in its /run/user/<uid> (one whose user is gone keeps them).
+            val base = when {
+                spec == null || !spec.optBoolean("userManager") -> runDir
+                spec.string("user") == null -> File(runDir, "user/0")
+                else -> Etc.accounts(data).users[spec.getString("user")]?.uid?.let { File(runDir, "user/$it") }
+            }
+            if (base != null) spec?.strings("runtimeDirectories")?.forEach { remove(File(base, it)) }
         }
+    }
+
+    /**
+     * What a unit runs once it leaves the config, as its last step (its cleanup.sh, as its user: Home Manager's unit of a
+     * user takes the user's links out of its home), told and kept in its log, which goes with it.
+     */
+    private fun cleanUp(name: String) {
+        val unitDir = File(dir, name)
+        val script = File(unitDir, "cleanup.sh").takeIf { it.isFile } ?: return
+        val spec = runCatching { JSONObject(File(unitDir, "spec.json").readText()) }.getOrNull() ?: return
+        val (done, code) = inView(name, spec, script, File(unitDir, "log"), 600, show = true)
+        if (!done || code != 0) Out.line("✘ $name: what it does once it leaves the config did not end well (${if (done) code else "it took too long"})")
     }
 
     /** Whether [unit] is a oneshot that ran and stays active (RemainAfterExit), with something to stop it. */
@@ -722,7 +778,8 @@ class Units(private val data: File) {
 
     /**
      * Its scripts, by file name: start.sh (its conditions, ExecCondition, ExecStartPre, then ExecStart; a oneshot's
-     * ExecStartPost too), post.sh, stop.sh (ExecStop) and stoppost.sh (ExecStopPost). Each begins as root, in the view
+     * ExecStartPost too), post.sh, stop.sh (ExecStop), stoppost.sh (ExecStopPost) and cleanup.sh (what it runs once it
+     * leaves the config: Home Manager's unit of a user takes its links out). Each begins as root, in the view
      * ([head]); its steps run as its user (through setpriv), but for those marked + or ! (and with PermissionsStartOnly,
      * all but its ExecStart), which run as root, as systemd runs them.
      */
@@ -764,6 +821,7 @@ class Units(private val data: File) {
         val post = unit.objects("post").map { line(it, "run", rootSteps) }
         val stop = unit.objects("stop").map { line(it, "stop", rootSteps) }
         val stopPost = unit.objects("stopPost").map { line(it, "stop", rootSteps) }
+        val cleanup = unit.objects("cleanup").map { line(it, "stop", rootSteps) }
         val checks = checks(name, unit, unitDir)
         if (oneshot(unit)) {
             files["start.sh"] = head(name, unit, env) + checks + (condition + pre + start.map { line(it, "run") } + post).joinToString("") { "$it\n" }
@@ -779,22 +837,37 @@ class Units(private val data: File) {
         }
         if (stop.isNotEmpty()) files["stop.sh"] = head(name, unit, env) + stop.joinToString("") { "$it\n" }
         if (stopPost.isNotEmpty()) files["stoppost.sh"] = head(name, unit, env) + stopPost.joinToString("") { "$it\n" }
+        if (cleanup.isNotEmpty()) files["cleanup.sh"] = head(name, unit, env) + cleanup.joinToString("") { "$it\n" }
         return files
     }
 
     /**
      * The start of a simple unit's program ([wrapped]: as its user, through setpriv), and of one with sockets
      * (systemd.sockets) first systemfd's, which opens them as root and hands them over as systemd does (as fds 3 and
-     * on, with LISTEN_FDS and LISTEN_PID): each execs the next, so the process stays the one started. A unix socket's
-     * file is made anew, readable and writable by all as systemd makes it (the program gets the unit's umask back);
-     * with StandardInput = "socket" the first socket is its input too.
+     * on, with LISTEN_FDS and LISTEN_PID, and their names as LISTEN_FDNAMES): each execs the next, so the process stays
+     * the one started. A unix socket's file is made anew, readable and writable by all as systemd makes it (the program
+     * gets the unit's umask back), in a folder made with its DirectoryMode when it is not there; a user's own unit's
+     * (userManager: its %t/gnupg/S.gpg-agent, ...) are its user's, as its systemd --user makes them. With
+     * StandardInput = "socket" the first socket is its input too.
      */
     private fun listen(name: String, unit: JSONObject, unitDir: File, wrapped: String, files: MutableMap<String, String>): String {
         val specs = unit.strings("sockets")
         if (specs.isEmpty()) return "exec $wrapped"
-        val prepare = specs.filter { it.startsWith("unix::") }.map { it.removePrefix("unix::") }.joinToString("") { path ->
-            "/system/bin/mkdir -p ${quote(File(path).parent ?: "/")} && { [ ! -S ${quote(path)} ] || /system/bin/rm -f ${quote(path)}; } || exit 1\n"
-        }
+        val env = environment(name, unit)
+        // A socket's spec or path as a shell word, its specifiers filled in (one of its user's, when it runs).
+        val word = { text: String -> parse(name, unit, "/ $text", arguments = true).shell(env, runtime(unit)).drop(1).joinToString(" ") }
+        val owned = unit.optBoolean("userManager") && unit.string("user") != null
+        val modes = unit.strings("socketDirectoryModes")
+        val unixPaths = specs.withIndex().filter { it.value.startsWith("unix::") }.map { (i, spec) -> i to spec.removePrefix("unix::") }
+        val prepare = unixPaths.joinToString("") { (i, path) ->
+            val folder = word(path.substringBeforeLast('/', "/").ifEmpty { "/" })
+            val mode = modes.getOrNull(i)?.takeIf { Regex("[0-7]{3,4}").matches(it) } ?: "0755"
+            val own = if (owned) " && /system/bin/chown \"${'$'}nixup_uid:${'$'}nixup_gid\" $folder" else ""
+            "{ [ -d $folder ] || { /system/bin/mkdir -p $folder$own && /system/bin/chmod $mode $folder; }; } && { [ ! -S ${word(path)} ] || /system/bin/rm -f ${word(path)}; } || exit 1\n"
+        } + (if (owned && unixPaths.isNotEmpty()) "export nixup_uid nixup_gid\n" else "") +
+            // Each socket's name, as systemd hands them over (its FileDescriptorName, else its socket unit's).
+            unit.strings("socketNames").takeIf { it.size == specs.size && !unit.optBoolean("accept") && it.none { n -> ':' in n } }
+                ?.let { "export LISTEN_FDNAMES=${quote(it.joinToString(":"))}\n" }.orEmpty()
         val program = if (unit.optBoolean("accept")) {
             // Accept = true: socat takes each connection (in a process of its own) and runs conn.sh with it as its
             // input and output, as systemd runs an instance for each: as StandardInput = "socket" has it, or as fd 3
@@ -820,9 +893,11 @@ class Units(private val data: File) {
         } else {
             ""
         }
-        val restore = quote("umask \"\$1\"; shift; ${wait}exec \"\$@\"$input")
+        // A user's own unix sockets become its own, once systemfd has made them (still as root).
+        val chown = if (owned && unixPaths.isNotEmpty()) "/system/bin/chown \"\$nixup_uid:\$nixup_gid\" ${unixPaths.joinToString(" ") { word(it.second) }} || exit 1; unset nixup_uid nixup_gid; " else ""
+        val restore = quote("umask \"\$1\"; shift; $chown${wait}exec \"\$@\"$input")
         return prepare + "nixup_umask=${'$'}(umask)\numask 0111\n" +
-            "exec ${quote(unit.getString("systemfd"))} '-q' '-b' '4096' ${specs.joinToString(" ") { "'-s' ${quote(it)}" }} '--' " +
+            "exec ${quote(unit.getString("systemfd"))} '-q' '-b' '4096' ${specs.joinToString(" ") { "'-s' ${word(it)}" }} '--' " +
             "/system/bin/sh -c $restore nixup-socket \"${'$'}nixup_umask\" $program"
     }
 
@@ -1018,30 +1093,35 @@ class Units(private val data: File) {
     }
 
     /**
-     * Its environment, with systemd's STATE_DIRECTORY, RUNTIME_DIRECTORY, CACHE_DIRECTORY, LOGS_DIRECTORY,
-     * CONFIGURATION_DIRECTORY and CREDENTIALS_DIRECTORY.
+     * Its environment as the unit gives it, with systemd's STATE_DIRECTORY, RUNTIME_DIRECTORY, CACHE_DIRECTORY,
+     * LOGS_DIRECTORY, CONFIGURATION_DIRECTORY (a user's own unit's in its home and its /run/user/<uid>, as specifiers)
+     * and CREDENTIALS_DIRECTORY; its specifiers not filled in yet.
      */
-    private fun environment(name: String, unit: JSONObject): Map<String, String> {
+    private fun unitVariables(name: String, unit: JSONObject): Map<String, String> {
         val env = linkedMapOf<String, String>()
         unit.optJSONObject("environment")?.let { json -> json.keys().forEach { env[it] = json.getString(it) } }
+        val mine = unit.optBoolean("userManager")
         for ((variable, key, base) in listOf(
-            Triple("STATE_DIRECTORY", "stateDirectories", "/var/lib"), Triple("RUNTIME_DIRECTORY", "runtimeDirectories", "/run"),
-            Triple("CACHE_DIRECTORY", "cacheDirectories", "/var/cache"), Triple("LOGS_DIRECTORY", "logsDirectories", "/var/log"),
-            Triple("CONFIGURATION_DIRECTORY", "configurationDirectories", "/etc"),
+            Triple("STATE_DIRECTORY", "stateDirectories", if (mine) "%S" else "/var/lib"),
+            Triple("RUNTIME_DIRECTORY", "runtimeDirectories", if (mine) "%t" else "/run"),
+            Triple("CACHE_DIRECTORY", "cacheDirectories", if (mine) "%C" else "/var/cache"),
+            Triple("LOGS_DIRECTORY", "logsDirectories", if (mine) "%L" else "/var/log"),
+            Triple("CONFIGURATION_DIRECTORY", "configurationDirectories", if (mine) "%E" else "/etc"),
         )) {
             unit.strings(key).takeIf { it.isNotEmpty() }?.let { env[variable] = it.joinToString(":") { dir -> "$base/$dir" } }
         }
         if (unit.has("credentials")) env["CREDENTIALS_DIRECTORY"] = credentialsDirectory(name)
-        // Specifiers in its values (%S, %N, %d, ...), as systemd fills them in; those only known when it runs are
-        // runtimeEnvironment's.
-        return env.mapValues { (_, value) -> specified(name, unit, value) }.filterValues { parts -> parts.none { it is Part.Variable } }
-            .mapValues { (_, parts) -> parts.joinToString("") { (it as Part.Text).text } }
+        return env
     }
+
+    /** Its environment ([unitVariables]), with the specifiers in its values (%S, %N, %d, ...) filled in, as systemd does; those only known when it runs are runtimeEnvironment's. */
+    private fun environment(name: String, unit: JSONObject): Map<String, String> =
+        unitVariables(name, unit).mapValues { (_, value) -> specified(name, unit, value) }.filterValues { parts -> parts.none { it is Part.Variable } }
+            .mapValues { (_, parts) -> parts.joinToString("") { (it as Part.Text).text } }
 
     /** Its variables with specifiers only known when it runs (its user's HOME, uid, gid), as shell words. */
     private fun runtimeEnvironment(name: String, unit: JSONObject): Map<String, String> {
-        val env = linkedMapOf<String, String>()
-        unit.optJSONObject("environment")?.let { json -> json.keys().forEach { env[it] = json.getString(it) } }
+        val env = unitVariables(name, unit)
         return env.mapValues { (_, value) -> specified(name, unit, value) }.filterValues { parts -> parts.any { it is Part.Variable } }
             .mapValues { (_, parts) ->
                 "\"" + parts.joinToString("") { part ->
@@ -1053,10 +1133,12 @@ class Units(private val data: File) {
             }
     }
 
-    /** [value] with its specifiers filled in: text, and the variables of those only known when it runs. */
+    /**
+     * [value] with its specifiers filled in: text, and the variables of those only known when it runs (a specifier's
+     * $HOME, $nixup_uid: see [specifier]).
+     */
     private fun specified(name: String, unit: JSONObject, value: String): List<Part> {
         if ('%' !in value) return listOf(Part.Text(value))
-        val runtime = if (unit.string("user") != null) mapOf('h' to "HOME", 'U' to "nixup_uid", 'G' to "nixup_gid") else emptyMap()
         val parts = mutableListOf<Part>()
         val text = StringBuilder()
         var i = 0
@@ -1064,14 +1146,16 @@ class Units(private val data: File) {
             val c = value[i]
             if (c == '%' && i + 1 < value.length) {
                 val letter = value[i + 1]
-                val variable = runtime[letter]
-                if (variable != null) {
+                // One not on the phone stays as it is.
+                val filled = runCatching { specifier(name, unit, letter) }.getOrElse { "%$letter" }
+                var at = 0
+                for (match in SPECIFIED_VARIABLE.findAll(filled)) {
+                    text.append(filled, at, match.range.first)
                     if (text.isNotEmpty()) parts += Part.Text(text.toString()).also { text.clear() }
-                    parts += Part.Variable(variable, split = false)
-                } else {
-                    // One not on the phone stays as it is.
-                    text.append(runCatching { specifier(name, unit, letter) }.getOrElse { "%$letter" })
+                    parts += Part.Variable(match.groupValues[1], split = false)
+                    at = match.range.last + 1
                 }
+                text.append(filled, at, filled.length)
                 i += 2
             } else {
                 text.append(c)
@@ -1319,10 +1403,16 @@ class Units(private val data: File) {
     private fun parse(name: String, unit: JSONObject, line: String, arguments: Boolean = false): Command =
         parse(line, arguments) { letter -> specifier(name, unit, letter) }
 
-    /** systemd's specifiers a command may have, and their values in the view. */
+    /**
+     * systemd's specifiers a command may have, and their values in the view; a user's own unit's (userManager: systemd.user,
+     * Home Manager's) as its systemd --user has them: %t its /run/user/<uid>, %S, %C, %L and %E in its home. Those of its
+     * user ($HOME, $nixup_uid) the shell knows when the unit runs.
+     */
     private fun specifier(name: String, unit: JSONObject, letter: Char): String {
         val user = unit.string("user")
         val instance = name.substringAfter('@', "")
+        val mine = unit.optBoolean("userManager")
+        val home = if (user != null) "${'$'}{HOME}" else File(data, "home").path
         return when (letter) {
             '%' -> "%"
             'n' -> "$name.service"
@@ -1331,11 +1421,11 @@ class Units(private val data: File) {
             'P' -> name.substringBefore('@')
             'i', 'I' -> instance
             'j', 'J' -> name.substringBefore('@').substringAfterLast('-')
-            't' -> "/run"
-            'S' -> "/var/lib"
-            'C' -> "/var/cache"
-            'L' -> "/var/log"
-            'E' -> "/etc"
+            't' -> if (!mine) "/run" else if (user != null) "/run/user/${'$'}{nixup_uid}" else "/run/user/0"
+            'S' -> if (mine) "$home/.local/state" else "/var/lib"
+            'C' -> if (mine) "$home/.cache" else "/var/cache"
+            'L' -> if (mine) "$home/.local/state/log" else "/var/log"
+            'E' -> if (mine) "$home/.config" else "/etc"
             'T', 'V' -> "/tmp"
             'd' -> credentialsDirectory(name)
             'u' -> user ?: "root"
@@ -1848,6 +1938,8 @@ class Units(private val data: File) {
         private fun quote(text: String) = "'" + text.replace("'", "'\\''") + "'"
 
         private val WHOLE_VARIABLE = Regex("\\$([A-Za-z_][A-Za-z0-9_]*)(?=\\s|$)")
+        /** A variable in a specifier's value ([specifier]: its user's HOME and uid, as the shell has them). */
+        private val SPECIFIED_VARIABLE = Regex("\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}")
         private val VARIABLE = Regex("\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}|\\$([A-Za-z_][A-Za-z0-9_]*)")
 
         /** A match of this pattern that starts right at [index] of [text], if there is one. */

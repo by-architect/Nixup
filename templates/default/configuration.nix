@@ -694,6 +694,18 @@
   #   imports = [ "${modulesPath}/services/web-apps/foo.nix" ];
   #   disabledModules = [ "services/misc/ntfy-sh.nix" ];   # leaves one of the list out, for a module of your own
 
+  # Home Manager, as on NixOS (its own NixOS module, with all of its options): a user's files, programs and services
+  # from here. With this file alone the phone fetches Home Manager, as it fetches nixpkgs (a flake: give it
+  # home-manager.nixosModules.home-manager in its modules instead of the import):
+  #   imports = [ <home-manager/nixos> ];
+  #   home-manager.useGlobalPkgs = true;          # the phone's pkgs
+  #   home-manager.backupFileExtension = "backup";   # a file in the way is moved aside, not refused
+  #   home-manager.users.niobe = { pkgs, ... }: {
+  #     home.stateVersion = "26.05";
+  #     programs.git.enable = true;
+  #     services.gpg-agent.enable = true;         # runs as niobe's own service (user-niobe-gpg-agent)
+  #   };
+
   environment.etc = { };                          # files in Nixup's /etc, like { "foo/foo.conf".text = "a = 1"; }
   environment.variables = { };                    # variables of every shell session, like { EDITOR = "nano"; }
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]

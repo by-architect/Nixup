@@ -214,6 +214,54 @@ Programs from nixpkgs for the phone's shell, as NixOS's `environment.systemPacka
 - `terminal.font` must be a file from a Nix package; `terminal.colors` takes `background`, `foreground`,
   `cursor` and `color0` to `color15`.
 - A normal user's home is `/home/<name>`, ready right after the phone starts.
+- A user's own packages (`users.users.<name>.packages`) are in its profile, `/etc/profiles/per-user/<name>`, on its
+  `PATH` before `environment.systemPackages`, as on NixOS.
+
+</details>
+
+<details>
+<summary><b>Home Manager</b></summary>
+
+[Home Manager](https://github.com/nix-community/home-manager) works as on NixOS, through its own NixOS module, with
+all of its options: `programs.*`, `services.*`, `home.file`, `xdg.*`, `home.packages`, `home.activation`. One module
+file can configure a user on a NixOS machine and on the phone.
+
+```nix
+{ pkgs, ... }: {
+  # A flake: inputs.home-manager.url = "github:nix-community/home-manager";
+  #          modules = [ home-manager.nixosModules.home-manager ./configuration.nix ];
+  # A configuration.nix alone: the phone fetches Home Manager (as it fetches nixpkgs):
+  imports = [ <home-manager/nixos> ];
+
+  users.users.niobe = { isNormalUser = true; androidApp = "dev.nixup.manager"; };
+
+  home-manager.useGlobalPkgs = true;            # the phone's pkgs (one evaluation of nixpkgs, not two)
+  home-manager.backupFileExtension = "backup";  # a file of yours in the way is moved aside, not refused
+  home-manager.users.niobe = { pkgs, ... }: {
+    home.stateVersion = "26.05";
+    home.packages = [ pkgs.ripgrep ];
+    programs.git = { enable = true; settings.user.name = "Niobe"; };
+    programs.bash.enable = true;
+    services.gpg-agent = { enable = true; enableSshSupport = true; };
+  };
+}
+```
+
+- Each user's Home Manager runs at each build that changes it and at the phone's start, as the user: it links the
+  user's files into its home and runs each module's steps (`onChange`, `home.activation`). The Services tab shows it
+  as `home-manager-<name>`, with its log.
+- The services Home Manager makes (every `services.*` module's, and `systemd.user.services` of your own) run as the
+  user's own, named `user-<name>-<service>`, after its files are linked: with `%t` its `/run/user/<uid>`,
+  `StateDirectory` in `~/.local/state`, and its sockets its own, as its `systemd --user` would run them.
+- Its packages are the user's profile (`/etc/profiles/per-user/<name>`), whatever `useUserPackages` says: a user
+  cannot install into the phone's store.
+- Taking a user out of `home-manager.users` takes Home Manager's links out of its home again.
+- On a phone some defaults differ, to save downloads: no manual page, no desktop file types (`xdg.mime`), and only
+  the UTF-8 locales; each can be turned on again.
+- Not on the phone: a desktop session (what only `graphical-session.target` starts is not started, and the build says
+  so), a D-Bus session bus (the services that need one fail), and `startAsUserService`. Home Manager's files are
+  links into `/nix/store`, so they are there in Nixup's view of the phone (SSH, the app's terminal, the services), not
+  for Android's apps.
 
 </details>
 

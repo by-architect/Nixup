@@ -425,3 +425,31 @@ channel() {
   fi
   NIXPKGS=$(readlink -f "$channel_link")
 }
+
+# Home Manager, for a configuration.nix alone that imports its NixOS module (imports = [ <home-manager/nixos> ];), as a
+# NixOS channel has it: the branch that goes with the phone's nixpkgs (master with nixos-unstable, release-25.05 with
+# nixos-25.05), or the one $DATA/channel-home-manager names; fetched the first time a config asks for it, and again with
+# update. It is kept in Nixup's store, as a root of it: HOME_MANAGER is its path there (<home-manager>).
+HOME_MANAGER=
+home_manager_channel() {
+  hm_url=$(cat "$DATA/channel-home-manager" 2> /dev/null)
+  if [ -z "$hm_url" ]; then
+    release=$(sed -n 's/.*nixos-\([0-9][0-9]\.[0-9][0-9]\).*/\1/p' "$DATA/channel" 2> /dev/null | head -n 1)
+    if [ -n "$release" ]; then
+      hm_url=https://github.com/nix-community/home-manager/archive/release-$release.tar.gz
+    else
+      hm_url=https://github.com/nix-community/home-manager/archive/master.tar.gz
+    fi
+  fi
+  hm_link=$DATA/channels/home-manager
+  if [ ! -d "$hm_link/" ] || [ "$1" = update ]; then
+    log "== Home Manager ($hm_url)"
+    nix_etc > /dev/null || { log "Nix could not get its /etc (the network's DNS servers): is the phone online?"; return 1; }
+    hm_path=$(nix_run "$MODDIR/bin/nix" --store "$DATA/nix" eval --raw --impure --option tarball-ttl 0 \
+      --expr "builtins.fetchTarball \"$hm_url\"") || return 1
+    mkdir -p "$DATA/channels" "$DATA/nix/nix/var/nix/gcroots"
+    ln -sfn "$hm_path" "$DATA/nix/nix/var/nix/gcroots/nixup-home-manager"
+    ln -sfn "$DATA/nix$hm_path" "$hm_link"
+  fi
+  HOME_MANAGER=$(readlink -f "$hm_link")
+}
