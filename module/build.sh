@@ -22,14 +22,39 @@
 #            --switch-generation and nixos-rebuild --rollback go back to one: its settings,
 #            apps (at their newest versions) and services; it becomes the newest generation
 #            (dry: only says what would change)
+# and, after any of switch, dry, update, again and generation:
+#   --specialisation <name>
+#            applies the build's specialisation <name> (nix/specialisation.nix) instead of the
+#            config itself, as nixos-rebuild --specialisation; the phone keeps it, across
+#            restarts too, until a build picks another. Without it, switch, dry and update apply
+#            the config itself, and again and generation the specialisation they had
+#   --no-specialisation
+#            the config itself, for again and generation
 # The config is what the app's Config picked (config_source in common.sh): a
 # configuration.nix, built alone; a flake.nix, whose folder is the flake (as
 # nixos-rebuild --flake reads /etc/nixos); or a flake's address, like github:owner/repo,
 # fetched. Seraph keeps no config folder of its own.
 MODDIR=${0%/*}
+# The specialisation asked for (--specialisation <name>, --no-specialisation), wherever it is among the arguments; the
+# others, plain words, stay in their order.
+SPECIALISATION= SPECIALISATION_GIVEN= SPECIALISATION_ARGS= rest=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --specialisation) SPECIALISATION=$2 SPECIALISATION_GIVEN=1; shift; [ $# -gt 0 ] && shift ;;
+    --specialisation=*) SPECIALISATION=${1#*=} SPECIALISATION_GIVEN=1; shift ;;
+    --no-specialisation) SPECIALISATION= SPECIALISATION_GIVEN=1; shift ;;
+    *) rest="$rest $1"; shift ;;
+  esac
+done
+set -- $rest
 BY=${1:-manual}
 MODE=${2:-switch}
 . "$MODDIR/common.sh"
+case "$SPECIALISATION" in
+  *[!A-Za-z0-9_.-]* | [!A-Za-z0-9]*) fail "--specialisation: \"$SPECIALISATION\" is not a specialisation's name (letters, digits and _ . -)" ;;
+esac
+[ -n "$SPECIALISATION_GIVEN" ] && SPECIALISATION_ARGS=${SPECIALISATION:+--specialisation $SPECIALISATION}
+[ -n "$SPECIALISATION_GIVEN" ] && [ -z "$SPECIALISATION" ] && SPECIALISATION_ARGS=--no-specialisation
 
 # The run: its log, and what the app is told (see run_open in common.sh).
 case "$MODE" in
@@ -48,8 +73,8 @@ NEW=$PROFILE.new-$$
 at_exit 'rm -f "$NEW"'
 # A restart (or a kill) in the middle: it starts again after (see resume.sh).
 case "$MODE" in
-  switch | update | again) resumable build build.sh "$MODE" ;;
-  generation) resumable build build.sh generation "$3" ${4:+"$4"} ;;
+  switch | update | again) resumable build build.sh "$MODE" $SPECIALISATION_ARGS ;;
+  generation) resumable build build.sh generation "$3" ${4:+"$4"} $SPECIALISATION_ARGS ;;
 esac
 
 case "$MODE" in
@@ -57,7 +82,9 @@ case "$MODE" in
   again)
     [ -f "$PROFILE" ] || fail "there is no build to apply again"
     log "== The last build again"
-    cp "$PROFILE" "$NEW"
+    # The whole of it (with its specialisations), and the specialisation in use unless another is asked for.
+    if [ -f "$SYSTEM" ]; then cp "$SYSTEM" "$NEW"; else cp "$PROFILE" "$NEW"; fi
+    [ -n "$SPECIALISATION_GIVEN" ] || SPECIALISATION=$(head -n 1 "$SPECIALISATION_IN_USE" 2> /dev/null)
     switch_to "$NEW" switch
     exit 0 ;;
   generation)
@@ -73,6 +100,8 @@ case "$MODE" in
     GEN_LOCK=
     [ -f "$g/flake.lock" ] && GEN_LOCK=$g/flake.lock
     [ -n "$GEN_SOURCE" ] || GEN_SOURCE="generation $n"
+    # The specialisation it had, unless another is asked for.
+    [ -n "$SPECIALISATION_GIVEN" ] || SPECIALISATION=$(head -n 1 "$g/specialisation" 2> /dev/null)
     cp "$g/profile.json" "$NEW"
     switch_to "$NEW" "$how"
     exit 0 ;;

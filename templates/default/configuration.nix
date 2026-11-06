@@ -707,4 +707,18 @@
   nixpkgs.hostPlatform = "aarch64-linux";         # the phone's processor: 64-bit ARM
 
   system.activationScripts = { };                 # scripts at each build: not on the phone yet
+
+  # Other versions of this config, built with it: switch with ⋮ → Specialisations (no new build),
+  # or build.sh / seraph-rebuild --specialisation work. The phone keeps the one picked, also after
+  # a restart, until a build picks another (or none: this config itself).
+  specialisation = {
+    # work.configuration = {                      # this config, with these lines over it
+    #   services.syncthing.enable = false;
+    #   android.settings.display.darkMode = true;
+    # };
+    # bare = {
+    #   inheritParentConfig = false;              # only its own lines, not this config's
+    #   configuration = { };
+    # };
+  };
 }

@@ -18,6 +18,10 @@
 #   --target-host <phone>      adb (the phone adb sees, the default), adb:<serial>, or [user@]host for ssh
 #                              (whose user can run su on the phone: root, or a user of Seraph's own app,
 #                              users.users.<name>.androidApp = "dev.seraph.manager")
+#   --specialisation <name>    apply the config's specialisation <name> (specialisation.<name>) instead of the
+#                              config itself, as nixos-rebuild --specialisation; the phone keeps it until a build
+#                              picks another (it can switch between them later without a PC: build.sh again
+#                              --specialisation <name>, or the app's Specialisations)
 #   --upgrade                  a flake's inputs at their newest first (nix flake update, for a flake in a
 #                              folder here), and the indexes and releases fetched again
 #   --override-input <input> <flake>
@@ -44,7 +48,7 @@ case $action in
   "" | -h | --help | help) usage; exit 0 ;;
   *) die "no such action: $action (switch, dry-activate or build; --help says more)" ;;
 esac
-flake="" file="" target="adb" upgrade=0 trace=() overrides=()
+flake="" file="" target="adb" upgrade=0 trace=() overrides=() specialisation=""
 while (($#)); do
   case $1 in
     --flake) [[ $# -ge 2 ]] || die "--flake needs a flake"; flake=$2; shift 2 ;;
@@ -53,6 +57,8 @@ while (($#)); do
     --file=*) file=${1#--file=}; shift ;;
     --target-host) [[ $# -ge 2 ]] || die "--target-host needs a phone"; target=$2; shift 2 ;;
     --target-host=*) target=${1#--target-host=}; shift ;;
+    --specialisation) [[ $# -ge 2 ]] || die "--specialisation needs a name"; specialisation=$2; shift 2 ;;
+    --specialisation=*) specialisation=${1#--specialisation=}; shift ;;
     --upgrade) upgrade=1; shift ;;
     --override-input) [[ $# -ge 3 ]] || die "--override-input needs an input and a flake"; overrides+=(--override-input "$2" "$3"); shift 3 ;;
     --show-trace) trace=(--show-trace); shift ;;
@@ -68,6 +74,7 @@ if [[ -z $flake && -z $file ]]; then
 fi
 [[ -z $flake || -z $file ]] || die "give --flake or --file, not both"
 [[ -z $file || ${#overrides[@]} -eq 0 ]] || die "--override-input is for a flake (--flake)"
+[[ -z $specialisation || $specialisation =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "--specialisation: \"$specialisation\" is not a specialisation's name (letters, digits and _ . -)"
 command -v nix > /dev/null || die "there is no nix here"
 
 # --- The phone: through adb, or ssh.
@@ -179,17 +186,25 @@ from_root 'cd /data/adb/seraph/repos && set -- */tree.json && [ -f "$1" ] && tar
 # The profile, built here with those names; and the secrets' files, by name.
 say "== Evaluating $what_built"
 what=profile evaluate --json > "$work/profile.json" || die "the config did not build (Nix says why above); nothing was changed"
+# Its specialisations, by name; the one asked for must be among them.
+specialisations="$(nixx eval --raw --impure --expr \
+  "builtins.concatStringsSep \" \" (builtins.attrNames ((builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json"))).specialisation or { }))")" \
+  || die "the built profile could not be read (Nix says why above)"
+if [[ -n $specialisation && " $specialisations " != *" $specialisation "* ]]; then
+  die "the config has no specialisation named $specialisation (its specialisations: ${specialisations:-none}); nothing was changed"
+fi
 what=secrets evaluate --raw --apply 's: builtins.concatStringsSep "\n" (map (n: n + "\t" + (if s.${n}.text then "text\t" else if s.${n}.file != null then "file\t" + s.${n}.file else "none\t")) (builtins.attrNames s))' \
   > "$work/secrets.txt" || die "the config's secrets could not be read (Nix says why above)"
 
 # The small files the config makes (a service's settings file, a script) are derivations
 # cache.nixos.org has not got, which the phone builds: theirs go along, with all they need
 # (the derivations they are made with) and the files the config put in the store itself, as
-# nix-store --export writes them.
+# nix-store --export writes them. The specialisations' too, so the phone can switch to one without a PC.
 ship_paths() {
   local list=() drvs=() sources=() build=() item
   mapfile -t list < <(nixx eval --raw --impure --expr \
-    "builtins.concatStringsSep \"\\n\" ((builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json"))).android.derivations or [ ])")
+    "let p = builtins.fromJSON (builtins.readFile $(printf '"%s"' "$work/profile.json")); in
+      builtins.concatStringsSep \"\\n\" (builtins.concatMap (part: part.android.derivations or [ ]) ([ p ] ++ builtins.attrValues (p.specialisation or { })))" | sort -u)
   for item in "${list[@]}"; do
     case $item in
       *.drv^*) drvs+=("$item") ;;
@@ -259,5 +274,5 @@ case $action in
   *) if ((upgrade)); then mode=update; else mode=switch; fi ;;
 esac
 status=0
-as_root "${module}sh \$d/remote.sh $by $mode" || status=$?
+as_root "${module}sh \$d/remote.sh $by $mode${specialisation:+ --specialisation $specialisation}" || status=$?
 exit $status

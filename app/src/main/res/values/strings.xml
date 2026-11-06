@@ -74,6 +74,11 @@
     <string name="switch_to">Switch to it</string>
     <string name="switching">Switching to generation %1$s…</string>
     <string name="generation_dry">Seeing what generation %1$s would change (nothing changes)…</string>
+    <string name="specialisations">Specialisations</string>
+    <string name="no_specialisations">The last build has no specialisations (specialisation.&lt;name&gt; in the config makes them).</string>
+    <string name="specialisation_none">The config itself (no specialisation)</string>
+    <string name="specialisation_switching">Switching to specialisation %1$s…</string>
+    <string name="specialisation_leaving">Switching back to the config itself…</string>
     <string name="unknown">unknown</string>
 
     <!-- Updates. -->

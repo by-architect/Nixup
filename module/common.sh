@@ -2,6 +2,11 @@
 # in the Magisk app. Sourced with MODDIR set to the module's folder.
 DATA=/data/adb/seraph
 PROFILE=$DATA/profile.json
+# The last build's whole profile: the config's own and each of its specialisations' (specialisation.<name>, see
+# nix/specialisation.nix). profile.json is the part applied: the config's own, or the specialisation named in
+# SPECIALISATION_IN_USE when one is.
+SYSTEM=$DATA/system.json
+SPECIALISATION_IN_USE=$DATA/specialisation
 LOG=$DATA/apply.log
 BY=${BY:-manual}
 # Who started it, for the engine's events too.
@@ -206,7 +211,9 @@ new_generation() {
   last=$(cat "$generations/last" 2> /dev/null || echo 0)
   rm -rf "$generations/new"
   mkdir -p "$generations/new"
-  cp "$PROFILE" "$generations/new/profile.json"
+  # The whole profile (with the specialisations), and the one in use; going back to it picks that one again.
+  if [ -f "$SYSTEM" ]; then cp "$SYSTEM" "$generations/new/profile.json"; else cp "$PROFILE" "$generations/new/profile.json"; fi
+  [ -n "$SPECIALISATION" ] && printf '%s\n' "$SPECIALISATION" > "$generations/new/specialisation"
   [ -f "$DATA/resolved.json" ] && cp "$DATA/resolved.json" "$generations/new/apps.json"
   if [ -n "$GEN_SOURCE" ]; then
     printf '%s\n' "$GEN_SOURCE" > "$generations/new/source"
@@ -350,13 +357,37 @@ keep_packages() {
   done
 }
 
+# A specialisation's own profile (specialisation.<name> of the whole profile [1], named [2]), on stdout; when the
+# build has none of that name, it says which it has, and fails.
+specialisation_of() {
+  nix_env
+  "$MODDIR/bin/nix-instantiate" --eval --strict --json --readonly-mode --store dummy:// \
+    --argstr file "$1" --argstr name "$2" --expr '{ file, name }:
+      let all = (builtins.fromJSON (builtins.readFile file)).specialisation or { }; in
+      if all ? ${name} then all.${name}
+      else throw "this build has no specialisation named ${name} (its specialisations: ${
+        if all == { } then "none" else builtins.concatStringsSep ", " (builtins.attrNames all)})"'
+}
+
 # The second half of every build, wherever the profile was built (build.sh on the
 # phone, remote.sh for a PC): its plan and every check (all a dry run does), then its
 # apps and settings, activated, and a new generation. When a check fails, nothing
 # changes. Arguments: the profile, and what to do (switch, dry, update); SECRETS_IN
-# is the folder of the secrets a PC sent with it.
+# is the folder of the secrets a PC sent with it, and SPECIALISATION the specialisation
+# to apply (none: the config itself), which the phone keeps until another build.
 switch_to() {
-  fetch_packages "$1" "$2" || { rm -f "$1"; fail "the config's packages could not be fetched from cache.nixos.org (Nix says why above); nothing was changed"; }
+  whole=$1
+  if [ -n "$SPECIALISATION" ]; then
+    log "== Specialisation $SPECIALISATION"
+    set -- "$1.specialisation" "$2"
+    at_exit "rm -f '$1'"
+    specialisation_of "$whole" "$SPECIALISATION" > "$1" 2> "$DATA/tmp/specialisation.err" || {
+      sed -n 's/^error: *//p' "$DATA/tmp/specialisation.err" | tail -n 1 >&2
+      rm -f "$whole" "$1"
+      fail "there is no specialisation $SPECIALISATION in this build; nothing was changed"
+    }
+  fi
+  fetch_packages "$1" "$2" || { rm -f "$1" "$whole"; fail "the config's packages could not be fetched from cache.nixos.org (Nix says why above); nothing was changed"; }
   log "== Apps"
   sent=
   [ -n "$SECRETS_IN" ] && sent="--secrets=$SECRETS_IN"
@@ -368,19 +399,21 @@ switch_to() {
   esac
   case $? in
     0) ;;
-    2) rm -f "$1"; fail "a check failed (see above); nothing was changed" ;;
-    *) rm -f "$1"; fail "stopped partway (see above); build again to carry on" ;;
+    2) rm -f "$1" "$whole"; fail "a check failed (see above); nothing was changed" ;;
+    *) rm -f "$1" "$whole"; fail "stopped partway (see above); build again to carry on" ;;
   esac
   # What the engine changed (or would change), in one line, for the run's end (see Apply.kt).
   summary=$(cat "$DATA/tmp/summary" 2> /dev/null)
   if [ "$2" = dry ]; then
-    rm -f "$1"
+    rm -f "$1" "$whole"
     log "Dry run: nothing was changed"
     run_end info "Dry run: nothing was changed" "${summary:-It would change nothing}"
     return 0
   fi
   log "== Activating"
   mv -f "$1" "$PROFILE"
+  if [ "$whole" != "$1" ]; then mv -f "$whole" "$SYSTEM"; else cp "$PROFILE" "$SYSTEM"; fi
+  if [ -n "$SPECIALISATION" ]; then printf '%s\n' "$SPECIALISATION" > "$SPECIALISATION_IN_USE"; else rm -f "$SPECIALISATION_IN_USE"; fi
   keep_packages
   sh "$MODDIR/apply.sh" "$BY" || exit 1
   new_generation

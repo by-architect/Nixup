@@ -6,6 +6,10 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- Specialisations, as on NixOS: `specialisation.<name>.configuration` makes other versions of the config (a
+  "work" or "travel" one) with each build. ⋮ → Specialisations switches to one, or back to the config itself,
+  without building again; `build.sh` and `seraph-rebuild` take `--specialisation <name>`. The phone keeps the
+  one picked, across restarts too, until a build picks another, and each generation remembers its own.
 - NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
   runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 67 Seraph has tried
   (AdGuard Home, Caddy, cron, Forgejo, Gitea, Gotify, Grafana, harmonia, Jellyfin, Navidrome, nginx, ntfy, Redis,

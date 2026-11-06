@@ -237,6 +237,7 @@ class MainActivity : Activity() {
         when (item.itemId) {
             R.id.menu_terminal -> startActivity(Intent(this, TerminalActivity::class.java))
             R.id.menu_play_account -> playAccount()
+            R.id.menu_specialisations -> specialisations()
             R.id.menu_notifications -> startActivity(
                 Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName),
             )
@@ -501,6 +502,38 @@ class MainActivity : Activity() {
             .setNeutralButton(R.string.dry_run) { _, _ -> buildScript("generation ${g.number} dry", R.string.generation_dry, g.number) }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    /**
+     * The last build's specialisations (specialisation.<name> in the config) and the one in use; the one picked, or
+     * the config itself, is applied without building again (build.sh again --specialisation, as a generation's).
+     */
+    private fun specialisations() {
+        runner.read(SPECIALISATIONS) { exit, said ->
+            if (exit == null) return@read toast(getString(R.string.no_root))
+            val inUse = said.lineSequence().firstOrNull { it.startsWith("in-use=") }?.removePrefix("in-use=")?.trim().orEmpty()
+            val names = runCatching {
+                JSONObject(said.substringAfter("$SPLIT\n", "")).optJSONObject("specialisation")?.keys()?.asSequence()?.toList()
+            }.getOrNull().orEmpty().filter { SPECIALISATION_NAME.matches(it) }.sorted()
+            if (names.isEmpty()) return@read toast(getString(R.string.no_specialisations))
+            val choices = listOf("") + names
+            val items = choices.map { name ->
+                (if (name.isEmpty()) getString(R.string.specialisation_none) else name) +
+                    if (name == inUse) getString(R.string.generation_current) else ""
+            }
+            AlertDialog.Builder(this)
+                .setTitle(R.string.specialisations)
+                .setItems(items.toTypedArray()) { _, i ->
+                    val name = choices[i]
+                    when {
+                        name == inUse -> Unit
+                        name.isEmpty() -> buildScript("again --no-specialisation", R.string.specialisation_leaving)
+                        else -> buildScript("again --specialisation $name", R.string.specialisation_switching, name)
+                    }
+                }
+                .setNegativeButton(R.string.close, null)
+                .show()
+        }
     }
 
     /** Pick file: the system's file picker, for a configuration.nix or a flake.nix wherever it is. */
@@ -891,6 +924,12 @@ class MainActivity : Activity() {
         /** Between the two files loadUpdates reads. */
         private const val SPLIT = "--seraph-update--"
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+        /** A specialisation's name, as nix/specialisation.nix allows it (it goes into build.sh's command). */
+        private val SPECIALISATION_NAME = Regex("[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+        /** The specialisation in use, then the last build's whole profile (with its specialisations). */
+        private const val SPECIALISATIONS = "d=/data/adb/seraph; echo \"in-use=\$(cat \$d/specialisation 2>/dev/null)\"; " +
+            "echo '$SPLIT'; cat \$d/system.json 2>/dev/null || cat \$d/profile.json 2>/dev/null"
 
         /** Each generation, newest first: its number, when it was made, what from and on which PC; and the current one. */
         private const val GENERATIONS = "g=/data/adb/seraph/generations; echo \"last=\$(cat \$g/last 2>/dev/null)\"; " +

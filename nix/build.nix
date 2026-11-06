@@ -14,7 +14,19 @@ let
 
   repos = lib.mapAttrs (_: repo: { url = repo.address; fingerprint = repo.signingKey; }) config.android.repos;
 
-  failed = map (check: check.message) (lib.filter (check: !check.assertion) config.assertions);
+  failedOf = config: map (check: check.message) (lib.filter (check: !check.assertion) config.assertions);
+  failed = failedOf config;
+
+  # The specialisations (nix/specialisation.nix), each a config of its own: what each says that the config itself does
+  # not (a failed check, a warning) is told with its name, and their repositories and secrets come with the config's.
+  children = lib.mapAttrs (_: specialisation: specialisation.configuration) config.specialisation;
+  ofChildren = what: lib.concatLists (lib.mapAttrsToList (name: child:
+    map (message: "specialisation.${name}: ${message}") (lib.subtractLists (what config) (what child))) children);
+  allFailed = failed ++ ofChildren failedOf;
+  allWarnings = config.warnings ++ ofChildren (config: config.warnings);
+  # The config's own wins over a specialisation's of the same name.
+  withChildren = part: lib.foldl' (all: child: all // child.system.build.${part}) { } (lib.attrValues children)
+    // config.system.build.${part};
 
   # The phone's own settings: the settings tables (Android's system, secure and global, and
   # LineageOS's as lineage.system, ...; true and false as 1 and 0), with the plain option that set
@@ -76,91 +88,106 @@ in
     # themselves, which need it: whether a module sets environment.systemPackages or the
     # terminal's font, whether a unit is there, and whether there are backups (restic).
     repos = {
-      android = { inherit repos; };
-      needsNixpkgs = options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
+      android.repos = lib.foldl' (all: child: all // child.system.build.repos.android.repos) { } (lib.attrValues children) // repos;
+      needsNixpkgs = lib.any (child: child.system.build.repos.needsNixpkgs) (lib.attrValues children)
+        || options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
         || options.terminal.font.highestPrio < (lib.mkOptionDefault null).priority
         || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { }
         || config.android.backup.repository != null
         || config.system.build.nixosServices.used;
     };
 
-    # toString: a path stays where it is, where interpolating it would copy it into the store.
-    secrets = lib.mapAttrs (_: secret: {
+    # toString: a path stays where it is, where interpolating it would copy it into the store. With the
+    # specialisations' (withChildren below), so whichever the phone switches to finds its own.
+    ownSecrets = lib.mapAttrs (_: secret: {
       file = if secret.file == null then null else toString secret.file;
       text = secret.text != null;
     }) config.android.secrets;
-    secretTexts = lib.mapAttrs (_: secret: secret.text) (lib.filterAttrs (_: secret: secret.text != null) config.android.secrets);
+    ownSecretTexts = lib.mapAttrs (_: secret: secret.text) (lib.filterAttrs (_: secret: secret.text != null) config.android.secrets);
     # The same for a build on the phone, which puts them in place itself: each file's path (in
     # the config's folder, or a flake's copy of it) or text.
-    secretsToDeliver = lib.mapAttrs (_: secret: {
+    ownSecretsToDeliver = lib.mapAttrs (_: secret: {
       file = if secret.file == null then null else toString secret.file;
       inherit (secret) text;
     }) config.android.secrets;
 
+    secrets = withChildren "ownSecrets";
+    secretTexts = withChildren "ownSecretTexts";
+    secretsToDeliver = withChildren "ownSecretsToDeliver";
+
+    # The profile, with each specialisation's under specialisation.<name> (when it has some): the phone applies the
+    # config's own part, or the one picked (build.sh --specialisation). The checks and warnings are its own and the
+    # specialisations', told once.
     profile =
-      if failed != [ ] then
-        throw "\nFailed assertions:\n${lib.concatMapStrings (message: "- ${message}\n") failed}"
+      if allFailed != [ ] then
+        throw "\nFailed assertions:\n${lib.concatMapStrings (message: "- ${message}\n") allFailed}"
       else
-        lib.showWarnings config.warnings {
-          # The module refuses a profile whose schemaVersion it does not know.
-          schemaVersion = 1;
-          android = {
-            inherit (settings.display) darkMode;
-            inherit repos;
-            # An F-Droid app (or one from Google Play) as its package name; an app from its own releases
-            # with where they are.
-            packages = lib.mapAttrs (_: map (app:
-              if builtins.isString app then app
-              else if !(app ? _id) then {
-                inherit (app) id url apkFilter prerelease;
-                signer = if app.signer == null then null else lib.toLower (lib.replaceStrings [ ":" ] [ "" ] app.signer);
-              }
-              else app._id
-            )) config.android.packages;
-            settings = lib.mapAttrs (name: _: { autoupdatePackages = settings.repo.${name}.autoupdatePackages or false; })
-              (repos // { obtainium = { }; playstore = { }; });
-            # The Google account Google Play's apps come with, and where its token is (nix/playstore.nix).
-            playstore = config.system.build.playstore;
-            # debloat only when true: false is the same as not managed; backup goes in backup.
-            apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: app:
-              managed (removeAttrs app [ "backup" ] // { debloat = if app.debloat == true then true else null; })
-            ) config.android.apps);
-            # The backups (nix/backup.nix): the repository, and each app and folder backed up.
-            backup = config.system.build.backup;
-            inherit system;
-            # The view's users and groups (nix/users.nix), and what each session runs first.
-            users = config.system.build.users;
-            inherit (config.environment) extraInit;
-            # The app's terminal: its font and colors (nix/terminal.nix).
-            terminal = config.system.build.terminal;
-            # adb's port and the computers it trusts (nix/adb.nix).
-            adb = config.system.build.adb;
-            # The secrets' names: the phone checks each is there, and removes one that left.
-            secrets = lib.attrNames config.android.secrets;
-            # The services (systemd.services, Seraph's own and NixOS's modules' among them) as the
-            # engine runs them, with the view's /etc files (environment.etc), hosts and DNS servers
-            # (networking.hosts, networking.nameservers) and the folders systemd.tmpfiles makes; and
-            # every store path the phone needs for them, environment.systemPackages and the
-            # terminal's font: it fetches those from cache.nixos.org (and builds the small files the
-            # config makes, as derivations says) before the build changes anything.
-            units = config.system.build.units;
-            # Their timers (systemd.timers, startAt), which the engine keeps.
-            timers = config.system.build.timers;
-            # Their path units (systemd.paths).
-            paths = config.system.build.paths;
-            etc = config.system.build.etc;
-            inherit (config.system.build) network tmpfiles;
-            storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths
-              ++ config.system.build.terminalStorePaths);
-            inherit derivations;
-            # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
-            # NixOS has them; none without Nix packages.
-            shell = if config.environment.systemPackages == [ ] then null else {
-              path = builtins.unsafeDiscardStringContext
-                "${lib.makeBinPath (config.environment.systemPackages ++ shellPackages)}:/system/bin";
-              bash = builtins.unsafeDiscardStringContext "${pkgs.bashInteractive}/bin/bash";
-            };
-          };
+        lib.showWarnings allWarnings (config.system.build.profileData
+          // lib.optionalAttrs (children != { }) {
+            specialisation = lib.mapAttrs (_: child: child.system.build.profileData) children;
+          });
+
+    # The profile itself, unchecked (profile checks it, and a specialisation's is checked by its config's).
+    profileData = {
+      # The module refuses a profile whose schemaVersion it does not know.
+      schemaVersion = 1;
+      android = {
+        inherit (settings.display) darkMode;
+        inherit repos;
+        # An F-Droid app (or one from Google Play) as its package name; an app from its own releases
+        # with where they are.
+        packages = lib.mapAttrs (_: map (app:
+          if builtins.isString app then app
+          else if !(app ? _id) then {
+            inherit (app) id url apkFilter prerelease;
+            signer = if app.signer == null then null else lib.toLower (lib.replaceStrings [ ":" ] [ "" ] app.signer);
+          }
+          else app._id
+        )) config.android.packages;
+        settings = lib.mapAttrs (name: _: { autoupdatePackages = settings.repo.${name}.autoupdatePackages or false; })
+          (repos // { obtainium = { }; playstore = { }; });
+        # The Google account Google Play's apps come with, and where its token is (nix/playstore.nix).
+        playstore = config.system.build.playstore;
+        # debloat only when true: false is the same as not managed; backup goes in backup.
+        apps = lib.filterAttrs (_: settings: settings != { }) (lib.mapAttrs (_: app:
+          managed (removeAttrs app [ "backup" ] // { debloat = if app.debloat == true then true else null; })
+        ) config.android.apps);
+        # The backups (nix/backup.nix): the repository, and each app and folder backed up.
+        backup = config.system.build.backup;
+        inherit system;
+        # The view's users and groups (nix/users.nix), and what each session runs first.
+        users = config.system.build.users;
+        inherit (config.environment) extraInit;
+        # The app's terminal: its font and colors (nix/terminal.nix).
+        terminal = config.system.build.terminal;
+        # adb's port and the computers it trusts (nix/adb.nix).
+        adb = config.system.build.adb;
+        # The secrets' names: the phone checks each is there, and removes one that left.
+        secrets = lib.attrNames config.android.secrets;
+        # The services (systemd.services, Seraph's own and NixOS's modules' among them) as the
+        # engine runs them, with the view's /etc files (environment.etc), hosts and DNS servers
+        # (networking.hosts, networking.nameservers) and the folders systemd.tmpfiles makes; and
+        # every store path the phone needs for them, environment.systemPackages and the
+        # terminal's font: it fetches those from cache.nixos.org (and builds the small files the
+        # config makes, as derivations says) before the build changes anything.
+        units = config.system.build.units;
+        # Their timers (systemd.timers, startAt), which the engine keeps.
+        timers = config.system.build.timers;
+        # Their path units (systemd.paths).
+        paths = config.system.build.paths;
+        etc = config.system.build.etc;
+        inherit (config.system.build) network tmpfiles;
+        storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths
+          ++ config.system.build.terminalStorePaths);
+        inherit derivations;
+        # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
+        # NixOS has them; none without Nix packages.
+        shell = if config.environment.systemPackages == [ ] then null else {
+          path = builtins.unsafeDiscardStringContext
+            "${lib.makeBinPath (config.environment.systemPackages ++ shellPackages)}:/system/bin";
+          bash = builtins.unsafeDiscardStringContext "${pkgs.bashInteractive}/bin/bash";
         };
+      };
+    };
   };
 }

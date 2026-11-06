@@ -19,14 +19,19 @@ let
   repoTrees =
     if reposDir == "" || !builtins.pathExists reposDir then { }
     else lib.mapAttrs (name: _: lib.importJSON "${reposDir}/${name}/tree.json") (lib.filterAttrs hasTree (builtins.readDir reposDir));
-in
-lib.evalModules {
-  class = "seraph";
-  modules = [ ./options.nix ] ++ modules;
-  specialArgs = {
-    _seraph = { inherit nixpkgs repoTrees; };
+  args = {
+    # noUserModules: Seraph's options without the config's modules, as NixOS's, for a specialisation of its own lines
+    # alone (nix/specialisation.nix).
+    _seraph = { inherit nixpkgs repoTrees noUserModules; };
     modulesPath =
       if nixpkgs == null then throw "modulesPath is nixpkgs' NixOS modules, which this build fetches first [seraph:needs-nixpkgs]"
       else (nixpkgs.outPath or nixpkgs) + "/nixos/modules";
   } // specialArgs;
-}
+  evaluate = modules: lib.evalModules {
+    class = "seraph";
+    modules = [ ./options.nix ] ++ modules;
+    specialArgs = args;
+  };
+  noUserModules = evaluate [ ];
+in
+evaluate modules

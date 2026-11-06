@@ -405,10 +405,14 @@ It works like `nixos-rebuild`:
 | `nixos-rebuild dry-activate` | **Dry run** |
 | `nixos-rebuild switch --upgrade` | **Upgrade** |
 | `nixos-rebuild switch --rollback` | **Generations** → pick one → Switch to it |
+| `nixos-rebuild switch --specialisation work` | ⋮ → **Specialisations** → pick one (no new build), or `--specialisation work` with `build.sh` or `seraph-rebuild` |
 | `nixos-rebuild --target-host` | `seraph-rebuild switch --flake .#phone` on a PC |
 
 - A build reads and checks everything first; if anything is wrong, **nothing changes**.
 - Each build that changes something is saved as a generation, with what it was built from.
+- `specialisation.<name>.configuration` makes other versions of the config (a "work" or "travel" one) with
+  each build, as on NixOS. The phone switches to one and back without building again, and keeps the one picked
+  across restarts, until a build picks another.
 - The config can be a `configuration.nix`, a `flake.nix` (with `seraphConfigurations.<name>`), or a git
   repository the app clones (**Git** button: Pull, Pull and build, Reclone).
 - You get a notification when a build, update or backup ends, and every run's log is in the **Logs** tab.

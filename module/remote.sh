@@ -12,11 +12,25 @@
 #                           nothing; update: the releases asked for again too);
 #                           incoming/source says what it was built from, incoming/built-on
 #                           on which machine, and incoming/flake.lock is the flake's lock,
-#                           all three for the generation
+#                           all three for the generation; with --specialisation <name>, the
+#                           build's specialisation of that name instead of the config itself
+#                           (see build.sh)
 MODDIR=${0%/*}
+SPECIALISATION= rest=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --specialisation) SPECIALISATION=$2; shift; [ $# -gt 0 ] && shift ;;
+    --specialisation=*) SPECIALISATION=${1#*=}; shift ;;
+    *) rest="$rest $1"; shift ;;
+  esac
+done
+set -- $rest
 BY=${1:-manual}
 MODE=${2:-}
 . "$MODDIR/common.sh"
+case "$SPECIALISATION" in
+  *[!A-Za-z0-9_.-]* | [!A-Za-z0-9]*) fail "--specialisation: \"$SPECIALISATION\" is not a specialisation's name (letters, digits and _ . -)" ;;
+esac
 IN=$DATA/incoming
 
 case "$MODE" in
@@ -39,7 +53,7 @@ GEN_BUILT_ON=$(head -n 1 "$IN/built-on" 2> /dev/null)
 [ -n "$GEN_SOURCE" ] || GEN_SOURCE="a build on ${GEN_BUILT_ON:-a PC}"
 run_open build "Build from ${GEN_BUILT_ON:-a PC}"
 # What was sent stays until it is applied: a restart in the middle applies it after (resume.sh).
-[ "$MODE" = dry ] || resumable build remote.sh "$MODE"
+[ "$MODE" = dry ] || resumable build remote.sh "$MODE" ${SPECIALISATION:+--specialisation "$SPECIALISATION"}
 if [ "$MODE" = dry ]; then event build start "Dry run of a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURCE"
 else event build start "Applying a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURCE"; fi
 log "== Built on ${GEN_BUILT_ON:-a PC}: $GEN_SOURCE"
