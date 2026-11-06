@@ -77,7 +77,7 @@ let
   }) (lib.range 1 cfg.nrBuildUsers));
 
   # The users besides root that log in, for whom Nix's daemon runs (root uses the store itself, as on NixOS).
-  loginUsers = lib.filter (user: user.name != "root" && (user.isNormalUser || user.useDefaultShell)) (lib.attrValues config.users.users);
+  loginUsers = lib.filter (user: user.enable && user.name != "root" && (user.isNormalUser || user.useDefaultShell)) (lib.attrValues config.users.users);
 
   # nix-env's own folder, which nix-env makes the first time it runs: XDG's with use-xdg-base-directories.
   defexpr = if cfg.settings.use-xdg-base-directories or false then "\${XDG_STATE_HOME:-$HOME/.local/state}/nix/defexpr" else "$HOME/.nix-defexpr";

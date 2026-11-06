@@ -19,15 +19,43 @@
 # Android checks a process's groups for some of what it may do: network sockets need inet (3003) on some phones, the
 # shared storage's folders media_rw (1023). users.groups has those, with Android's numbers, for extraGroups.
 #
+# A user's password (hashedPassword, password, hashedPasswordFile, as on NixOS) is in the view's /etc/shadow, which
+# sshd reads for a password login, with the day it expires (expires); its subordinate ids (subUidRanges,
+# autoSubUidGidRange) in /etc/subuid and /etc/subgid. A user with enable = false is not there at all, and one with
+# linger = false runs no units of its own (the phone has no logins that would start them).
+#
 # A user's packages (users.users.<name>.packages, and its Home Manager's: nix/home-manager.nix) are its profile, in
 # /etc/profiles/per-user/<name> as on NixOS: on its PATH (its sessions', and its own units'), before
 # environment.systemPackages.
 { config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
+  topConfig = config;
+  secretFiles = import ./secret-files.nix { inherit lib; };
+
+  # NixOS's subordinate ids (/etc/subuid, /etc/subgid): a range's start and count.
+  subRange = kind: {
+    options = {
+      "start${kind}" = mkOption {
+        type = types.int;
+        description = "Start of the range of subordinate ${lib.toLower kind}s the user may use.";
+      };
+      count = mkOption {
+        type = types.int;
+        default = 1;
+        description = "Count of subordinate ${lib.toLower kind}s.";
+      };
+    };
+  };
 
   userModule = { name, config, ... }: {
     options = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        example = false;
+        description = "Whether the user is there at all, as on NixOS (false: as if it were not in the config).";
+      };
       name = mkOption {
         type = types.str;
         default = name;
@@ -83,8 +111,9 @@ let
       };
       home = mkOption {
         type = types.str;
-        default = if name == "root" then "/data/adb/nixup/home" else if config.isNormalUser then "/home/${name}" else "/var/empty";
-        defaultText = lib.literalExpression ''"/home/''${name}" for a normal user, "/var/empty" else (root's: /data/adb/nixup/home)'';
+        default = if name == "root" then "/data/adb/nixup/home"
+          else if config.isNormalUser then "${topConfig.users.defaultUserHome}/${name}" else "/var/empty";
+        defaultText = lib.literalExpression ''"''${users.defaultUserHome}/''${name}" for a normal user, "/var/empty" else (root's: /data/adb/nixup/home)'';
         example = "/data/data/com.termux/files/home";
         description = ''
           The user's home folder: a normal user's is /home/<name>, Nixup's own (/data/adb/nixup/users/<name>), there
@@ -123,6 +152,105 @@ let
         example = lib.literalExpression "[ pkgs.htop ]";
         description = "Nix packages for the user, as on NixOS: its profile, /etc/profiles/per-user/<name>, on its PATH.";
       };
+
+      # Its password, as NixOS's options (the view's /etc/shadow, which the engine writes): sshd takes it when the user
+      # logs in with a password (services.openssh.settings.PasswordAuthentication), and it is checked as NixOS checks
+      # it. users.mutableUsers is false on the phone (nothing there changes a password), so at each build the user's
+      # password is the one these give, as NixOS sets it then: hashedPasswordFile, else password, else hashedPassword
+      # (initialPassword and initialHashedPassword are password and hashedPassword when those are not set).
+      hashedPassword = mkOption {
+        type = types.nullOr (types.passwdEntry types.str);
+        default = null;
+        example = "$y$j9T$...";
+        description = ''
+          The user's password, hashed (`mkpasswd`), as on NixOS. "" logs in without a password (not over ssh). null:
+          no password login.
+        '';
+      };
+      password = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          The user's password, as text, as on NixOS: the phone hashes it (SHA-512, as mkpasswd -m sha-512 does). It is in
+          the profile, which root alone can read (on NixOS it is in Nix's store, which anyone can): for a password
+          others may know, else hashedPassword or hashedPasswordFile.
+        '';
+      };
+      hashedPasswordFile = mkOption {
+        type = secretFiles.type;
+        default = config.passwordFile;
+        defaultText = lib.literalExpression "null";
+        example = lib.literalExpression "./niobe.hash";
+        description = ''
+          A file with the user's hashed password (its one line, as `mkpasswd` writes it), as on NixOS, read at each
+          build: a file from the config's folder (./niobe.hash), which each build puts on the phone readable by root
+          alone, never in the profile or Nix's store; or, as a string, the full path of a file on the phone. One that is
+          not there leaves the other options' password (the build says so).
+        '';
+      };
+      passwordFile = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        visible = false;
+        description = "NixOS's old name of hashedPasswordFile.";
+      };
+      initialHashedPassword = mkOption {
+        type = types.nullOr (types.passwdEntry types.str);
+        default = null;
+        description = "As on NixOS, with users.mutableUsers false (as on the phone): hashedPassword, when that is not set.";
+      };
+      initialPassword = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "As on NixOS, with users.mutableUsers false (as on the phone): password, when that is not set.";
+      };
+      expires = mkOption {
+        type = types.nullOr (types.strMatching "[[:digit:]]{4}-[[:digit:]]{2}-[[:digit:]]{2}");
+        default = null;
+        example = "2027-01-31";
+        description = "The day the user can no longer log in (YYYY-MM-DD), as on NixOS: sshd refuses it from then on. null: never.";
+      };
+      linger = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        example = false;
+        description = ''
+          Whether the user's own units (systemd.user, its Home Manager's) run without a login of it, as NixOS's
+          lingering: the phone has no logins that would start them, so false is that they do not run at all. null
+          (as on NixOS: not managed) and true: they run, from each build and the phone's start.
+        '';
+      };
+      subUidRanges = mkOption {
+        type = types.listOf (types.submodule (subRange "Uid"));
+        default = [ ];
+        example = [ { startUid = 100001; count = 65534; } ];
+        description = "Subordinate user ids the user may use, as on NixOS: the view's /etc/subuid (newuidmap, for user namespaces).";
+      };
+      subGidRanges = mkOption {
+        type = types.listOf (types.submodule (subRange "Gid"));
+        default = [ ];
+        example = [ { startGid = 100001; count = 65534; } ];
+        description = "Subordinate group ids the user may use, as on NixOS: the view's /etc/subgid.";
+      };
+      autoSubUidGidRange = mkOption {
+        type = types.bool;
+        default = false;
+        example = true;
+        description = ''
+          Give the user 65536 subordinate user and group ids of its own, as on NixOS (from 100000 on, kept on the
+          phone); a normal user without ranges of its own gets them, as on NixOS.
+        '';
+      };
+      cryptHomeLuks = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "As on NixOS, a home on an encrypted LUKS device: not on the phone.";
+      };
+      pamMount = mkOption {
+        type = types.attrsOf types.str;
+        default = { };
+        description = "As on NixOS, pam_mount's settings for the user. Taken; the phone has no PAM.";
+      };
       openssh = {
         authorizedKeys = {
           keys = mkOption {
@@ -148,6 +276,9 @@ let
         };
       };
     };
+    config = lib.mkIf (config.isNormalUser && config.subUidRanges == [ ] && config.subGidRanges == [ ]) {
+      autoSubUidGidRange = lib.mkDefault true;
+    };
   };
 
   groupModule = { name, ... }: {
@@ -170,7 +301,8 @@ let
     };
   };
 
-  users = config.users.users;
+  # (A user with enable = false is not there, as on NixOS.)
+  users = lib.filterAttrs (_: user: user.enable) config.users.users;
   groups = config.users.groups;
 
   # A user's uid as /etc/passwd has it: an app's, or a service user's (given on the phone), as the engine fills them
@@ -230,6 +362,31 @@ let
       preferLocalBuild = true;
       allowSubstitutes = false;
     };
+  # Each user's password as the engine sets it in the view's /etc/shadow, as NixOS's update-users-groups.pl does with
+  # users.mutableUsers false: the file's (when it is on the phone), else the text's, hashed on the phone, else the hash;
+  # none: "*", no password login (NixOS's "!" would lock the user out of sshd, which runs without PAM here).
+  passwordFileOf = user: secretFiles.path topConfig "users.users.${user.name}.hashedPasswordFile" user.hashedPasswordFile;
+  shadowOf = user:
+    let
+      password = if user.password != null then user.password else user.initialPassword;
+      hash = if user.hashedPassword != null then user.hashedPassword else user.initialHashedPassword;
+    in
+    { inherit (user) name; uid = uidText user; }
+    // lib.optionalAttrs (user.hashedPasswordFile != null) { file = passwordFileOf user; }
+    // lib.optionalAttrs (password != null) { inherit password; }
+    // lib.optionalAttrs (hash != null) { inherit hash; }
+    // lib.optionalAttrs (user.expires != null) { inherit (user) expires; };
+  withPassword = user: lib.any (option: user.${option} != null)
+    [ "hashedPassword" "hashedPasswordFile" "password" "initialHashedPassword" "initialPassword" ];
+  # NixOS's check of a hash (a subset of the Modular Crypt Format: $id$[options$]salt$hash).
+  hashLooksRight = hash:
+    let
+      sep = "\\$";
+      base64 = "[a-zA-Z0-9./]+";
+      options = "[a-z0-9-]+(=[a-zA-Z0-9/+.-]+)?(,[a-z0-9-]+=[a-zA-Z0-9/+.-]+)*";
+    in
+    lib.elem hash [ "" "!" "!!" "*" ]
+    || builtins.match (lib.concatStrings [ "^" sep "[a-z0-9]+(" sep options ")?" sep base64 sep base64 "(" sep base64 ")?$" ]) hash != null;
   missingUid = map (user: user.name) (lib.filter (user: !hasUid user) userList);
   bothUids = map (user: user.name) (lib.filter (user: user.uid != null && user.androidApp != null && user.name != "root") userList);
   unknownGroups = lib.concatMap (user: map (group: "${user.name}: ${group}")
@@ -249,6 +406,16 @@ in
       type = types.attrsOf (types.submodule groupModule);
       default = { };
       description = "The view's groups, as NixOS's users.groups; Android's own (inet, external_storage, ...) are there with its numbers.";
+    };
+    defaultUserHome = mkOption {
+      type = types.str;
+      default = "/home";
+      description = "Where normal users' homes are, as on NixOS: /home is Nixup's own folder in the view (/data/adb/nixup/users).";
+    };
+    manageLingering = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Whether users.users.<name>.linger is used, as on NixOS (the phone has no lingering otherwise: see linger).";
     };
   };
 
@@ -302,7 +469,35 @@ in
         (lib.filter (user: user.createHome && hasUid user) userList);
       # The users of apps, which must be on the phone (or installed by the build).
       apps = map (user: { inherit (user) name; app = user.androidApp; }) (lib.filter (user: user.androidApp != null) userList);
+
+      # The view's /etc/shadow: each user's password (see shadowOf); a user not here has none ("*").
+      shadow = map shadowOf (lib.filter (user: hasUid user && (withPassword user || user.expires != null)) userList);
+      # The view's /etc/subuid and /etc/subgid: each user's ranges, and whether it gets 65536 of its own (the engine
+      # gives them, from 100000 on, and keeps them, as NixOS keeps /var/lib/nixos/auto-subuid-map).
+      subIds = map (user: {
+        inherit (user) name;
+        uids = map (range: { start = range.startUid; inherit (range) count; }) user.subUidRanges;
+        gids = map (range: { start = range.startGid; inherit (range) count; }) user.subGidRanges;
+        auto = user.autoSubUidGidRange;
+      }) (lib.filter (user: hasUid user && (user.autoSubUidGidRange || user.subUidRanges != [ ] || user.subGidRanges != [ ])) userList);
     };
+
+    # A password file from the config's folder, which each build puts on the phone (see hashedPasswordFile).
+    android.secrets = lib.mkMerge (map (user: secretFiles.secrets "users.users.${user.name}.hashedPasswordFile" user.hashedPasswordFile)
+      (lib.filter (user: user.hashedPasswordFile != null) userList));
+
+    # As NixOS warns of them.
+    warnings = lib.concatMap (user:
+      lib.optional (lib.length (lib.filter (option: user.${option} != null) [ "hashedPassword" "hashedPasswordFile" "password" ]) > 1) ''
+        The user '${user.name}' has more than one of `hashedPassword`, `password` and `hashedPasswordFile` set: the
+        last of hashedPassword -> password -> hashedPasswordFile is the one it gets (users.mutableUsers is false on
+        the phone).''
+      ++ lib.optional (user.hashedPassword != null && !hashLooksRight user.hashedPassword) ''
+        The password hash of user "${user.name}" may be invalid. You must set a valid hash or the user will be locked
+        out of their account. Please check the value of option `users.users."${user.name}".hashedPassword`.''
+      ++ lib.optional (user.passwordFile != null)
+        "The option `users.users.\"${user.name}\".passwordFile' has been renamed to `users.users.\"${user.name}\".hashedPasswordFile'."
+    ) userList;
 
     assertions = [
       {
@@ -317,6 +512,18 @@ in
         assertion = unknownGroups == [ ];
         message = "users.users: no group named ${lib.concatStringsSep "; " unknownGroups} in users.groups.";
       }
+      {
+        assertion = lib.all (user: user.cryptHomeLuks == null) userList;
+        message = "users.users.<name>.cryptHomeLuks: a home on an encrypted LUKS device is not on the phone (Android encrypts its storage itself).";
+      }
+      {
+        assertion = lib.all (user: user.linger != null -> topConfig.users.manageLingering) userList;
+        message = "users.users.<name>.linger is set, but users.manageLingering is false: set it to null, or users.manageLingering to true (as on NixOS).";
+      }
+    ] ++ map (user: {
+      assertion = secretFiles.valid user.hashedPasswordFile;
+      message = secretFiles.problem "users.users.${user.name}.hashedPasswordFile" user.hashedPasswordFile;
+    }) userList ++ [
       {
         assertion = lib.all (user: user.openssh.authorizedPrincipals == [ ]) userList;
         message = "users.users.<name>.openssh.authorizedPrincipals: not on the phone yet.";

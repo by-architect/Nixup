@@ -29,7 +29,7 @@ let
     lib.filter (line: line != "" && !lib.hasPrefix "#" line) (map lib.trim (lib.splitString "\n" (builtins.readFile file)))
   ) (lib.filter builtins.isPath keys.keyFiles);
   phoneKeyFiles = keys: lib.filter (file: !builtins.isPath file) keys.keyFiles;
-  withKeys = lib.filterAttrs (_: user: user.openssh.authorizedKeys.keys != [ ] || user.openssh.authorizedKeys.keyFiles != [ ])
+  withKeys = lib.filterAttrs (_: user: user.enable && (user.openssh.authorizedKeys.keys != [ ] || user.openssh.authorizedKeys.keyFiles != [ ]))
     config.users.users;
   writeKeys = name: user: let keys = user.openssh.authorizedKeys; in ''
     {

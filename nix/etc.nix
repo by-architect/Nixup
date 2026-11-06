@@ -3,7 +3,7 @@
 # package's file, or one the config makes), or with mode a copy owned by user and group. One the config no longer
 # has goes. Android's own /etc (/system/etc) is not touched.
 #
-# Nixup writes some of that /etc itself: passwd and group (users.users), hosts (networking.hosts), resolv.conf (the
+# Nixup writes some of that /etc itself: passwd, group, shadow, subuid and subgid (users.users), hosts (networking.hosts), resolv.conf (the
 # network's DNS servers, or networking.nameservers), ssl/certs/ca-certificates.crt (Android's certificates), profile,
 # zshenv and nixup/. A file of environment.etc cannot be one of those.
 { config, lib, pkgs, ... }:
@@ -70,7 +70,7 @@ let
 
   entries = lib.filter (entry: entry.enable) (lib.attrValues config.environment.etc);
   # The files Nixup writes itself, which an entry cannot be.
-  own = [ "passwd" "group" "hosts" "resolv.conf" "ssl/certs/ca-certificates.crt" "profile" "zshenv" ];
+  own = [ "passwd" "group" "shadow" "subuid" "subgid" "hosts" "resolv.conf" "ssl/certs/ca-certificates.crt" "profile" "zshenv" ];
   clean = target: lib.removePrefix "/" target;
   mine = entry: lib.elem (clean entry.target) own || lib.hasPrefix "nixup/" (clean entry.target) || clean entry.target == "nixup";
 in

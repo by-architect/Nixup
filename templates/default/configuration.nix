@@ -592,7 +592,17 @@
     group = "niobe";                              # its own group (made with its uid)
     extraGroups = [ "inet" "everybody" "external_storage" ];   # network, shared storage (users.groups has Android's)
     openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleOnlyPutYourOwnKeyHere neo@laptop" ];   # an example
+    enable = true;                                # false: as if the user were not in the config
+    hashedPassword = null;                        # its password, hashed with mkpasswd (for ssh with PasswordAuthentication)
+    password = null;                              # or as text, which the phone hashes (in the profile, readable by root alone)
+    hashedPasswordFile = null;                    # or ./niobe.hash: a file with its hash, put on the phone readable by root alone (secret)
+    expires = null;                               # "2027-01-31": no logins from that day on
+    linger = null;                                # false: its own units (systemd.user, Home Manager's) do not run
+    autoSubUidGidRange = true;                    # 65536 subordinate ids of its own in /etc/subuid and /etc/subgid
+    subUidRanges = [ ];                           # or its own: [ { startUid = 100001; count = 65534; } ]
+    subGidRanges = [ ];
   };
+  users.defaultUserHome = "/home";                # where normal users' homes are
 
   environment.extraInit = "";                     # what every shell session runs first, like 'export EDITOR=nano'
 

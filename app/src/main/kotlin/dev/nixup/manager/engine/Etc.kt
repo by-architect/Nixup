@@ -38,10 +38,14 @@ object Etc {
         // app's uid on this phone, and left out while the app is not there.
         val users = profile?.optJSONObject("users")
         val uids = Ids(data, users?.string("passwd").orEmpty(), users?.string("group").orEmpty())
-        File(etc, "passwd").writeText(users?.string("passwd")?.let { uids.fill(it) }
-            ?: "root:x:0:0:root:${home.path}:/etc/nixup/login\nsshd:x:74:74:sshd privilege separation:/var/empty:/system/bin/false\n")
+        val passwd = users?.string("passwd")?.let { uids.fill(it) }
+            ?: "root:x:0:0:root:${home.path}:/etc/nixup/login\nsshd:x:74:74:sshd privilege separation:/var/empty:/system/bin/false\n"
+        File(etc, "passwd").writeText(passwd)
         File(etc, "group").writeText(users?.string("group")?.let { uids.fill(it) } ?: "root:x:0:\nsshd:x:74:\n")
         uids.keep()
+        // Their passwords and the days they expire (users.users.<name>.hashedPassword, ...), and their subordinate ids.
+        runCatching { Shadow.write(data, etc, passwd, users?.optJSONArray("shadow")) }.onFailure { Out.line("✘ /etc/shadow: ${it.message}") }
+        runCatching { Shadow.writeSubIds(data, etc, users?.optJSONArray("subIds")) }.onFailure { Out.line("✘ /etc/subuid: ${it.message}") }
         // The home of service users and NixOS's empty folder.
         File(data, "var/empty").mkdirs()
         // /home of the view: normal users' homes.

@@ -995,7 +995,7 @@ let
       group = spec.group or user;
       # The shared storage's real folders are media_rw's.
       groups = spec.groups ++ lib.optional (spec.storage or false) "media_rw";
-      declared = config.users.users ? ${user};
+      declared = config.users.users.${user}.enable or false;
     }
   ) (units // acceptUnits));
 
@@ -1087,7 +1087,10 @@ let
   # the user's specifiers and folders (%t, %S, StateDirectory in ~/.local/state, ...), and the user's packages
   # (/etc/profiles/per-user/<user>) and the system's on its PATH. default.target is one the phone reaches; a desktop
   # session's (graphical-session.target) is not, and what only that starts is not started.
-  normalUsers = lib.attrNames (lib.filterAttrs (_: user: user.isNormalUser) config.users.users);
+  # (One with enable = false is not there; one with linger = false runs none: the phone has no logins that would start
+  # them.)
+  normalUsers = lib.attrNames (lib.filterAttrs (_: user: user.enable && user.isNormalUser
+    && !(config.users.manageLingering && user.linger == false)) config.users.users);
   userUnit = user: name: "user-${user}-${name}";
   userKinds = { services = "service"; sockets = "socket"; timers = "timer"; paths = "path"; targets = "target"; };
   # A value of a section as Home Manager gives it (text, a number, true or false, a path, or a list of them), as a unit

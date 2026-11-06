@@ -6,6 +6,13 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- Users' passwords, as on NixOS: `users.users.<name>.hashedPassword`, `password` (hashed on the phone),
+  `hashedPasswordFile` (a file from the config's folder, put on the phone readable by root alone, or one already
+  there), `initialPassword` and `initialHashedPassword`, in the view's `/etc/shadow`, which sshd takes for a
+  password login; `expires` (no logins from that day on). Also `enable = false` (the user is left out),
+  `linger = false` (its own units do not run), `subUidRanges`, `subGidRanges` and `autoSubUidGidRange`
+  (`/etc/subuid`, `/etc/subgid`), `users.defaultUserHome` and `users.manageLingering`, with NixOS's checks and
+  warnings.
 - Seraph is now called Nixup: the app (`dev.nixup.manager`), the Magisk module (`nixup`), its data
   (`/data/adb/nixup`), `nixup-rebuild`, `nixup-play-login`, `nixup-shell`, `nixup-backup`, and the flake
   (`github:by-architect/Nixup`, `nixup.lib.nixupSystem`, `nixupConfigurations`). Installing Nixup takes a

@@ -10,7 +10,7 @@
 { config, options, lib, pkgs, ... }:
 let
   # Whether there are Nix packages for a shell: environment.systemPackages, or a user's (its profile: nix/users.nix).
-  anyPackages = config.environment.systemPackages != [ ] || lib.any (user: user.packages != [ ]) (lib.attrValues config.users.users);
+  anyPackages = config.environment.systemPackages != [ ] || lib.any (user: user.enable && user.packages != [ ]) (lib.attrValues config.users.users);
   # What a shell has besides environment.systemPackages, as on NixOS.
   shellPackages = lib.optionals anyPackages (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
   # Whether a user has packages (users.users.<name>.packages), asked of the definitions alone: their packages need
