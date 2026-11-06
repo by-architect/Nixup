@@ -476,9 +476,13 @@ It works like `nixos-rebuild`:
 | `nixos-rebuild switch --rollback` | **Generations** → pick one → Switch to it |
 | `nixos-rebuild switch --specialisation work` | ⋮ → **Specialisations** → pick one (no new build), or `--specialisation work` with `build.sh` or `nixup-rebuild` |
 | `nixos-rebuild --target-host` | `nixup-rebuild switch --flake .#phone` on a PC |
+| `nixos-version` | `nixos-version` (in the terminal, `nixup-shell` or adb), with `--revision`, `--configuration-revision`, `--json` |
 
 - A build reads and checks everything first; if anything is wrong, **nothing changes**.
-- Each build that changes something is saved as a generation, with what it was built from.
+- Each build that changes something is saved as a generation, with what it was built from, its label
+  (`system.nixos.label`: tags and the nixpkgs version) and the config's commit (`system.configurationRevision`),
+  as NixOS's boot menu shows them; with `system.copySystemConfiguration = true;` it keeps a copy of the
+  `configuration.nix` too.
 - `specialisation.<name>.configuration` makes other versions of the config (a "work" or "travel" one) with
   each build, as on NixOS. The phone switches to one and back without building again, and keeps the one picked
   across restarts, until a build picks another.

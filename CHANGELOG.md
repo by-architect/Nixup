@@ -6,6 +6,11 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- The system's version, as on NixOS: each generation keeps its label (`system.nixos.label`, with
+  `system.nixos.tags` and the nixpkgs version) and the config's commit (`system.configurationRevision`), which
+  the app's Generations shows; `system.copySystemConfiguration = true;` keeps a copy of the configuration.nix
+  with each generation. `nixos-version` tells them (`--revision`, `--configuration-revision`, `--json`),
+  `/etc/os-release` and `/etc/lsb-release` are in Nixup's view, and `system.build.toplevel` is the profile.
 - The phone builds its config by itself, as NixOS's `system.autoUpgrade`: at `dates` (with `randomizedDelaySec`,
   `fixedRandomDelay` and `persistent`) it builds again with everything at its newest (`upgrade = false`: as locked),
   the picked config (a git clone gets its new commits first) or `flake`, with `channel` for a configuration.nix

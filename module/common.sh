@@ -202,7 +202,8 @@ engine() {
 
 # A new generation, as nixos-rebuild makes one when the system changed: the
 # profile, the versions the config's apps are at, what it was built from
-# (GEN_SOURCE), the PC it was built on (GEN_BUILT_ON; none: the phone) and a
+# (GEN_SOURCE), its version and the config's revision (version), the configuration.nix
+# itself with system.copySystemConfiguration (GEN_CONFIG), the PC it was built on (GEN_BUILT_ON; none: the phone) and a
 # flake's lock (GEN_LOCK: the exact versions of its inputs, so going back to it
 # builds them again). An update of the apps alone, or the last profile applied
 # again, keeps the last generation's.
@@ -215,6 +216,12 @@ new_generation() {
   if [ -f "$SYSTEM" ]; then cp "$SYSTEM" "$generations/new/profile.json"; else cp "$PROFILE" "$generations/new/profile.json"; fi
   [ -s "$SPECIALISATION_IN_USE" ] && cp "$SPECIALISATION_IN_USE" "$generations/new/specialisation"
   [ -f "$DATA/resolved.json" ] && cp "$DATA/resolved.json" "$generations/new/apps.json"
+  # Its version and the config's revision (system.nixos.label, system.configurationRevision: the engine's
+  # /etc/nixup/version), and with system.copySystemConfiguration the configuration.nix it was built from (GEN_CONFIG).
+  [ -f "$DATA/etc/nixup/version" ] && cp "$DATA/etc/nixup/version" "$generations/new/version"
+  if [ -n "$GEN_CONFIG" ] && [ -f "$GEN_CONFIG" ] && grep -q '"copySystemConfiguration":true' "$generations/new/profile.json"; then
+    cp "$GEN_CONFIG" "$generations/new/configuration.nix"
+  fi
   if [ -n "$GEN_SOURCE" ]; then
     printf '%s\n' "$GEN_SOURCE" > "$generations/new/source"
     [ -n "$GEN_BUILT_ON" ] && printf '%s\n' "$GEN_BUILT_ON" > "$generations/new/built-on"

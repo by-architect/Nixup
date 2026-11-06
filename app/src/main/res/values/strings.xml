@@ -70,6 +70,8 @@
     <string name="generation_current">  (current)</string>
     <string name="generation_title">Generation %1$s</string>
     <string name="generation_message">Built %1$s, from %2$s.\n\nSwitching to it applies its settings, apps and services again (its apps at their newest versions); it becomes the newest generation. A dry run says first what would change.</string>
+    <string name="generation_label">Version: %1$s</string>
+    <string name="generation_revision">Config\'s commit: %1$s</string>
     <string name="generation_from_pc">%1$s, on %2$s</string>
     <string name="switch_to">Switch to it</string>
     <string name="switching">Switching to generation %1$s…</string>

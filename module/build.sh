@@ -320,7 +320,9 @@ eval_secrets() {
   else nix_eval --argstr reposDir "$DATA/repos" --argstr part secretsToDeliver; fi
 }
 
-GEN_SOURCE=$SRC GEN_LOCK=
+GEN_SOURCE=$SRC GEN_LOCK= GEN_CONFIG=
+# A configuration.nix alone: the file, which the generation keeps with system.copySystemConfiguration.
+[ -z "$FLAKE" ] && [ -f "$SRC" ] && GEN_CONFIG=$SRC
 if [ -n "$FLAKE" ]; then
   log "== Flake $WHERE"
   nix_etc || fail "Nix could not get its /etc (the network's DNS servers): is the phone online?"

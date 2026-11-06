@@ -271,9 +271,11 @@ else
   source="$what_built"
 fi
 printf '%s\n' "$source" > "$work/source"
+# The configuration.nix itself, which the generation keeps with system.copySystemConfiguration (nix/version.nix).
+if [[ -n $file ]] && grep -q '"copySystemConfiguration":true' "$work/profile.json"; then cp "$file" "$work/configuration.nix"; fi
 
 say "== Sending it to the phone"
-for part in profile.json source built-on flake.lock paths.nar paths.nar.gz; do
+for part in profile.json source built-on flake.lock configuration.nix paths.nar paths.nar.gz; do
   [[ -f $work/$part ]] || continue
   send "$work/$part" "$incoming/$part" || die "could not send $part to the phone"
 done

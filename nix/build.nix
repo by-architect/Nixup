@@ -172,6 +172,8 @@ in
         inherit (config.environment) extraInit;
         # The app's terminal: its font and colors (nix/terminal.nix).
         terminal = config.system.build.terminal;
+        # The version and the config's revision, which each generation keeps (nix/version.nix).
+        version = config.system.build.version;
         # adb's port and the computers it trusts (nix/adb.nix).
         adb = config.system.build.adb;
         # The secrets' names: the phone checks each is there, and removes one that left.

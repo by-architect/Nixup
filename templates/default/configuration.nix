@@ -727,6 +727,13 @@
 
   system.activationScripts = { };                 # scripts at each build: not on the phone yet
 
+  # The system's version and where it was built from, as on NixOS: the app's Generations shows each one's label and
+  # the config's commit, nixos-version tells them, and /etc/os-release has them (nix/version.nix).
+  system.stateVersion = "26.05";                  # the release of your first build: leave it there (NixOS's modules keep its defaults)
+  system.nixos.tags = [ ];                        # words before the version in each generation's label, like [ "travel" ]
+  system.configurationRevision = null;            # the config's git commit; in a flake: self.rev or self.dirtyRev or null
+  system.copySystemConfiguration = false;         # true: each generation keeps a copy of this configuration.nix (not with a flake)
+
   # Other versions of this config, built with it: switch with ⋮ → Specialisations (no new build),
   # or build.sh / nixup-rebuild --specialisation work. The phone keeps the one picked, also after
   # a restart, until a build picks another (or none: this config itself).

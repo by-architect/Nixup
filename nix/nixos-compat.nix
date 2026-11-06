@@ -240,15 +240,7 @@ in
     };
 
     system = {
-      stateVersion = mkOption {
-        type = types.str;
-        default = lib.trivial.release;
-        defaultText = lib.literalExpression "lib.trivial.release";
-        description = ''
-          The NixOS release whose defaults NixOS's modules keep, as on NixOS (where it has no default): here the
-          release of the config's nixpkgs.
-        '';
-      };
+      # (stateVersion, with the system's version: nix/version.nix.)
       nssModules = mkOption {
         type = types.listOf types.path;
         default = [ ];

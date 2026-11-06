@@ -467,7 +467,8 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private class Generation(val number: String, val time: Long, val source: String, val builtOn: String)
+    /** A generation: its number, when it was made, what from and on which PC, and its label and the config's revision (nix/version.nix). */
+    private class Generation(val number: String, val time: Long, val source: String, val builtOn: String, val label: String = "", val revision: String = "")
 
     /** The generations, newest first; one picked can be tried (a dry run) or switched to (build.sh generation). */
     private fun generations() {
@@ -475,7 +476,7 @@ class MainActivity : Activity() {
             if (exit == null) return@read toast(getString(R.string.no_root))
             val current = said.lineSequence().firstOrNull { it.startsWith("last=") }?.removePrefix("last=")?.trim()
             val all = said.lineSequence().map { it.split('\t') }.filter { it.size >= 4 && it[0].isNotEmpty() && it[0].all(Char::isDigit) }
-                .map { Generation(it[0], (it[1].toLongOrNull() ?: 0L) * 1000, it[2], it[3]) }.toList()
+                .map { Generation(it[0], (it[1].toLongOrNull() ?: 0L) * 1000, it[2], it[3], it.getOrElse(4) { "" }, it.getOrElse(5) { "" }) }.toList()
             if (all.isEmpty()) return@read toast(getString(R.string.no_generations))
             val items = all.map { g ->
                 getString(R.string.generation_item, g.number, when (g.time) { 0L -> getString(R.string.unknown); else -> Ui.date(g.time) },
@@ -494,10 +495,15 @@ class MainActivity : Activity() {
         return if (g.builtOn.isNotEmpty()) getString(R.string.generation_from_pc, source, g.builtOn) else source
     }
 
+    /** Its label and the config's revision, as the dialog's last lines (none for a generation made before they were kept). */
+    private fun version(g: Generation): String =
+        (if (g.label.isNotEmpty()) "\n\n" + getString(R.string.generation_label, g.label) else "") +
+            (if (g.revision.isNotEmpty()) "\n" + getString(R.string.generation_revision, g.revision) else "")
+
     private fun generation(g: Generation) {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.generation_title, g.number))
-            .setMessage(getString(R.string.generation_message, if (g.time == 0L) getString(R.string.unknown) else Ui.date(g.time), from(g)))
+            .setMessage(getString(R.string.generation_message, if (g.time == 0L) getString(R.string.unknown) else Ui.date(g.time), from(g)) + version(g))
             .setPositiveButton(R.string.switch_to) { _, _ -> buildScript("generation ${g.number}", R.string.switching, g.number) }
             .setNeutralButton(R.string.dry_run) { _, _ -> buildScript("generation ${g.number} dry", R.string.generation_dry, g.number) }
             .setNegativeButton(R.string.cancel, null)
@@ -934,7 +940,8 @@ class MainActivity : Activity() {
         /** Each generation, newest first: its number, when it was made, what from and on which PC; and the current one. */
         private const val GENERATIONS = "g=/data/adb/nixup/generations; echo \"last=\$(cat \$g/last 2>/dev/null)\"; " +
             "for n in \$(ls \$g 2>/dev/null | grep -E '^[0-9]+\$' | sort -rn); do " +
-            "printf '%s\\t%s\\t%s\\t%s\\n' \"\$n\" \"\$(stat -c %Y \$g/\$n/profile.json 2>/dev/null)\" " +
-            "\"\$(head -n 1 \$g/\$n/source 2>/dev/null)\" \"\$(head -n 1 \$g/\$n/built-on 2>/dev/null)\"; done"
+            "printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"\$n\" \"\$(stat -c %Y \$g/\$n/profile.json 2>/dev/null)\" " +
+            "\"\$(head -n 1 \$g/\$n/source 2>/dev/null)\" \"\$(head -n 1 \$g/\$n/built-on 2>/dev/null)\" " +
+            "\"\$(sed -n 's/^label=//p' \$g/\$n/version 2>/dev/null)\" \"\$(sed -n 's/^configurationRevision=//p' \$g/\$n/version 2>/dev/null)\"; done"
     }
 }

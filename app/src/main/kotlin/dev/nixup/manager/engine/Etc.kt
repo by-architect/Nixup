@@ -87,6 +87,7 @@ object Etc {
         writeNixCommands(etc, profile?.optJSONObject("nix"))
         // What every session runs first (environment.extraInit).
         File(etc, "nixup/environment").writeText(profile?.string("extraInit") ?: "")
+        writeVersion(etc, profile?.optJSONObject("version"))
         // The app's terminal: its font and colors (terminal.font, terminal.colors), read by the app when it opens.
         val terminal = File(etc, "nixup/terminal.json")
         val look = profile?.optJSONObject("terminal")
@@ -102,6 +103,21 @@ object Etc {
         val own = profile?.optJSONArray("etc")?.let { entries -> (0 until entries.length()).map { entries.getJSONObject(it).getString("target").trim('/') } }.orEmpty()
         if ("bashrc" !in own) File(etc, "bashrc").writeText(BASHRC.replace("@NAME@", hostName))
         return etc
+    }
+
+    /**
+     * /etc/nixup/version: the system's version and the config's revision ([version], a profile's version part:
+     * system.nixos.version, label, ..., system.configurationRevision; nix/version.nix), as "name=value" lines, which
+     * nixos-version tells and each generation keeps (module/common.sh). None for a profile without it.
+     */
+    private fun writeVersion(etc: File, version: JSONObject?) {
+        val file = File(etc, "nixup/version")
+        if (version == null) {
+            file.delete()
+            return
+        }
+        val names = listOf("version", "release", "codeName", "revision", "label", "configurationRevision")
+        file.writeText(names.joinToString("") { name -> "$name=${version.string(name).orEmpty().replace("\n", " ")}\n" })
     }
 
     /**
