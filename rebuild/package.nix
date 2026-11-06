@@ -2,7 +2,7 @@
 # its own): with its overlay, environment.systemPackages = [ pkgs.nixup-rebuild ];
 # The script finds Nixup's nix/ next to its own folder, so both go in share/nixup. nixup-play-login
 # (a Google Play account's token, for the config) comes with it.
-{ lib, stdenvNoCC, makeWrapper, android-tools, openssh, gnutar, curl }:
+{ lib, stdenvNoCC, makeWrapper, android-tools, openssh, gnutar, gzip, curl }:
 stdenvNoCC.mkDerivation {
   pname = "nixup-rebuild";
   version = "0.1.0";
@@ -20,7 +20,7 @@ stdenvNoCC.mkDerivation {
     cp -r rebuild nix $out/share/nixup/
     # adb and ssh reach the phone; nix is the system's own (its daemon's version).
     makeWrapper $out/share/nixup/rebuild/nixup-rebuild $out/bin/nixup-rebuild \
-      --prefix PATH : ${lib.makeBinPath [ android-tools openssh gnutar ]}
+      --prefix PATH : ${lib.makeBinPath [ android-tools openssh gnutar gzip ]}
     # The browser it opens is the system's own (xdg-open, open).
     makeWrapper $out/share/nixup/rebuild/nixup-play-login $out/bin/nixup-play-login \
       --prefix PATH : ${lib.makeBinPath [ curl ]}

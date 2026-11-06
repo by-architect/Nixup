@@ -703,6 +703,30 @@
 
   environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c nixup-shell), like htop rsync
 
+  # Nix itself in the shells, as NixOS's nix.* options: nix shell nixpkgs#htop, nix profile add nixpkgs#htop,
+  # nix-shell -p htop, nix-env -iA nixpkgs.htop (installed for the user, on PATH), from this config's nixpkgs.
+  nix.enable = true;                              # Nix's commands in the terminal, ssh and nixup-shell (false: none)
+  nix.settings = {                                # /etc/nix/nix.conf, as on NixOS
+    experimental-features = [ "nix-command" "flakes" ];   # the nix command and flakes (on by default)
+    substituters = [ ];                           # more binary caches (cache.nixos.org is always one)
+    trusted-public-keys = [ ];                    # their keys, like "nix-community.cachix.org-1:mB9F…"
+    max-jobs = "auto";                            # builds at once ("auto": one per core)
+    sandbox = false;                              # Nix's sandbox: Android's kernels cannot (builds run as nixbld users)
+  };
+  nix.extraOptions = "";                          # more nix.conf lines, like "keep-outputs = true"
+  nix.nrBuildUsers = 32;                          # nixbld users builds run as (a uid from 400 to 999 each)
+  nix.gc = {                                      # remove what nothing uses (Nixup's own packages stay)
+    automatic = false;                            # true: at the times below
+    dates = "weekly";                             # when, like "03:15" or "weekly"
+    options = "--delete-older-than 30d";          # what nix-collect-garbage gets
+  };
+  nix.optimise.automatic = false;                 # files the store has twice become one, at night
+  nix.registry = { };                             # flakes by name, like { mine.flake = inputs.mine; } (nixpkgs: this config's)
+  nix.channel.enable = true;                      # nix-channel, for channels of your own
+  # nix.package = pkgs.nixVersions.latest;        # another Nix, from nixpkgs (not set: the module's own, nothing to download)
+  nixpkgs.flake.setFlakeRegistry = true;          # nixpkgs#… in the shells is this config's nixpkgs (the phone keeps it)
+  nixpkgs.flake.setNixPath = true;                # and <nixpkgs> (nix-shell -p, nix-env -iA nixpkgs.…)
+
   nixpkgs.config = { };                           # nixpkgs settings, like { allowUnfree = true; }
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)
   nixpkgs.hostPlatform = "aarch64-linux";         # the phone's processor: 64-bit ARM

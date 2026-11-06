@@ -714,6 +714,10 @@
 
   environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c nixup-shell), like htop rsync
 
+  # Nix itself in the shells, as NixOS's nix.*: nix shell nixpkgs#htop, nix-shell -p htop, nix-env -iA nixpkgs.htop.
+  nix.enable = true;                              # Nix's commands in the terminal, ssh and nixup-shell (false: none)
+  nix.gc.automatic = false;                       # true: remove what nothing uses, at 03:15 (nix.gc.dates)
+
   nixpkgs.config = { };                           # nixpkgs settings, like { allowUnfree = true; }
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)
   nixpkgs.hostPlatform = "aarch64-linux";         # the phone's processor: 64-bit ARM

@@ -6,6 +6,30 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- Seraph is now called Nixup: the app (`dev.nixup.manager`), the Magisk module (`nixup`), its data
+  (`/data/adb/nixup`), `nixup-rebuild`, `nixup-play-login`, `nixup-shell`, `nixup-backup`, and the flake
+  (`github:by-architect/Nixup`, `nixup.lib.nixupSystem`, `nixupConfigurations`). Installing Nixup takes a
+  Seraph install over, as Seraph took Andronix's: its data moves (with a link left at `/data/adb/seraph`, so
+  paths a config names there still work), its module and app go, and its config stays where it is. Allow the
+  Nixup app root when it asks. A flake made for Seraph (`seraph.lib.seraphSystem`, `seraphConfigurations`)
+  and `androidApp = "dev.seraph.manager"` build as they are.
+- Nix in the phone's shells (the app's terminal, ssh, `su -c nixup-shell`), as on NixOS: `nix shell nixpkgs#htop`,
+  `nix run`, `nix profile add`, `nix-shell -p`, `nix-env -iA nixpkgs.htop`, `nix-build`, `nix-collect-garbage` and
+  the rest, with the module's own Nix (nothing to download) and Nixup's store. `nixpkgs` there is the config's own
+  (the registry's and `<nixpkgs>`, NixOS's `nixpkgs.flake.setFlakeRegistry` and `setNixPath`): the phone keeps it,
+  and `nixup-rebuild` sends it once when the phone has not got it. What a user installs is on their PATH.
+- NixOS's `nix.*` options do what they do on NixOS: `nix.enable`, `nix.package`, `nix.settings` and `nix.extraOptions`
+  (`/etc/nix/nix.conf`; flakes on, the sandbox off, as Android's kernels lack its namespaces), `nix.registry`,
+  `nix.nixPath`, `nix.channel.enable`, `nix.nrBuildUsers` (builds run as `nixbld` users with uids from 400 to 999),
+  `nix.gc` and `nix.optimise` at their times. Nix's daemon runs for the other users that log in. `nix.buildMachines`,
+  `nix.distributedBuilds`, `nix.sshServe` and `nix.checkConfig` are there too, so a NixOS module that sets them builds.
+- A shell another program starts (`nix shell`'s, tmux's) keeps its PATH and gets the same prompt: `SHELL` is the shell
+  itself, as on NixOS, and `/etc/bashrc` has the prompt.
+- Free up space runs in Nixup's view, where the users' own Nix profiles are roots it keeps.
+- Fixed: Nix's garbage collector (Free up space, `nix-collect-garbage`) could stop with "read of 65536 bytes: Out of
+  memory" on an Android 4.x kernel, which refuses a big read of `/proc/sys/kernel/modprobe` and `poweroff_cmd`: those
+  are empty in Nixup's view, as containers have them.
+- `nixup-rebuild` sends what it sends of Nix's store compressed, to a module that takes it so.
 - Home Manager, as on NixOS: import its NixOS module (a flake's `home-manager.nixosModules.home-manager`, or
   `<home-manager/nixos>` in a configuration.nix alone, which the phone then fetches as it fetches nixpkgs) and
   `home-manager.users.<name>` has all of Home Manager's options. Each user's Home Manager runs as the user at each
@@ -25,13 +49,6 @@ section after the version, and its text is what the Magisk app shows as the upda
 - Sockets are handed over with their names (`FileDescriptorName`, else their socket unit's, as `LISTEN_FDNAMES`), and
   a unix socket's folder is made with its `DirectoryMode`.
 - The build's messages name a user's unit where the config gives it (`home-manager.users.<name>.systemd.user...`).
-- Seraph is now called Nixup: the app (`dev.nixup.manager`), the Magisk module (`nixup`), its data
-  (`/data/adb/nixup`), `nixup-rebuild`, `nixup-play-login`, `nixup-shell`, `nixup-backup`, and the flake
-  (`github:by-architect/Nixup`, `nixup.lib.nixupSystem`, `nixupConfigurations`). Installing Nixup takes a
-  Seraph install over, as Seraph took Andronix's: its data moves (with a link left at `/data/adb/seraph`, so
-  paths a config names there still work), its module and app go, and its config stays where it is. Allow the
-  Nixup app root when it asks. A flake made for Seraph (`seraph.lib.seraphSystem`, `seraphConfigurations`)
-  and `androidApp = "dev.seraph.manager"` build as they are.
 - NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
   runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 67 Nixup has tried
   (AdGuard Home, Caddy, cron, Forgejo, Gitea, Gotify, Grafana, harmonia, Jellyfin, Navidrome, nginx, ntfy, Redis,

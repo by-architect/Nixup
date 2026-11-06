@@ -263,6 +263,27 @@ file can configure a user on a NixOS machine and on the phone.
   links into `/nix/store`, so they are there in Nixup's view of the phone (SSH, the app's terminal, the services), not
   for Android's apps.
 
+Nix itself is in the same shells, as on NixOS, for packages you want without changing the config:
+
+```sh
+nix shell nixpkgs#htop          # a shell with htop (nix run nixpkgs#cowsay -- hi runs one program)
+nix profile add nixpkgs#htop    # installed for you, on PATH from then on (or: nix-env -iA nixpkgs.htop)
+nix-shell -p htop               # a shell with nixpkgs' build tools too (a big download the first time)
+nix-collect-garbage -d          # frees up space; the config's own packages stay
+```
+
+- `nixpkgs` there is your config's own nixpkgs (the registry's `nixpkgs` and `<nixpkgs>`, as on a NixOS built
+  from a flake), so nothing fetches nixpkgs again. The phone keeps it; a build from a PC sends it once when
+  the phone has not got it.
+- The commands are the module's own Nix, so nothing is downloaded for them. Settings: `nix.settings`
+  (`/etc/nix/nix.conf`, flakes on), `nix.registry`, `nix.gc`, `nix.optimise`, `nix.package`, as on NixOS;
+  `nix.enable = false` takes it all away.
+- Builds run as the `nixbld` users, without Nix's sandbox (Android's kernels cannot do it). Other users that
+  log in (`isNormalUser`) use Nix through its daemon, as on NixOS.
+- A user of an Android app (`androidApp`) has that app's network, which Android cuts while the app is in the
+  background: `nix-shell -p` and `nix-env -iA nixpkgs.…` work anyway (the daemon downloads), but `nix shell
+  nixpkgs#…` first fetches Nix's registry itself, which then fails.
+
 </details>
 
 <details>

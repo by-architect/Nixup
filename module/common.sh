@@ -329,18 +329,33 @@ fetch_packages() {
   fi
 }
 
-# What a PC that built the config sent of Nix's store (incoming/paths.nar: the derivations
-# of the files the config makes, with all they need, and the files it added): into Nixup's
-# store, for fetch_packages to build.
+# What a PC that built the config sent of Nix's store (incoming/paths.nar, or paths.nar.gz:
+# the derivations of the files the config makes, with all they need, the files it added, and
+# the config's nixpkgs when the phone had not got it): into Nixup's store, for fetch_packages
+# to build.
 import_paths() {
   [ -s "$1" ] || return 0
   log "== Files made from the config, from the PC"
   nix_env
-  nix_view nix-store --import < "$1" > /dev/null
+  case "$1" in
+    *.gz) ${BUSYBOX:+"$BUSYBOX"} zcat "$1" | nix_view nix-store --import > /dev/null ;;
+    *) nix_view nix-store --import < "$1" > /dev/null ;;
+  esac
+}
+
+# The paths a profile has the phone keep that no cache has (Nix's registry's flakes, the
+# config's nixpkgs among them: nix shell nixpkgs#… in the shells): a build on the phone has
+# them from its evaluation, and nixup-rebuild sends them. One that is not here is said.
+check_kept() {
+  for path in $(engine paths "$1" --kept | grep '^/nix/store/'); do
+    [ -e "$DATA/nix$path" ] || log "Not on the phone: $path, which Nix's registry names (the config's nixpkgs, for nix shell nixpkgs#… in the shells): a build on the phone fetches it, and nixup-rebuild sends it"
+  done
+  return 0
 }
 
 # The packages of the profile in use, kept from Nix's garbage collection (each a root
-# in Nixup's store), as a NixOS system's are.
+# in Nixup's store), as a NixOS system's are; and the flakes Nix's registry names (the
+# config's nixpkgs), as a NixOS system keeps them through its registry.
 keep_packages() {
   roots=$DATA/nix/nix/var/nix/gcroots/nixup
   rm -rf "$roots" && mkdir -p "$roots"
@@ -348,6 +363,10 @@ keep_packages() {
   for path in $(engine paths "$PROFILE" | grep '^/nix/store/'); do
     ln -s "$path" "$roots/$i" && i=$((i + 1))
   done
+  for path in $(engine paths "$PROFILE" --kept | grep '^/nix/store/'); do
+    [ -e "$DATA/nix$path" ] && ln -s "$path" "$roots/$i" && i=$((i + 1))
+  done
+  return 0
 }
 
 # The second half of every build, wherever the profile was built (build.sh on the
@@ -357,6 +376,7 @@ keep_packages() {
 # is the folder of the secrets a PC sent with it.
 switch_to() {
   fetch_packages "$1" "$2" || { rm -f "$1"; fail "the config's packages could not be fetched from cache.nixos.org (Nix says why above); nothing was changed"; }
+  check_kept "$1"
   log "== Apps"
   sent=
   [ -n "$SECRETS_IN" ] && sent="--secrets=$SECRETS_IN"

@@ -19,6 +19,7 @@ import java.util.TimeZone
  * environment.systemPackages on PATH, started the same way for an ssh session (services.openssh), the app's terminal
  * and nixup-shell. What every session starts with ([SET_ENVIRONMENT]: PATH, a user's own packages first, the time
  * zone, environment.extraInit) /etc/profile and /etc/zshenv give a user's own shell too (users.users.<name>.shell).
+ * Nix's commands are in /etc/nixup/bin ([writeNixCommands]).
  */
 object Etc {
     /**
@@ -83,6 +84,7 @@ object Etc {
             machineId.writeText(java.util.UUID.randomUUID().toString().replace("-", "") + "\n")
         }
         writeLogin(etc, home, profile?.optJSONObject("shell"))
+        writeNixCommands(etc, profile?.optJSONObject("nix"))
         // What every session runs first (environment.extraInit).
         File(etc, "nixup/environment").writeText(profile?.string("extraInit") ?: "")
         // The app's terminal: its font and colors (terminal.font, terminal.colors), read by the app when it opens.
@@ -90,12 +92,66 @@ object Etc {
         val look = profile?.optJSONObject("terminal")
         if (look == null || (look.string("font") == null && (look.optJSONObject("colors")?.length() ?: 0) == 0)) terminal.delete()
         else terminal.writeText(look.toString())
-        // A login shell's prompt, with the phone's name (its device name, networking.hostName).
+        // The shells' prompt, with the phone's name (its device name, networking.hostName).
         val name = profile?.optJSONObject("system")?.optJSONObject("settings")?.optJSONObject("global")?.string("device_name")
             ?: Device.run("settings", "get", "global", "device_name").second.trim().takeIf { it.isNotEmpty() && it != "null" } ?: "phone"
-        File(etc, "profile").writeText(PROFILE.replace("@NAME@", name.replace(Regex("[^A-Za-z0-9._-]"), "-")))
+        val hostName = name.replace(Regex("[^A-Za-z0-9._-]"), "-")
+        File(etc, "profile").writeText(PROFILE)
         File(etc, "zshenv").writeText(ZSHENV)
+        // Every interactive bash's (nix shell's too), unless environment.etc has a bashrc of its own.
+        val own = profile?.optJSONArray("etc")?.let { entries -> (0 until entries.length()).map { entries.getJSONObject(it).getString("target").trim('/') } }.orEmpty()
+        if ("bashrc" !in own) File(etc, "bashrc").writeText(BASHRC.replace("@NAME@", hostName))
         return etc
+    }
+
+    /**
+     * Nix's commands (nix, nix-shell, nix-env, ...: [nix]'s commands, a profile's nix part) in /etc/nixup/bin, which the
+     * shells have on PATH and the units run (nix/nix.nix): nix is the module's own Nix, and each other command a link to
+     * it, which it acts as. The module's folder is in /data/adb, which only root may enter, so nix is that file itself
+     * under a second name (a hard link; a copy when the module is on another file system), which every user may run.
+     * The installed module's (it stays where it is from one start to the next, and each start takes it again), else
+     * the one this engine runs from (a module installed, the phone not started again yet). None with nix.enable = false.
+     */
+    fun writeNixCommands(etc: File, nix: JSONObject?) {
+        val dir = File(etc, "nixup/bin")
+        val commands = nix?.strings("commands").orEmpty().filter { it.matches(Regex("[A-Za-z0-9._-]+")) }
+        val binary = listOf(File("/data/adb/modules/nixup/bin/nix"), Notify.module?.let { File(it, "bin/nix") })
+            .firstOrNull { it != null && it.isFile && it.canExecute() }
+        if (commands.isEmpty() || binary == null) {
+            // (Links each, and nix's own name: deleted as they are, never what they lead to.)
+            dir.listFiles().orEmpty().forEach { it.delete() }
+            dir.delete()
+            return
+        }
+        dir.mkdirs()
+        runCatching { Os.chmod(dir.path, "755".toInt(8)) }
+        // nix: again when the module's is another file (a new module), as a hard link the same file, as a copy its size
+        // and time.
+        val nixFile = File(dir, "nix")
+        val wanted = Os.stat(binary.path)
+        val have = runCatching { Os.lstat(nixFile.path) }.getOrNull()
+        val same = have != null && android.system.OsConstants.S_ISREG(have.st_mode) &&
+            ((have.st_dev == wanted.st_dev && have.st_ino == wanted.st_ino) || (have.st_size == wanted.st_size && have.st_mtime == wanted.st_mtime))
+        if (!same) {
+            val next = File(dir, ".nix.new")
+            next.delete()
+            runCatching { Os.link(binary.path, next.path) }.getOrElse {
+                binary.copyTo(next, overwrite = true)
+                next.setLastModified(binary.lastModified())
+                Os.chmod(next.path, "755".toInt(8))
+            }
+            if (!next.renameTo(nixFile)) next.delete()
+        }
+        for (command in commands) {
+            if (command == "nix") continue
+            val link = File(dir, command)
+            if (runCatching { Os.readlink(link.path) }.getOrNull() == "nix") continue
+            val next = File(dir, ".$command.new")
+            next.delete()
+            Os.symlink("nix", next.path)
+            if (!next.renameTo(link)) next.delete()
+        }
+        dir.listFiles().orEmpty().filter { it.name !in commands && it.name != "nix" }.forEach { it.delete() }
     }
 
     /**
@@ -437,12 +493,12 @@ object Etc {
         return 0
     """.trimIndent() + "\n"
 
-    /** What bash reads in a login shell: what every session starts with, a prompt with the phone's name, and ~/.bashrc, as distributions have it. */
+    /** What bash reads in a login shell: what every session starts with, /etc/bashrc (the prompt) and ~/.bashrc, as distributions have it. */
     private val PROFILE = """
         # Nixup's /etc/profile, for login shells in its view (written by the engine: Etc.kt).
         [ -r /etc/nixup/set-environment ] && . /etc/nixup/set-environment
         if [ -n "${'$'}BASH_VERSION" ] && [ -n "${'$'}PS1" ]; then
-          PS1='\[\e[1;32m\]\u@@NAME@\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\${'$'} '
+          [ -r /etc/bashrc ] && . /etc/bashrc
           [ -r "${'$'}HOME/.bashrc" ] && . "${'$'}HOME/.bashrc"
         fi
     """.trimIndent() + "\n"
@@ -454,6 +510,17 @@ object Etc {
     """.trimIndent() + "\n"
 
     /**
+     * What every interactive bash reads (nixpkgs' bash reads /etc/bashrc; a login shell through /etc/profile): a prompt
+     * with the phone's name, also in a shell another program starts (nix shell's, tmux's).
+     */
+    private val BASHRC = """
+        # Nixup's /etc/bashrc, for interactive bash shells in its view (written by the engine: Etc.kt).
+        if [ -n "${'$'}PS1" ]; then
+          PS1='\[\e[1;32m\]\u@@NAME@\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\${'$'} '
+        fi
+    """.trimIndent() + "\n"
+
+    /**
      * The users' shell in the view: for a login (an ssh session, the terminal) a login shell in its home, else the
      * command it is given (`login -c 'ls'`, as sshd runs a command or SFTP).
      */
@@ -462,7 +529,8 @@ object Etc {
         # The users' shell in Nixup's view of the phone, for ssh sessions, the app's terminal and nixup-shell: the
         # profile's (the user's own packages and environment.systemPackages on PATH, then Android's commands). Written
         # by the engine (Etc.kt).
-        export SHELL=/etc/nixup/login
+        # SHELL is the shell itself, as on NixOS: a program that starts one (nix shell, tmux) keeps the PATH it made.
+        export SHELL=@SHELL@
         # root's home; another user's is the one sshd gave it, from /etc/passwd.
         [ "${'$'}(/system/bin/id -u)" = 0 ] && export HOME=@HOME@
         # What every session starts with (PATH, the time zone, environment.extraInit), anew.

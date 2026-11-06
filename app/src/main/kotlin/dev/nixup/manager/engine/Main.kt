@@ -21,11 +21,13 @@ import kotlin.system.exitProcess
  *                                 services match the profile (with --dry-run: only plans and checks; with --force, the
  *                                 releases are asked for again even when new enough; --secrets: the folder of the
  *                                 secrets a PC sent with it, nixup-rebuild's)
- *   paths <profile> [--derivations]
+ *   paths <profile> [--derivations | --kept]
  *                                 prints the store paths the profile needs (its android.storePaths), one a line, for
  *                                 the module to fetch from cache.nixos.org before applying it; with --derivations, how
  *                                 each comes (android.derivations: a derivation's outputs, which the small files the
- *                                 config makes are built from on the phone, or a path the config added)
+ *                                 config makes are built from on the phone, or a path the config added); with --kept,
+ *                                 the paths the phone keeps but fetches from nowhere (android.nix.kept: the flakes of
+ *                                 Nix's registry, the config's nixpkgs among them, which a build brings)
  *   secrets <file> <folder> [--store=<root>]
  *                                 puts the secrets a build on the phone gives (<file>: each one's file or text) in
  *                                 <folder>, readable by root alone, as a PC sends them (--store: Nixup's store, for
@@ -35,8 +37,9 @@ import kotlin.system.exitProcess
  *                                 watch runs it when the phone's network changes; see Units)
  *   etc                           writes Nixup's /etc for the Linux programs it runs (Nix, tailscaled): DNS servers,
  *                                 trusted certificates, a root user (see Etc); and the services' view of the phone
- *   services                      at boot: sets adb's port and trusted computers again (android.adb), and starts the
- *                                 services the last build left (its systemd.services units)
+ *   services                      at boot: sets adb's port and trusted computers again (android.adb), links Nix's
+ *                                 commands to the module where it is now (see Etc), and starts the services the last
+ *                                 build left (its systemd.services units)
  *   support                       says which settings that need something of the phone (a feature, a newer Android,
  *                                 LineageOS) this phone can have
  *   restore                       brings back the apps it removed, gives back every app and system setting the module
@@ -115,6 +118,8 @@ object Main {
                     // adb listens on no port after a restart: the profile's again, before the units start.
                     val android = runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull()
                     runCatching { Adb(data).boot(android?.optJSONObject("adb")) }.onFailure { Out.line("✘ adb: ${it.message}") }
+                    // A module installed since the last start is where Magisk moved it now.
+                    runCatching { Etc.writeNixCommands(File(data, "etc"), android?.optJSONObject("nix")) }
                     Units(data).start()
                 }
                 "secrets" -> Secrets.stage(
@@ -122,7 +127,13 @@ object Main {
                     args.firstOrNull { it.startsWith("--store=") }?.let { File(it.removePrefix("--store=")) },
                 )
                 "paths" -> JSONObject(File(files.firstOrNull() ?: usage()).readText()).getJSONObject("android")
-                    .optJSONArray(if ("--derivations" in args) "derivations" else "storePaths")
+                    .let { android ->
+                        when {
+                            "--kept" in args -> android.optJSONObject("nix")?.optJSONArray("kept")
+                            "--derivations" in args -> android.optJSONArray("derivations")
+                            else -> android.optJSONArray("storePaths")
+                        }
+                    }
                     ?.let { paths -> (0 until paths.length()).forEach { println(paths.getString(it)) } }.let { 0 }
                 "updates" -> Updates(data).check()
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
