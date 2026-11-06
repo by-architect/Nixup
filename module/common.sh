@@ -292,7 +292,9 @@ nix_view() {
 # evaluation or sent by the PC that built the config) built here, from what the cache has;
 # with dry, only said. A package the cache has not got (built from source: unfree, or
 # changed by an overlay) is never built on the phone: it stops the build here, before
-# anything changes.
+# anything changes; unless the config has build machines (nix.buildMachines, with
+# nix.distributedBuilds), which build it over ssh (nixpkgs' openssh, fetched first) and
+# send it back.
 fetch_packages() {
   paths=$(engine paths "$1" | grep '^/nix/store/') || paths=
   drvs=$(engine paths "$1" --derivations | grep '^/nix/store/') || drvs=
@@ -307,17 +309,33 @@ fetch_packages() {
     nix_view nix build --dry-run --no-link $here 2> "$DATA/tmp/packages.plan" || { cat "$DATA/tmp/packages.plan" >&2; return 1; }
     cat "$DATA/tmp/packages.plan" >&2
     # What it would build: files made from the config, or a package (from its source) it must not.
-    refused=
+    refused= remote=
     for drv in $(sed -n '/will be built:$/,/^[^ ]/s/^ *\(\/nix\/store\/[^ ]*\.drv\)$/\1/p' "$DATA/tmp/packages.plan"); do
       file=$DATA/nix$drv
       if grep -qE '\("srcs?","' "$file" && ! grep -qF '("preferLocalBuild","1")' "$file"; then
         refused="$refused ${drv#/nix/store/*-}"
+        remote="$remote $drv^*"
       fi
     done
     if [ -n "$refused" ]; then
-      log "Not in cache.nixos.org, and packages the phone does not build (from their source):$refused"
-      log "(An overlay or nixpkgs.config makes them so, or they are unfree: give one the cache has.)"
-      return 1
+      builders=$DATA/tmp/builders
+      engine builders "$1" > "$builders" 2> /dev/null || : > "$builders"
+      if [ ! -s "$builders" ]; then
+        log "Not in cache.nixos.org, and packages the phone does not build (from their source):$refused"
+        log "(An overlay or nixpkgs.config makes them so, or they are unfree: give one the cache has, or build machines:"
+        log "nix.buildMachines with nix.distributedBuilds.)"
+        return 1
+      fi
+      log "Not in cache.nixos.org, built on the config's build machines (nix.buildMachines):$refused"
+      if [ "$2" != dry ]; then
+        # Nix's ssh first, then those packages on the machines alone (no job of the phone's own: --max-jobs 0),
+        # then the rest here as before.
+        ssh_bin=$(sed -n 1p "$builders")
+        sed '1d' "$builders" > "$DATA/etc/nix-machines"
+        nix_store build --no-link "${ssh_bin%/bin}" || { log "Nix's ssh (openssh) could not be fetched"; return 1; }
+        PATH="$ssh_bin:$PATH" nix_view nix build --no-link --max-jobs 0 --builders "@/etc/nix-machines" --option builders-use-substitutes true $remote \
+          || { log "The build machines could not build them (Nix says why above: a machine's sshKey, publicHostKey, system?)"; return 1; }
+      fi
     fi
     [ "$2" = dry ] || nix_view nix build --no-link $here || return 1
   fi
@@ -411,9 +429,11 @@ tell_app() {
 NIXPKGS=
 channel() {
   # (Names of its own: the scripts that call it have their own url and path.)
-  channel_url=$(cat "$DATA/channel" 2> /dev/null)
+  # (SERAPH_CHANNEL: another one, for one build: system.autoUpgrade.channel.)
+  channel_url=${SERAPH_CHANNEL:-$(cat "$DATA/channel" 2> /dev/null)}
   [ -n "$channel_url" ] || channel_url=https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz
   channel_link=$DATA/channels/nixpkgs
+  [ -n "$SERAPH_CHANNEL" ] && [ "$(cat "$DATA/channels/url" 2> /dev/null)" != "$channel_url" ] && set -- update
   if [ ! -d "$channel_link/" ] || [ "$1" = update ]; then
     log "== nixpkgs ($channel_url)"
     nix_etc > /dev/null || { log "Nix could not get its /etc (the network's DNS servers): is the phone online?"; return 1; }
@@ -422,6 +442,7 @@ channel() {
     mkdir -p "$DATA/channels" "$DATA/nix/nix/var/nix/gcroots"
     ln -sfn "$channel_path" "$DATA/nix/nix/var/nix/gcroots/seraph-channel"
     ln -sfn "$DATA/nix$channel_path" "$channel_link"
+    printf '%s\n' "$channel_url" > "$DATA/channels/url"
   fi
   NIXPKGS=$(readlink -f "$channel_link")
 }

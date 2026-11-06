@@ -706,5 +706,9 @@
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)
   nixpkgs.hostPlatform = "aarch64-linux";         # the phone's processor: 64-bit ARM
 
+  system.autoUpgrade.enable = false;              # true: builds again by itself at dates ("04:40"), on Wi-Fi, as NixOS's
+  nix.optimise.automatic = false;                 # true: Seraph's store made smaller at dates, while charging
+  nix.distributedBuilds = false;                  # true: nix.buildMachines build what cache.nixos.org has not got, over ssh
+
   system.activationScripts = { };                 # scripts at each build: not on the phone yet
 }

@@ -695,5 +695,41 @@
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)
   nixpkgs.hostPlatform = "aarch64-linux";         # the phone's processor: 64-bit ARM
 
+  # Builds by themselves, as NixOS's system.autoUpgrade: the config built again with everything at its newest.
+  system.autoUpgrade = {
+    enable = false;                               # true: build again at dates
+    dates = "04:40";                              # when, like "daily", "Sun 03:00" (systemd's calendar events)
+    randomizedDelaySec = "0";                     # a random wait before each, like "45min"
+    fixedRandomDelay = false;                     # true: the same wait each time
+    persistent = true;                            # a time missed while the phone was off comes once it is on
+    upgrade = true;                               # false: build the config as flake.lock locks it
+    flake = null;                                 # another config, like "github:you/phone#logos"; null: the picked one (a git clone gets its new commits first)
+    channel = null;                               # nixpkgs of a configuration.nix alone, like "https://channels.nixos.org/nixos-26.05"
+    runGarbageCollection = false;                 # true: then frees up space (the app's Free up space)
+  };
+  android.autoUpgrade = {
+    onlyOnUnmetered = true;                       # build only on Wi-Fi (never on mobile data)
+    onlyWhileCharging = false;                    # true: only while charging
+  };
+
+  # Seraph's store made smaller (files that are the same, kept once), as NixOS's nix.optimise; only while charging.
+  nix.optimise = {
+    automatic = false;                            # true: at dates
+    dates = [ "03:45" ];                          # when
+  };
+
+  # Machines that build the packages cache.nixos.org has not got (an overlay's, an unfree one), as NixOS's: over ssh.
+  nix.distributedBuilds = false;                  # true: use nix.buildMachines; false: such a package stops the build
+  nix.buildMachines = [
+    # {
+    #   hostName = "builder.example.org";         # its address (a tailnet name works)
+    #   sshUser = "builder";                      # one of its nix.settings.trusted-users
+    #   sshKey = "/data/adb/seraph/secrets/builder_ed25519";   # a key on the phone, readable by root (secret)
+    #   systems = [ "aarch64-linux" ];            # the phone's packages' system (a PC builds it with binfmt emulation)
+    #   publicHostKey = "c3NoLWVkMjU1MTkg…";      # base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub on it
+    #   maxJobs = 4;
+    # }
+  ];
+
   system.activationScripts = { };                 # scripts at each build: not on the phone yet
 }

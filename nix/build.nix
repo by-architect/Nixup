@@ -46,6 +46,8 @@ let
   needed = builtins.toJSON {
     inherit (config.system.build) units etc;
     packages = map (package: "${package}") (config.environment.systemPackages ++ shellPackages);
+    # The ssh Nix reaches nix.buildMachines with (nix/nix-builds.nix).
+    builders = if config.system.build.nixBuilders == null then null else config.system.build.nixBuilders.sshPath;
   };
   storePathsIn = text: map builtins.head (lib.filter builtins.isList
     (builtins.split "(/nix/store/[a-z0-9]{32}-[A-Za-z0-9+._?=-]+)" (builtins.unsafeDiscardStringContext text)));
@@ -81,6 +83,7 @@ in
         || options.terminal.font.highestPrio < (lib.mkOptionDefault null).priority
         || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { }
         || config.android.backup.repository != null
+        || (config.nix.distributedBuilds && config.nix.buildMachines != [ ])
         || config.system.build.nixosServices.used;
     };
 
@@ -144,8 +147,9 @@ in
             # terminal's font: it fetches those from cache.nixos.org (and builds the small files the
             # config makes, as derivations says) before the build changes anything.
             units = config.system.build.units;
-            # Their timers (systemd.timers, startAt), which the engine keeps.
-            timers = config.system.build.timers;
+            # Their timers (systemd.timers, startAt), which the engine keeps, with system.autoUpgrade's and
+            # nix.optimise's, which run the module's build.sh at their times (nix/auto-upgrade.nix, nix/nix-builds.nix).
+            timers = config.system.build.timers // config.system.build.autoUpgrade // config.system.build.nixOptimise;
             # Their path units (systemd.paths).
             paths = config.system.build.paths;
             etc = config.system.build.etc;
@@ -153,6 +157,10 @@ in
             storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths
               ++ config.system.build.terminalStorePaths);
             inherit derivations;
+            # The machines that build what cache.nixos.org has not got (nix.buildMachines, with
+            # nix.distributedBuilds), and the ssh Nix reaches them with; null: none.
+            builders = if config.system.build.nixBuilders == null then null
+              else { inherit (config.system.build.nixBuilders) machines ssh; };
             # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
             # NixOS has them; none without Nix packages.
             shell = if config.environment.systemPackages == [ ] then null else {

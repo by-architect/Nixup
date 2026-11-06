@@ -6,6 +6,17 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- The phone builds its config by itself, as NixOS's `system.autoUpgrade`: at `dates` (with `randomizedDelaySec`,
+  `fixedRandomDelay` and `persistent`) it builds again with everything at its newest (`upgrade = false`: as locked),
+  the picked config (a git clone gets its new commits first) or `flake`, with `channel` for a configuration.nix
+  alone, and frees up space after (`runGarbageCollection`). Only on Wi-Fi unless `android.autoUpgrade.onlyOnUnmetered
+  = false`, only while charging with `android.autoUpgrade.onlyWhileCharging`, and never on a low battery.
+- `nix.optimise.automatic`: Seraph's store made smaller at its `dates` (files that are the same, kept once), while the
+  phone charges, as on NixOS; `build.sh optimise` does it at once.
+- `nix.buildMachines` with `nix.distributedBuilds`: a package cache.nixos.org has not got (an overlay's, an unfree one)
+  is built on those machines over ssh and sent back, where the build stopped at it before.
+- systemd timers' `FixedRandomDelay` works (it was taken and did nothing).
+
 - NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
   runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The 67 Seraph has tried
   (AdGuard Home, Caddy, cron, Forgejo, Gitea, Gotify, Grafana, harmonia, Jellyfin, Navidrome, nginx, ntfy, Redis,

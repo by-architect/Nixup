@@ -17,6 +17,14 @@
 #            on a PC (seraph-rebuild), whose config the phone may not have
 #   gc       frees up space, as nix-collect-garbage: the Nix packages no root keeps go (the last
 #            build's packages, nixpkgs and git stay; an older generation fetches its own again)
+#   optimise makes Seraph's store smaller, as nix-store --optimise: files that are the same, kept
+#            once (nix.optimise's timer)
+# switch and update take these too (system.autoUpgrade's timer gives them):
+#   --source=<config>   another config than the one picked, for this build (a flake's address)
+#   --channel=<url>     the nixexprs.tar.xz a configuration.nix alone gets its nixpkgs from
+#   --pull              a picked config in a git clone (the app's Git) gets its repository's new
+#                       commits first (git.sh pull)
+#   --gc                once the build has worked, as gc
 #   generation <n> [dry]
 #            generation n's profile applied again, nothing evaluated, as nix-env
 #            --switch-generation and nixos-rebuild --rollback go back to one: its settings,
@@ -31,16 +39,40 @@ BY=${1:-manual}
 MODE=${2:-switch}
 . "$MODDIR/common.sh"
 
+# switch's and update's options (see above), kept for a run picked up after a restart (resumable).
+OPTIONS= PULL= THEN_GC=
+case "$MODE" in
+  switch | update)
+    if [ $# -ge 2 ]; then shift 2; else set --; fi
+    for option; do
+      case "$option" in
+        --source=*) SERAPH_SOURCE=${option#--source=} ;;
+        --channel=*) SERAPH_CHANNEL=${option#--channel=} ;;
+        --pull) PULL=1 ;;
+        --gc) THEN_GC=1 ;;
+        *) fail "build.sh $MODE: no such option: $option (--source=, --channel=, --pull, --gc)" ;;
+      esac
+      OPTIONS="$OPTIONS $option"
+    done
+    export SERAPH_SOURCE SERAPH_CHANNEL ;;
+esac
+
 # The run: its log, and what the app is told (see run_open in common.sh).
 case "$MODE" in
-  switch) run_open build "Build"; event build start "Building the config" "$(config_source)" ;;
+  switch | update) if [ -n "$OPTIONS" ] && { [ "$BY" = timer ] || [ "$BY" = resume ]; }; then
+      run_open build "Automatic upgrade"; event build start "Automatic upgrade (system.autoUpgrade)" "$(config_source)"
+    elif [ "$MODE" = switch ]; then
+      run_open build "Build"; event build start "Building the config" "$(config_source)"
+    else
+      run_open build "Upgrade"; event build start "Upgrading: a build with everything at its newest" "$(config_source)"
+    fi ;;
   dry) run_open build "Dry run"; event build start "Dry run: what a build would change" "$(config_source)" ;;
-  update) run_open build "Upgrade"; event build start "Upgrading: a build with everything at its newest" "$(config_source)" ;;
   again) run_open build "Build"; event build start "Applying the last build again" ;;
   generation)
     run_open build "Generation $3"
     if [ "$4" = dry ]; then event build start "Trying generation $3"; else event build start "Going back to generation $3"; fi ;;
   gc) run_open build "Freeing up space"; event build start "Freeing up space" ;;
+  optimise) run_open build "Making the store smaller"; event build start "Making Seraph's store smaller (nix.optimise)" ;;
 esac
 # The profile it builds, its own (a dry run next to a build does not touch the build's), until
 # switch_to makes it the phone's.
@@ -48,7 +80,8 @@ NEW=$PROFILE.new-$$
 at_exit 'rm -f "$NEW"'
 # A restart (or a kill) in the middle: it starts again after (see resume.sh).
 case "$MODE" in
-  switch | update | again) resumable build build.sh "$MODE" ;;
+  switch | update) resumable build build.sh "$MODE" $OPTIONS ;;
+  again) resumable build build.sh "$MODE" ;;
   generation) resumable build build.sh generation "$3" ${4:+"$4"} ;;
 esac
 
@@ -88,8 +121,27 @@ case "$MODE" in
     log "Freed $freed MB; Seraph's store has $(( ${after:-0} / 1024 )) MB"
     run_end ok "Freed up $freed MB" "Seraph's store has $(( ${after:-0} / 1024 )) MB left"
     exit 0 ;;
-  *) fail "build.sh: no such thing to do: $MODE (switch, dry, update, again, generation, gc)" ;;
+  optimise)
+    # As nix-store --optimise: files that are the same, kept once (hard links), at the lowest priority.
+    [ -d "$DATA/nix/nix/store" ] || { log "Seraph's store is empty: nothing to make smaller"; run_end info "Nothing to make smaller" "Seraph's store is empty"; exit 0; }
+    nix_env
+    before=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
+    log "== Making the store smaller: files that are the same, kept once"
+    nix_store store optimise || fail "Nix could not make the store smaller (it says why above)"
+    after=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
+    saved=$(( (${before:-0} - ${after:-0}) / 1024 ))
+    log "Saved $saved MB; Seraph's store has $(( ${after:-0} / 1024 )) MB"
+    run_end ok "Saved $saved MB" "Seraph's store has $(( ${after:-0} / 1024 )) MB"
+    exit 0 ;;
+  *) fail "build.sh: no such thing to do: $MODE (switch, dry, update, again, generation, gc, optimise)" ;;
 esac
+
+# --pull: a picked config in a git clone gets its repository's new commits first (as the app's Pull and build).
+if [ -n "$PULL" ] && [ -z "$SERAPH_SOURCE" ]; then
+  case "$(config_source)" in
+    "$DATA/git/"*) sh "$MODDIR/git.sh" "$BY" pull < /dev/null || fail "the repository's new commits could not be pulled (see above); nothing was changed" ;;
+  esac
+fi
 
 SRC=$(config_source)
 [ -n "$SRC" ] || fail "there is no config yet: in the Seraph app, Config picks your configuration.nix or flake.nix (New makes one), or takes a flake's address, like github:you/phone"
@@ -309,3 +361,6 @@ if grep -q '"secrets":\["' "$NEW"; then
 fi
 
 switch_to "$NEW" "$MODE"
+# --gc: what no build keeps goes, now that this one has worked.
+[ -n "$THEN_GC" ] && sh "$MODDIR/build.sh" "$BY" gc < /dev/null
+exit 0
