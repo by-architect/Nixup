@@ -8,11 +8,13 @@
 # (system.activationScripts) have their name here already, with NixOS's type, and using it is an
 # error until they come. The services, with NixOS's names too, are in nix/units.nix and
 # nix/services.nix.
-{ config, lib, ... }:
+{ config, lib, options, ... }:
 let
   inherit (lib) mkOption types;
 
   hostName = config.networking.hostName;
+  # Whether the config gives the phone a name (its default is only for NixOS's modules that read one).
+  hostNameSet = options.networking.hostName.highestPrio < (lib.mkOptionDefault null).priority;
   locale = config.i18n.defaultLocale;
 
   # A locale as NixOS writes one (language[_TERRITORY][.codeset][@modifier], like "tr_TR.UTF-8") as
@@ -54,14 +56,15 @@ in
       # NixOS's type: a DNS label (letters, digits and -, starting and ending with a letter or digit,
       # at most 63 characters), or "".
       type = types.strMatching "^$|^[[:alnum:]]([[:alnum:]_-]{0,61}[[:alnum:]])?$";
-      default = "";
+      default = "localhost";
       example = "phone";
       description = ''
         The phone's name, as NixOS's networking.hostName: letters, digits and -, starting and
         ending with a letter or digit, at most 63 characters. It is the phone's device name
         (android.settings.deviceName, unless that is set; About phone shows it, and other devices
-        over Bluetooth) and its name on the tailnet (services.tailscale). "": the phone keeps the
-        name it has (NixOS's default would be "nixos").
+        over Bluetooth) and its name on the tailnet (services.tailscale). Not set, the phone keeps the
+        name it has, and NixOS's modules that read a name (Apache's ServerName) get "localhost", the
+        name of the phone's kernel (NixOS's default would be "nixos").
       '';
     };
 
@@ -122,7 +125,7 @@ in
 
   config = {
     android.settings = {
-      deviceName = lib.mkIf (hostName != "") (lib.mkDefault hostName);
+      deviceName = lib.mkIf (hostNameSet && hostName != "") (lib.mkDefault hostName);
       time.timeZone = lib.mkIf (config.time.timeZone != null) (lib.mkDefault config.time.timeZone);
       language = lib.mkIf (language != null) (lib.mkDefault language);
     };

@@ -64,9 +64,14 @@ object Etc {
         }
         // networking.hosts and networking.extraHosts, and the DNS servers: networking.nameservers, else the network's.
         val network = profile?.optJSONObject("network")
-        File(etc, "hosts").writeText("127.0.0.1 localhost\n::1 localhost ip6-localhost\n" + (network?.string("hosts") ?: ""))
-        val dns = network?.strings("nameservers")?.takeIf { it.isNotEmpty() } ?: Device.dnsServers()
-        if (dns.isNotEmpty()) File(etc, "resolv.conf").writeText(dns.joinToString("") { "nameserver $it\n" })
+        // The phone's own name too (its kernel's, as programs look themselves up, and networking.hostName), as NixOS's
+        // /etc/hosts has it.
+        val deviceName = profile?.optJSONObject("system")?.optJSONObject("settings")?.optJSONObject("global")?.string("device_name")
+        val names = listOfNotNull(runCatching { Os.uname().nodename }.getOrNull(), deviceName?.replace(Regex("[^A-Za-z0-9._-]"), "-"))
+            .filter { it.isNotBlank() && it != "localhost" }.distinct()
+        File(etc, "hosts").writeText("127.0.0.1 localhost\n::1 localhost ip6-localhost\n" +
+            (if (names.isNotEmpty()) "127.0.0.2 ${names.joinToString(" ")}\n" else "") + (network?.string("hosts") ?: ""))
+        writeDns(etc, network)
         // The config's own files (environment.etc), and the phone's time zone unless they have one.
         writeFiles(data, etc, profile?.optJSONArray("etc"))
         writeTimeZone(etc, profile?.optJSONArray("etc"))
@@ -110,7 +115,8 @@ object Etc {
             runCatching {
                 file.parentFile?.mkdirs()
                 val mode = entry.optString("mode", "symlink")
-                val text = entry.string("text")
+                // (An empty text is a file of its own too: string() would make it none.)
+                val text = if (entry.has("text") && !entry.isNull("text")) entry.getString("text") else null
                 val source = entry.string("source")
                 // What is there goes first: a link is made anew, and a file of another kind replaced.
                 if (Files.isSymbolicLink(file.toPath()) || file.isFile) file.delete()
@@ -148,10 +154,20 @@ object Etc {
     private fun writeTimeZone(etc: File, entries: JSONArray?) {
         val own = (0 until (entries?.length() ?: 0)).map { entries!!.getJSONObject(it).getString("target").trim('/') }
         val zone = Device.timeZone().ifEmpty { TimeZone.getDefault().id }
+        val zoneinfo = "zoneinfo" !in own && writeZoneinfo(File(etc, "zoneinfo"))
         if ("localtime" !in own) {
             val file = File(etc, "localtime")
             val rules = zoneRules(zone)
+            // As NixOS has it: a link to its zone in /etc/zoneinfo, by which programs know its name (.NET, Java).
+            val link = "zoneinfo/$zone"
+            val linked = zoneinfo && zone.isNotEmpty() && File(etc, link).isFile
             when {
+                linked -> if (!Files.isSymbolicLink(file.toPath()) || runCatching { Os.readlink(file.path) }.getOrNull() != link) {
+                    val next = File(etc, ".localtime.new")
+                    next.delete()
+                    Os.symlink(link, next.path)
+                    if (!next.renameTo(file)) next.delete()
+                }
                 // (Not found: the services' TZ, the zone's offset from UTC, stays theirs; see Units.)
                 rules == null -> if (Files.isSymbolicLink(file.toPath()) || file.isFile) file.delete()
                 Files.isSymbolicLink(file.toPath()) || !file.isFile || !file.readBytes().contentEquals(rules) -> {
@@ -170,38 +186,80 @@ object Etc {
         }
     }
 
+    /** Android's time zone data, its newest copy first (the time zone updates' module, then the system's). */
+    private val TZDATA = listOf("/apex/com.android.tzdata/etc/tz/tzdata", "/system/usr/share/zoneinfo/tzdata")
+
     /**
-     * The rules of time zone [zone] (a TZif file, as /usr/share/zoneinfo has them), out of Android's time zone data:
-     * one file with every zone (bionic's tzdata: a header, an index of 52-byte entries, then the zones), its newest
-     * copy first (the time zone updates' module, then the system's).
+     * Each zone of Android's time zone data [file] (bionic's tzdata: one file with every zone: a header, an index of
+     * 52-byte entries, then the zones), as its name and its rules (a TZif file, as /usr/share/zoneinfo has them), to
+     * [take], until it says it has what it wants (true). Whether the file was read.
      */
+    private fun zones(file: File, take: (String, () -> ByteArray) -> Boolean): Boolean = runCatching {
+        RandomAccessFile(file, "r").use { tzdata ->
+            val magic = ByteArray(12).also { tzdata.readFully(it) }
+            if (!String(magic, Charsets.US_ASCII).startsWith("tzdata")) return@use false
+            val index = tzdata.readInt()
+            val start = tzdata.readInt()
+            val name = ByteArray(40)
+            for (i in 0 until (start - index) / 52) {
+                tzdata.seek(index.toLong() + 52L * i)
+                tzdata.readFully(name)
+                val offset = tzdata.readInt()
+                val length = tzdata.readInt()
+                val rules = { tzdata.seek(start.toLong() + offset); ByteArray(length).also { tzdata.readFully(it) } }
+                if (take(String(name, Charsets.US_ASCII).trimEnd('\u0000'), rules)) break
+            }
+            true
+        }
+    }.getOrDefault(false)
+
+    /** The rules of time zone [zone] (a TZif file), out of Android's time zone data. */
     fun zoneRules(zone: String): ByteArray? {
-        for (path in listOf("/apex/com.android.tzdata/etc/tz/tzdata", "/system/usr/share/zoneinfo/tzdata")) {
+        for (path in TZDATA) {
             val file = File(path).takeIf { it.isFile } ?: continue
-            val found = runCatching {
-                RandomAccessFile(file, "r").use { tzdata ->
-                    val magic = ByteArray(12).also { tzdata.readFully(it) }
-                    if (!String(magic, Charsets.US_ASCII).startsWith("tzdata")) return@use null
-                    val index = tzdata.readInt()
-                    val start = tzdata.readInt()
-                    tzdata.seek(index.toLong())
-                    val name = ByteArray(40)
-                    for (i in 0 until (start - index) / 52) {
-                        tzdata.readFully(name)
-                        val offset = tzdata.readInt()
-                        val length = tzdata.readInt()
-                        tzdata.readInt()
-                        if (String(name, Charsets.US_ASCII).trimEnd('\u0000') == zone) {
-                            tzdata.seek(start.toLong() + offset)
-                            return@use ByteArray(length).also { tzdata.readFully(it) }
-                        }
-                    }
-                    null
-                }
-            }.getOrNull()
+            var found: ByteArray? = null
+            zones(file) { name, rules -> (name == zone).also { if (it) found = rules() } }
             if (found != null) return found
         }
         return null
+    }
+
+    /**
+     * /etc/zoneinfo, as NixOS's (TZDIR): every zone of Android's time zone data, for programs that look a zone up by
+     * its name (TZ=Europe/Berlin, .NET's and Java's own lookups). Written again only when Android's data changes; whether
+     * it is there.
+     */
+    private fun writeZoneinfo(dir: File): Boolean {
+        val file = TZDATA.map { File(it) }.firstOrNull { it.isFile } ?: return false
+        val version = File(dir, ".seraph-tzdata")
+        val stamp = "${file.path} ${file.length()} ${file.lastModified()}\n"
+        if (runCatching { version.readText() }.getOrNull() == stamp) return true
+        val written = zones(file) { name, rules ->
+            if (name.isNotEmpty() && name.split('/').none { it == ".." || it == "." || it.isEmpty() }) {
+                val zoneFile = File(dir, name)
+                zoneFile.parentFile?.mkdirs()
+                zoneFile.writeBytes(rules())
+            }
+            false
+        }
+        if (written) version.writeText(stamp)
+        return written
+    }
+
+    /**
+     * Seraph's /etc/resolv.conf: networking.nameservers, else the DNS servers of the phone's network now (one without a
+     * network keeps the ones it had); whether it changed. Its services read it again when it does (glibc, Go).
+     */
+    fun writeDns(data: File): Boolean = writeDns(File(data, "etc"), current(data)?.optJSONObject("network"))
+
+    private fun writeDns(etc: File, network: JSONObject?): Boolean {
+        val dns = network?.strings("nameservers")?.takeIf { it.isNotEmpty() } ?: Device.dnsServers()
+        if (dns.isEmpty()) return false
+        val text = dns.joinToString("") { "nameserver $it\n" }
+        val file = File(etc, "resolv.conf")
+        if (runCatching { file.readText() }.getOrNull() == text) return false
+        file.writeText(text)
+        return true
     }
 
     /** "+<number>", or a name of [names]. */
@@ -364,7 +422,9 @@ object Etc {
         # root's home; another user's is the one sshd gave it, from /etc/passwd.
         [ "${'$'}(/system/bin/id -u)" = 0 ] && export HOME=@HOME@
         export LANG="${'$'}{LANG:-C.UTF-8}" TERM="${'$'}{TERM:-xterm-256color}"
-        # Android's time zone is /etc/localtime; without it, its offset from UTC (POSIX: "<+0300>-03:00").
+        # Android's time zone is /etc/localtime (its zones in /etc/zoneinfo); without it, its offset from UTC
+        # (POSIX: "<+0300>-03:00").
+        [ -d /etc/zoneinfo ] && export TZDIR=/etc/zoneinfo
         if [ -z "${'$'}TZ" ] && [ ! -s /etc/localtime ]; then
           off=${'$'}(/system/bin/date +%z)
           case ${'$'}off in

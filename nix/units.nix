@@ -837,10 +837,11 @@ let
       rootSteps = boolean (sc.PermissionsStartOnly or false);
       timeout = key: if sc ? ${key} then toString sc.${key} else if sc ? TimeoutSec then toString sc.TimeoutSec else null;
       envFiles = map (path: { path = lib.removePrefix "-" path; optional = lib.hasPrefix "-" path; }) (reset (strings (sc.EnvironmentFile or [ ])));
-      creds = map (credential "path") (strings (sc.LoadCredential or [ ])) ++ map (credential "text") (strings (sc.SetCredential or [ ]))
+      # (An empty one clears those before it, as systemd takes it: NixOS's ttyd gives "" without a password file.)
+      creds = map (credential "path") (reset (strings (sc.LoadCredential or [ ]))) ++ map (credential "text") (reset (strings (sc.SetCredential or [ ])))
         # Decrypted on the phone with its own key, as systemd-creds encrypt made them there (see the top).
-        ++ map (entry: credential "path" entry // { encrypted = true; }) (strings (sc.LoadCredentialEncrypted or [ ]))
-        ++ map (entry: credential "text" entry // { encrypted = true; }) (strings (sc.SetCredentialEncrypted or [ ]));
+        ++ map (entry: credential "path" entry // { encrypted = true; }) (reset (strings (sc.LoadCredentialEncrypted or [ ])))
+        ++ map (entry: credential "text" entry // { encrypted = true; }) (reset (strings (sc.SetCredentialEncrypted or [ ])));
       dirs = kind: words (sc."${kind}Directory" or [ ]);
       modes = lib.filterAttrs (_: mode: mode != null) (lib.genAttrs [ "State" "Runtime" "Cache" "Logs" "Configuration" ]
         (kind: if sc ? "${kind}DirectoryMode" then toString sc."${kind}DirectoryMode" else null));

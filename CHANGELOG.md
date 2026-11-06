@@ -38,6 +38,27 @@ section after the version, and its text is what the Magisk app shows as the upda
   a command of its own); one look at all of them takes a moment now.
 - Fixed: a build did not wait for a forking service to have started before it said so (it looked before the
   service's loop was there); a notify service that never says it is ready is told as not started.
+- Fixed: services kept the DNS servers of the network of the last build or start, which another network (mobile
+  data, another Wi-Fi) may not answer: Seraph's /etc/resolv.conf now follows the phone's network.
+- Fixed: services started with whatever environment the build or start came with (its TMPDIR, HOSTNAME, TERM, an
+  adb session's ...); they start clean now, as systemd starts them, with Android's own variables and root's HOME
+  for root's units.
+- Fixed: a notify service that restarted could kill another process (one with the pid its listener had before).
+- Fixed: a service's stop or restart could end another service's processes: Android gives a new view the number a
+  view that just ended had, and the stopped service's loop took the new one's processes for its own. Each view
+  now keeps its number while its loop looks.
+- Fixed: the "runs again" notice could come for a service stopped in the minute after it had stopped by itself,
+  once another process had its old process number.
+- Fixed: the app was not told when a service stopped by itself, or when it ran again.
+- A unit's own Environment wins over its user's HOME and USER (NixOS's couchdb), /etc/hosts has the phone's own
+  name, an empty LoadCredential is taken as systemd takes it (ttyd), an empty environment.etc file is written
+  (homepage-dashboard), a command's lines continued with a backslash are one (prometheus), and a user's socket
+  with Accept = true runs its connections as that user.
+- Seraph's /etc has every time zone of Android's data in /etc/zoneinfo, as NixOS has, with /etc/localtime a link to
+  the phone's (programs know its name by it: .NET's Kavita needs it) and TZDIR set for the services.
+- A command's @ prefix (another name for the program, as systemd takes it: NixOS's Apache) works.
+- networking.hostName not set is "localhost" for NixOS's modules that read a name (Apache's ServerName); the phone
+  keeps its own name, as before.
 - Services and the jobs cron starts have the phone's time zone in Seraph's `/etc/localtime`, out of Android's
   time zone data, so summer time comes too; cron's jobs ran in UTC before.
 - `system.path` (cron's `PATH`) is made by Nix itself, without Perl.

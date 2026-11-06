@@ -12,7 +12,7 @@
 # the config's settings with `tailscale up --reset` at each build: what the config leaves out goes
 # back to Tailscale's default. Its name on the tailnet is networking.hostName, or the phone's device
 # name. Its first build shows a link to log in with, unless authKeyFile is set.
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, options, ... }:
 let
   inherit (lib) mkOption types;
   cfg = config.services.tailscale;
@@ -28,7 +28,8 @@ let
   ) (lib.filterAttrs (_: value: value != null) (removeAttrs cfg.authKeyParameters [ "_module" ])));
   # Its name on the tailnet: the config's, or the phone's device name as the tailnet takes names.
   hostName =
-    if config.networking.hostName != "" then lib.escapeShellArg config.networking.hostName
+    if options.networking.hostName.highestPrio < (lib.mkOptionDefault null).priority && config.networking.hostName != ""
+    then lib.escapeShellArg config.networking.hostName
     else ''"$(/system/bin/settings get global device_name | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9-' '-' | sed 's/^-*//; s/-*$//')"'';
 in
 {

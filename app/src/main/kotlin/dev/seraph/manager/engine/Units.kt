@@ -204,6 +204,7 @@ class Units(private val data: File) {
             if (count == 0) names.joinToString(", ") else broken.joinToString(", "), quiet = true,
         )
         broken.forEach { retryLater(it) }
+        watchNetwork()
         timers.start(had.keys)
         paths.start(had.keys)
         return count
@@ -228,6 +229,7 @@ class Units(private val data: File) {
     /** The module is being removed: every unit stops, and what they kept goes with the module's data. */
     fun removeAll(): Int {
         moveLegacy()
+        unwatchNetwork()
         timers.removeAll()
         paths.removeAll()
         val had = applied()
@@ -537,8 +539,8 @@ class Units(private val data: File) {
             "sigkill" to if (unit.optBoolean("sendSigkill", true)) "1" else "",
             "timeout" to timeout(unit, "timeoutStop", 10).coerceAtMost(300).toString(),
             "timeout_start" to timeout(unit, "timeoutStart", 90).coerceAtMost(600).toString(),
-            // Type = notify: what it tells its socket goes there (see notifyStart), and WatchdogSec.
-            "notify" to if (unit.optBoolean("notify")) "1" else "",
+            // Type = notify: what it tells its socket goes there (see notifyStart), and WatchdogSec. (Not a second
+            // "notify": that is the app's notify.sh, above, which the loop tells the app with.)
             "notifylog" to if (unit.optBoolean("notify")) File(runDir, "seraph-notify/${notifyName(unitDir.name)}.log").path else "",
             "watchdog" to if (unit.optBoolean("notify")) unit.string("watchdog")?.let { seconds(it).toDouble().toInt().coerceAtLeast(1).toString() }.orEmpty() else "",
         )
@@ -559,7 +561,15 @@ class Units(private val data: File) {
      * [text]` tells the app something, as a notification). Not the run that started it: its own events are its own.
      */
     private fun unitEnvironment(env: MutableMap<String, String>) {
-        listOf("SERAPH_RUN", "SERAPH_KIND", "SERAPH_BY", "SERAPH_QUIET").forEach { env.remove(it) }
+        // A clean start, as systemd gives its services: Android's own variables (init's, which its commands need) and
+        // PATH, nothing of whoever started the engine (its HOSTNAME, TMPDIR, TERM, CLASSPATH, an adb session's ...).
+        val keep = env.filterKeys { key ->
+            key == "PATH" || key in ANDROID_ENVIRONMENT || (key.startsWith("ANDROID_") && !key.startsWith("ANDROID_SOCKET_"))
+        }
+        env.clear()
+        env.putAll(keep)
+        // Where the names of time zones are, as NixOS's units have it (see Etc).
+        env["TZDIR"] = "/etc/zoneinfo"
         Notify.module?.let {
             env["SERAPH_MODULE"] = it.path
             env["SERAPH_NOTIFY"] = File(it, "notify.sh").path
@@ -669,7 +679,11 @@ class Units(private val data: File) {
             while (supervisorPid(name) != null && tries++ < seconds * 5) Thread.sleep(200)
             supervisorPid(name)?.let { Device.run("kill", "-KILL", "$it") }
         }
-        pid(File(unitDir, "main.pid"))?.takeIf { alive(it) }?.let { Device.run("kill", "-KILL", "$it") }
+        // (Only a process of its view: a main.pid its loop left may be another process's pid by now.)
+        pid(File(unitDir, "main.pid"))?.takeIf { alive(it) && ofView(it, unitDir) }?.let { Device.run("kill", "-KILL", "$it") }
+        // And the holder of its view's namespace (see scripts), should its loop not have ended it.
+        pid(File(unitDir, "holder"))?.takeIf { alive(it) && ofView(it, unitDir) }?.let { Device.run("kill", "-KILL", "$it") }
+        File(unitDir, "holder").delete()
         File(unitDir, "supervisor.pid").delete()
         File(unitDir, "main.pid").delete()
         if (spec?.optString("runtimeDirectoryPreserve") !in listOf("yes", "true", "1", "restart")) {
@@ -732,7 +746,9 @@ class Units(private val data: File) {
                 else (listOf(quote(shell), "'-e'", quote(File(unitDir, file).path)) + args).joinToString(" ")
             } else {
                 val parsed = parse(name, unit, step.getString("command"))
-                val words = parsed.shell(env, runtime(unit)).joinToString(" ")
+                val all = parsed.shell(env, runtime(unit))
+                // @: the program gets its second word as its argv[0], as systemd gives it (bash's exec -a does).
+                val words = (if (parsed.argv0) listOf(quote(shell), "'-c'", quote("exec -a \"\$0\" \"\$@\""), all[1], all[0]) + all.drop(2) else all).joinToString(" ")
                 parsed.ignore to if (user != null && !root && !parsed.privileged) "${setpriv(unit)} -- $words" else words
             }
             return when {
@@ -753,7 +769,10 @@ class Units(private val data: File) {
             files["start.sh"] = head(name, unit, env) + checks + (condition + pre + start.map { line(it, "run") } + post).joinToString("") { "$it\n" }
         } else {
             // Its view's mount namespace, by which its loop knows its processes (KillMode).
-            val mark = "/system/bin/readlink /proc/self/ns/mnt > ${quote(File(unitDir, "ns").path)}\n"
+            // And a process that keeps that namespace (and so its number, which the kernel gives the next one at once)
+            // until its loop has ended what is left of it: else its loop could take a new view's processes for its own.
+            val mark = "/system/bin/readlink /proc/self/ns/mnt > ${quote(File(unitDir, "ns").path)}\n" +
+                "( /system/bin/sleep 2147483647 < /dev/null > /dev/null 2>&1 & echo ${'$'}! > ${quote(File(unitDir, "holder").path)} )\n"
             files["start.sh"] = head(name, unit, env) + checks + mark +
                 (condition + pre + listOfNotNull(notifyStart(unit, unitDir)) + line(start.single(), "exec")).joinToString("") { "$it\n" }
             if (post.isNotEmpty()) files["post.sh"] = head(name, unit, env) + post.joinToString("") { "$it\n" }
@@ -781,7 +800,9 @@ class Units(private val data: File) {
             // input and output, as systemd runs an instance for each: as StandardInput = "socket" has it, or as fd 3
             // (LISTEN_FDS=1) for one that takes its socket as systemd hands sockets over.
             // (3<&0 on the exec itself: mksh closes an fd that `exec 3<&0` alone opens when it runs a program.)
+            // (Its user looked up again: socat runs it as a program of its own, without start.sh's shell variables.)
             files["conn.sh"] = "#!/system/bin/sh\n# A connection to $name (Accept = true), for its template's program (written by the engine; see Units.kt).\n" +
+                lookup(name, unit) +
                 if (unit.optBoolean("stdinSocket")) "exec 3<&-\nexec $wrapped\n" else "export LISTEN_FDS=1 LISTEN_PID=${'$'}${'$'}\nexec $wrapped 3<&0\n"
             "${quote(unit.getString("socat"))} 'ACCEPT-FD:3,fork' ${quote("EXEC:${File(unitDir, "conn.sh").path},nofork")}"
         } else {
@@ -814,7 +835,11 @@ class Units(private val data: File) {
         if (!unit.optBoolean("notify")) return null
         val socket = "/run/seraph-notify/${notifyName(unitDir.name)}"
         val watchdog = unit.string("watchdog")?.let { (seconds(it).toDouble() * 1_000_000).toLong() }
-        return "/system/bin/mkdir -p /run/seraph-notify && { [ ! -f ${quote("$socket.pid")} ] || kill ${'$'}(/system/bin/cat ${quote("$socket.pid")}) 2> /dev/null; /system/bin/rm -f ${quote(socket)}; }\n" +
+        // The listener of its run before, if it still runs: only that process (its pid may be another's by now).
+        val before = "p=${'$'}(/system/bin/cat ${quote("$socket.pid")} 2> /dev/null) && case \"${'$'}(/system/bin/cat /proc/${'$'}p/cmdline 2> /dev/null | /system/bin/tr '\\0' ' ')\" in " +
+            "*${quote("UNIX-RECVFROM:$socket,")}*) kill ${'$'}p 2> /dev/null ;; esac"
+        // (Its folder reachable by all, whatever the unit's UMask: a service user sends to its socket in it.)
+        return "/system/bin/mkdir -p /run/seraph-notify && /system/bin/chmod 0755 /run/seraph-notify && { $before; /system/bin/rm -f ${quote(socket)}; }\n" +
             "${quote(unit.getString("socat"))} -u ${quote("UNIX-RECVFROM:$socket,fork")} ${quote("OPEN:$socket.log,creat,append")} < /dev/null > /dev/null 2>&1 &\n" +
             "echo ${'$'}! > ${quote("$socket.pid")}; i=0; while [ ! -S ${quote(socket)} ] && [ ${'$'}i -lt 50 ]; do /system/bin/sleep 0.1; i=${'$'}((i + 1)); done; /system/bin/chmod 0666 ${quote(socket)}\n" +
             "export NOTIFY_SOCKET=${quote(socket)}" + (watchdog?.let { " WATCHDOG_USEC=$it" } ?: "")
@@ -837,6 +862,17 @@ class Units(private val data: File) {
         return words.joinToString(" ")
     }
 
+    /** Its user's (and Group's) uid, gid, home and shell, looked up in Seraph's /etc/passwd and /etc/group (seraph_*). */
+    private fun lookup(name: String, unit: JSONObject): String = buildString {
+        val user = unit.string("user") ?: return@buildString
+        append("while IFS=: read -r seraph_name seraph_x seraph_uid seraph_gid seraph_gecos seraph_home seraph_shell; do [ \"${'$'}seraph_name\" = ${quote(user)} ] && break; done < /etc/passwd\n")
+        append("[ \"${'$'}seraph_name\" = ${quote(user)} ] || { echo \"$name: its user $user is not in Seraph's /etc/passwd\" >&2; exit 1; }\n")
+        unit.string("group")?.let { group ->
+            append("while IFS=: read -r seraph_name seraph_x seraph_gid seraph_members; do [ \"${'$'}seraph_name\" = ${quote(group)} ] && break; done < /etc/group\n")
+            append("[ \"${'$'}seraph_name\" = ${quote(group)} ] || { echo \"$name: its group $group is not in Seraph's /etc/group\" >&2; exit 1; }\n")
+        }
+    }
+
     /** Whether its commands take variables only known when it runs (its EnvironmentFile's, its user's HOME, ...). */
     private fun runtime(unit: JSONObject) = unit.has("environmentFiles") || unit.has("user")
 
@@ -851,13 +887,16 @@ class Units(private val data: File) {
         if (env.isNotEmpty()) append("export ").append(env.entries.joinToString(" ") { (key, value) -> "$key=${quote(value)}" }).append('\n')
         val user = unit.string("user")
         if (user != null) {
-            append("while IFS=: read -r seraph_name seraph_x seraph_uid seraph_gid seraph_gecos seraph_home seraph_shell; do [ \"${'$'}seraph_name\" = ${quote(user)} ] && break; done < /etc/passwd\n")
-            append("[ \"${'$'}seraph_name\" = ${quote(user)} ] || { echo \"$name: its user $user is not in Seraph's /etc/passwd\" >&2; exit 1; }\n")
-            append("export USER=${quote(user)} LOGNAME=${quote(user)} HOME=\"${'$'}seraph_home\" SHELL=\"${'$'}seraph_shell\"\n")
-            unit.string("group")?.let { group ->
-                append("while IFS=: read -r seraph_name seraph_x seraph_gid seraph_members; do [ \"${'$'}seraph_name\" = ${quote(group)} ] && break; done < /etc/group\n")
-                append("[ \"${'$'}seraph_name\" = ${quote(group)} ] || { echo \"$name: its group $group is not in Seraph's /etc/group\" >&2; exit 1; }\n")
-            }
+            append(lookup(name, unit))
+            // (What its Environment sets stays, as systemd's does: NixOS's couchdb gives HOME its database's folder.)
+            val own = listOf("USER" to quote(user), "LOGNAME" to quote(user), "HOME" to "\"${'$'}seraph_home\"", "SHELL" to "\"${'$'}seraph_shell\"")
+                .filter { (key, _) -> key !in env && unit.optJSONObject("environment")?.has(key) != true }
+            if (own.isNotEmpty()) append("export ").append(own.joinToString(" ") { (key, value) -> "$key=$value" }).append('\n')
+        }
+        // Root's home for a unit of root's, which systemd would leave unset: what Seraph's units always had (they got it
+        // from the build that started them, with more that is now left out).
+        if (user == null && "HOME" !in env && unit.optJSONObject("environment")?.has("HOME") != true) {
+            append("export HOME=${quote(File(data, "home").path)}\n")
         }
         // Its variables whose specifiers are only known now (%h, %U, %G of its user).
         runtimeEnvironment(name, unit).takeIf { it.isNotEmpty() }?.let { vars ->
@@ -1103,6 +1142,12 @@ class Units(private val data: File) {
 
     private fun alive(pid: Int) = File("/proc/$pid").exists()
 
+    /** Whether process [pid] runs in the view of the unit of [unitDir] (its mount namespace, which the unit's ns names). */
+    private fun ofView(pid: Int, unitDir: File): Boolean {
+        val ns = runCatching { File(unitDir, "ns").readText().filter { it.isDigit() }.toLong() }.getOrNull() ?: return false
+        return runCatching { Os.stat("/proc/$pid/ns/mnt").st_ino == ns }.getOrDefault(false)
+    }
+
     private fun cmdline(pid: Int) = runCatching { File("/proc/$pid/cmdline").readText().replace('\u0000', ' ') }.getOrDefault("")
 
     private fun tail(file: File) = runCatching { file.readLines().takeLast(8) }.getOrDefault(emptyList())
@@ -1180,6 +1225,31 @@ class Units(private val data: File) {
         writeView()
         Etc.write(data, android)
         Tmpfiles.apply(data, android?.optJSONArray("tmpfiles"))
+        if ((android?.optJSONObject("units")?.length() ?: 0) > 0) watchNetwork() else unwatchNetwork()
+    }
+
+    /**
+     * Keeps Seraph's /etc/resolv.conf on the phone's network while there are services: a loop of its own
+     * ([NETWORK_WATCH]) looks at the phone's way out (its route) every 20 seconds, and when it changes (another Wi-Fi,
+     * mobile data) has the engine write the network's DNS servers again (dns-update). Before, the services kept the
+     * servers of the network of the last build or start, which other networks may not answer.
+     */
+    private fun watchNetwork() {
+        val module = Notify.module ?: return
+        val pidFile = File(dir, "network.pid")
+        if (pid(pidFile)?.takeIf { cmdline(it).contains(NETWORK_MARK) } != null) return
+        dir.mkdirs()
+        runCatching {
+            ProcessBuilder(busybox(), "setsid", "sh", "-c", NETWORK_WATCH, NETWORK_MARK, File(module, "app.apk").path, pidFile.path)
+                .redirectInput(File("/dev/null")).redirectOutput(File("/dev/null")).redirectError(File("/dev/null"))
+                .apply { listOf("SERAPH_RUN", "SERAPH_KIND", "SERAPH_QUIET").forEach { environment().remove(it) } }.start()
+        }
+    }
+
+    private fun unwatchNetwork() {
+        val pidFile = File(dir, "network.pid")
+        pid(pidFile)?.takeIf { cmdline(it).contains(NETWORK_MARK) }?.let { Device.run("kill", "-TERM", "$it") }
+        pidFile.delete()
     }
 
     /** The services Seraph ran before units: stopped, Tailscale's and Syncthing's state moved to theirs, and gone. */
@@ -1205,7 +1275,8 @@ class Units(private val data: File) {
     }
 
     /** A command line of a unit, as systemd takes it, with what it needs to become shell words (see [parse]). */
-    private class Command(val ignore: Boolean, val privileged: Boolean, private val words: List<List<Part>>) {
+    /** [argv0]: its second word is the name the program gets as its argv[0] (systemd's @ prefix). */
+    private class Command(val ignore: Boolean, val privileged: Boolean, private val words: List<List<Part>>, val argv0: Boolean = false) {
         /** Its words, with its variables' values from [env]; one with none, empty. */
         fun words(env: Map<String, String>): List<String> = words.flatMap { parts ->
             val whole = parts.singleOrNull() as? Part.Variable
@@ -1332,6 +1403,33 @@ class Units(private val data: File) {
         """.trimIndent()
         private const val ONESHOT_MINUTES = 10
         private const val MARK = "seraph-unit:"
+        private const val NETWORK_MARK = "seraph-network"
+
+        /** The variables Android's init gives every process besides ANDROID_* (its commands, am and cmd, need them). */
+        private val ANDROID_ENVIRONMENT = setOf(
+            "BOOTCLASSPATH", "DEX2OATBOOTCLASSPATH", "SYSTEMSERVERCLASSPATH", "STANDALONE_SYSTEMSERVER_JARS",
+            "ASEC_MOUNTPOINT", "EXTERNAL_STORAGE", "DOWNLOAD_CACHE",
+        )
+
+        /**
+         * The services' network watch (see watchNetwork): the phone's routes to the internet (IPv4 and IPv6) every 20
+         * seconds; when they change, the engine's dns-update then and three times more (a new network's DNS servers may
+         * come a little after it). Its start counts as a change: at boot the network may come only after Seraph's /etc
+         * was written, which then kept the DNS servers it had. Arguments: the module's app.apk, its pid file.
+         */
+        private val NETWORK_WATCH = """
+            apk=${'$'}1 pidfile=${'$'}2
+            echo ${'$'}${'$'} > "${'$'}pidfile"
+            engine() { CLASSPATH="${'$'}apk" /system/bin/app_process /system/bin dev.seraph.manager.engine.Main "${'$'}@" > /dev/null 2>&1 < /dev/null; }
+            route() { /system/bin/ip route get 8.8.8.8 2> /dev/null; /system/bin/ip -6 route get 2001:4860:4860::8888 2> /dev/null; }
+            last= again=0
+            while :; do
+              sleep 20 & wait ${'$'}!
+              now=${'$'}(route)
+              if [ "${'$'}now" != "${'$'}last" ]; then last=${'$'}now again=4; fi
+              if [ ${'$'}again -gt 0 ]; then again=${'$'}((again - 1)); engine dns-update; fi
+            done
+        """.trimIndent()
         private val BUSYBOXES = listOf("/data/adb/magisk/busybox", "/data/adb/ksu/bin/busybox", "/data/adb/ap/bin/busybox")
 
         /** The root solution's busybox, which runs the services (and the timers' loops). */
@@ -1437,24 +1535,31 @@ class Units(private val data: File) {
             # Its processes: those in the mount namespace of the view its start made.
             # (One stat for all: the namespace's number is its file's inode. A readlink for each of a phone's ~900
             # processes took half a minute.)
+            # (Its holder, which keeps the namespace and its number while the loop looks, is not one of them.)
             procs() {
               [ -f "${'$'}unit/ns" ] || return 0
               ino=${'$'}(tr -dc 0-9 < "${'$'}unit/ns")
-              "${'$'}b" stat -L -c '%i %n' /proc/[0-9]*/ns/mnt 2> /dev/null | while read -r i n; do [ "${'$'}i" = "${'$'}ino" ] && { n=${'$'}{n#/proc/}; echo "${'$'}{n%%/*}"; }; done
+              h=${'$'}(cat "${'$'}unit/holder" 2> /dev/null)
+              "${'$'}b" stat -L -c '%i %n' /proc/[0-9]*/ns/mnt 2> /dev/null | while read -r i n; do [ "${'$'}i" = "${'$'}ino" ] && { n=${'$'}{n#/proc/}; n=${'$'}{n%%/*}; [ "${'$'}n" = "${'$'}h" ] || echo "${'$'}n"; }; done
               return 0
             }
+            # Whether process ${'$'}1 is in its view (a main the loop found, not its own child, may be gone and its pid another's).
+            ours() { [ -n "${'$'}1" ] && [ "${'$'}("${'$'}b" stat -L -c %i /proc/${'$'}1/ns/mnt 2> /dev/null)" = "${'$'}(tr -dc 0-9 < "${'$'}unit/ns" 2> /dev/null)" ]; }
+            killmain() { [ -n "${'$'}main" ] && { [ "${'$'}main" = "${'$'}child" ] || ours "${'$'}main"; } && kill -"${'$'}1" "${'$'}main" 2> /dev/null; }
+            # The view's holder goes last, once what was left of the unit has ended.
+            holder_end() { h=${'$'}(cat "${'$'}unit/holder" 2> /dev/null) && ours "${'$'}h" && kill -9 "${'$'}h" 2> /dev/null; rm -f "${'$'}unit/holder"; }
             alive() { { [ -n "${'$'}main" ] && kill -0 "${'$'}main" 2> /dev/null; } || { [ "${'$'}killmode" = control-group ] && [ -n "${'$'}(procs)" ]; }; }
             # Ends it as KillMode says, with KillSignal; what still runs after TimeoutStopSec gets SIGKILL (unless SendSIGKILL is no).
             end() {
               case ${'$'}killmode in
                 none) ;;
-                process | mixed) [ -n "${'$'}main" ] && kill -"${'$'}killsignal" "${'$'}main" 2> /dev/null ;;
-                *) [ -n "${'$'}main" ] && kill -"${'$'}killsignal" "${'$'}main" 2> /dev/null; for p in ${'$'}(procs); do kill -"${'$'}killsignal" "${'$'}p" 2> /dev/null; done ;;
+                process | mixed) killmain "${'$'}killsignal" ;;
+                *) killmain "${'$'}killsignal"; for p in ${'$'}(procs); do kill -"${'$'}killsignal" "${'$'}p" 2> /dev/null; done ;;
               esac
               i=0
               while [ "${'$'}killmode" != none ] && alive && [ ${'$'}i -lt ${'$'}((timeout * 5)) ]; do sleep 0.2; i=${'$'}((i + 1)); done
               if [ -n "${'$'}sigkill" ] && [ "${'$'}killmode" != none ]; then
-                [ -n "${'$'}main" ] && kill -9 "${'$'}main" 2> /dev/null
+                killmain 9
                 [ "${'$'}killmode" = process ] || for p in ${'$'}(procs); do kill -9 "${'$'}p" 2> /dev/null; done
               fi
               return 0
@@ -1464,6 +1569,7 @@ class Units(private val data: File) {
               [ -n "${'$'}stop" ] && [ -n "${'$'}main" ] && inview "${'$'}stop"
               [ -n "${'$'}main" ] && end
               [ -n "${'$'}child" ] && wait ${'$'}child 2> /dev/null
+              holder_end
               [ -n "${'$'}stoppost" ] && inview "${'$'}stoppost"
               rm -f "${'$'}unit/supervisor.pid" "${'$'}unit/main.pid" "${'$'}unit/waiting" "${'$'}unit/fresh" "${'$'}unit/ns" "${'$'}unit/ready" "${'$'}unit/listening"
               exit 0
@@ -1513,9 +1619,10 @@ class Units(private val data: File) {
                 fi
                 : > "${'$'}unit/ready"
               fi
-              # Type = notify: started once it says READY=1 (TimeoutStartSec), then watched for WATCHDOG=1 (WatchdogSec).
+              # Type = notify (it has a notifylog): started once it says READY=1 (TimeoutStartSec), then watched for
+              # WATCHDOG=1 (WatchdogSec).
               unready= dog=
-              if [ -z "${'$'}code" ] && [ -n "${'$'}notify" ]; then
+              if [ -z "${'$'}code" ] && [ -n "${'$'}notifylog" ]; then
                 i=0
                 until grep -q READY=1 "${'$'}notifylog" 2> /dev/null; do
                   kill -0 ${'$'}child 2> /dev/null || break
@@ -1547,7 +1654,8 @@ class Units(private val data: File) {
               fi
               if [ -z "${'$'}code" ]; then
                 if [ -f "${'$'}unit/failing" ]; then
-                  ( sleep 60; kill -0 ${'$'}main 2> /dev/null && rm "${'$'}unit/failing" 2> /dev/null && tell ok "${'$'}name runs again" "It had stopped by itself" ) < /dev/null > /dev/null 2>&1 &
+                  # (Only while this run is still the unit's: once it ends, its pid may be another process's.)
+                  ( sleep 60; [ "${'$'}(cat "${'$'}unit/main.pid" 2> /dev/null)" = "${'$'}main" ] && kill -0 ${'$'}main 2> /dev/null && rm "${'$'}unit/failing" 2> /dev/null && tell ok "${'$'}name runs again" "It had stopped by itself" ) < /dev/null > /dev/null 2>&1 &
                 fi
                 [ -n "${'$'}post" ] && [ ! -f "${'$'}unit/skipped" ] && [ -z "${'$'}unready" ] && inview "${'$'}post"
                 # While it runs, its storage is looked at every 15 s: one that went away stops it (to wait for it again), one
@@ -1583,6 +1691,7 @@ class Units(private val data: File) {
               [ -n "${'$'}unready" ] && code=1
               # What is left of it ends with it (KillMode control-group), as systemd ends a service's processes.
               [ "${'$'}killmode" = control-group ] && [ -n "${'$'}(procs)" ] && { main=; end; }
+              holder_end
               child= watcher= main=
               rm -f "${'$'}unit/main.pid"
               [ -n "${'$'}stoppost" ] && inview "${'$'}stoppost"
@@ -1636,17 +1745,20 @@ class Units(private val data: File) {
          * ($NAME alone splits into words, as systemd does; $$ is $). With [arguments], its first word may be anything.
          */
         private fun parse(line: String, arguments: Boolean, specifier: (Char) -> String): Command {
-            var rest = line.trimStart()
+            // A backslash at a line's end continues the line, as systemd reads a unit file (NixOS's modules write long
+            // ExecStart lines so: prometheus's).
+            var rest = line.replace(Regex("\\\\\r?\n"), " ").trimStart()
             var ignore = false
             var expand = true
             var privileged = false
+            var argv0 = false
             while (rest.isNotEmpty() && rest[0] in "-+!:@") {
                 when (rest[0]) {
                     '-' -> ignore = true
                     ':' -> expand = false
                     '+' -> privileged = true
                     '!' -> if (rest.startsWith("!!")) rest = rest.substring(1) else privileged = true
-                    '@' -> throw IllegalArgumentException("its command starts with @ (another name for the program), which is not on the phone")
+                    '@' -> argv0 = true
                 }
                 rest = rest.substring(1)
             }
@@ -1719,7 +1831,8 @@ class Units(private val data: File) {
             if (!arguments && first != null && !first.text.startsWith("/")) {
                 throw IllegalArgumentException("its command is not a full path, as systemd needs: ${first.text}")
             }
-            return Command(ignore, privileged, words)
+            if (argv0 && words.size < 2) throw IllegalArgumentException("its command starts with @, so its second word is the program's name: it has none")
+            return Command(ignore, privileged, words, argv0)
         }
 
         /** A systemd time span (RestartSec: "10", "5s", "100ms", "1min 30s") in seconds, as sleep takes it. */

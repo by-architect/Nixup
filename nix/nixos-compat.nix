@@ -403,6 +403,12 @@ in
       hosts = if hostsText == "" then null else hostsText;
       nameservers = if config.networking.nameservers == [ ] then null else config.networking.nameservers;
     };
+    # NixOS keeps /etc/hosts in environment.etc, which modules read (dnsmasq restarts when its source changes): the
+    # same text, turned off, as Etc.kt writes the file itself.
+    environment.etc.hosts = {
+      enable = lib.mkDefault false;
+      text = lib.mkDefault ("127.0.0.1 localhost\n::1 localhost ip6-localhost\n" + hostsText);
+    };
 
     assertions = [
       (off "networking.firewall.enable" config.networking.firewall.enable "Seraph has no firewall yet (a phone has none in the way of its services): leave it off.")

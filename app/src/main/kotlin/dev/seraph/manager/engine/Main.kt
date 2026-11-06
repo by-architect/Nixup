@@ -29,6 +29,8 @@ import kotlin.system.exitProcess
  *                                 <folder>, readable by root alone, as a PC sends them (--store: Seraph's store, for
  *                                 the files of a flake's copy)
  *   dns                           prints the DNS servers of the network in use, as resolv.conf lines
+ *   dns-update                    writes them to Seraph's /etc/resolv.conf when they changed (the services' network
+ *                                 watch runs it when the phone's network changes; see Units)
  *   etc                           writes Seraph's /etc for the Linux programs it runs (Nix, tailscaled): DNS servers,
  *                                 trusted certificates, a root user (see Etc); and the services' view of the phone
  *   services                      at boot: sets adb's port and trusted computers again (android.adb), and starts the
@@ -97,6 +99,7 @@ object Main {
                 }
                 "restore" -> Apply(emptyMap(), data).restore()
                 "support" -> SystemSettings(data).report().let { 0 }
+                "dns-update" -> Etc.writeDns(data).let { changed -> if (changed) Out.line("✔ DNS servers: ${File(data, "etc/resolv.conf").readText().lines().filter { it.isNotBlank() }.joinToString(", ") { it.removePrefix("nameserver ") }}"); 0 }
                 "dns" -> Device.dnsServers().ifEmpty { throw Stop("no network with DNS servers: is the phone online?") }
                     .forEach { println("nameserver $it") }.let { 0 }
                 "etc" -> Etc.write(data).let { etc ->
@@ -271,5 +274,5 @@ object Main {
     private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | path-fire <path unit> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | dns-update | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | path-fire <path unit> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]")
 }

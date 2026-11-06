@@ -18,7 +18,7 @@
 # it back by hand). Backups stay when they, or the module, leave the config.
 # The engine does it (see Backup.kt); by hand, the app's Backups tab and seraph-backup (list, now,
 # restore, restic) back up any app or folder, and bring back an app's APK and data, or a folder.
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, options, ... }:
 let
   inherit (lib) mkOption types;
   cfg = config.android.backup;
@@ -208,7 +208,8 @@ in
       inherit repository restic passwordFile environmentFile;
       inherit (cfg) initialize folders onlyWhileCharging keep;
       path = builtins.unsafeDiscardStringContext "${lib.makeBinPath ([ pkgs.restic ] ++ extraPath)}:/system/bin";
-      host = config.networking.hostName;
+      # (The config's name for the phone; not set, "", the engine's own.)
+      host = if options.networking.hostName.highestPrio < (lib.mkOptionDefault null).priority then config.networking.hostName else "";
       schedule = seconds cfg.schedule;
       quietTime = seconds cfg.quietTime;
       apps = resolved;
