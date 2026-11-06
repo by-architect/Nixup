@@ -136,15 +136,24 @@ let
         default = null;
         example = lib.literalExpression "pkgs.bashInteractive";
         description = ''
-          The user's shell, as on NixOS: a package (its shellPath, or bin/<name>) or a full path. null: Nixup's
-          login shell (/etc/nixup/login: environment.systemPackages on PATH) for root, a normal user and one with
-          useDefaultShell, and none (/system/bin/false) for any other (a service's), which logs in nowhere.
+          The user's shell, as on NixOS: a package (its shellPath, or bin/<name>; zsh, fish and xonsh need their
+          programs.<shell>.enable, which writes the files they read) or a full path. null: Nixup's login
+          (/etc/nixup/login), which starts users.defaultUserShell, for root, a normal user and one with useDefaultShell,
+          and none (/system/bin/false) for any other (a service's), which logs in nowhere.
         '';
       };
       useDefaultShell = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether a system user gets Nixup's login shell too, as on NixOS it gets users.defaultUserShell.";
+        description = "Whether a system user logs in too, with users.defaultUserShell, as on NixOS.";
+      };
+      ignoreShellProgramCheck = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Whether a shell (zsh, fish, xonsh) without its programs.<shell>.enable is fine, as on NixOS, which checks it:
+          without it the shell lacks the Nix packages' folders on PATH.
+        '';
       };
       packages = mkOption {
         type = types.listOf types.package;
@@ -335,11 +344,13 @@ let
     ++ lib.attrNames (lib.filterAttrs (_: user: lib.elem name user.extraGroups) users)
     ++ map (user: user.name) (lib.filter (user: lib.elem name (user.groups ++ [ "inet" ])) unitAccounts));
 
-  # Its shell: one it names, Nixup's login shell (root's, a normal user's), or none, as NixOS gives a service's user.
+  # A shell's program: a package's (its shellPath, or bin/<name>), or a full path, as NixOS's utils.toShellPath has it.
+  shellPath = shell: if builtins.isString shell then shell
+    else "${shell}${shell.passthru.shellPath or "/bin/${shell.meta.mainProgram or (lib.getName shell)}"}";
+  # Its shell: one it names, Nixup's login (root's, a normal user's: it starts users.defaultUserShell), or none, as
+  # NixOS gives a service's user.
   shellOf = user:
-    if user.shell != null then
-      (if builtins.isString user.shell then user.shell
-       else "${user.shell}${user.shell.passthru.shellPath or "/bin/${user.shell.meta.mainProgram or (lib.getName user.shell)}"}")
+    if user.shell != null then shellPath user.shell
     else if user.name == "root" || user.isNormalUser || user.useDefaultShell then "/etc/nixup/login"
     else "/system/bin/false";
   passwdLine = user: lib.concatStringsSep ":" [
@@ -417,6 +428,16 @@ in
       default = true;
       description = "Whether users.users.<name>.linger is used, as on NixOS (the phone has no lingering otherwise: see linger).";
     };
+    defaultUserShell = mkOption {
+      type = types.nullOr (types.either types.package types.str);
+      default = null;
+      example = lib.literalExpression "pkgs.zsh";
+      description = ''
+        The shell of root, the normal users and those with useDefaultShell, when users.users.<name>.shell is not set,
+        as on NixOS: a package or a full path, which Nixup's login (/etc/nixup/login) starts (programs.bash makes it
+        bash, as on NixOS). null: bash with Nix packages, else Android's sh.
+      '';
+    };
   };
 
   config = {
@@ -467,6 +488,8 @@ in
       # number.
       homes = map (user: { path = user.home; uid = uidText user; gid = toString (gidOf user.group); mode = user.homeMode; })
         (lib.filter (user: user.createHome && hasUid user) userList);
+      # The shell Nixup's login starts (users.defaultUserShell), as its program; null: the profile's (nix/build.nix).
+      defaultShell = if config.users.defaultUserShell == null then null else shellPath config.users.defaultUserShell;
       # The users of apps, which must be on the phone (or installed by the build).
       apps = map (user: { inherit (user) name; app = user.androidApp; }) (lib.filter (user: user.androidApp != null) userList);
 

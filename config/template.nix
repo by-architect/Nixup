@@ -707,6 +707,18 @@
 
   environment.etc = { };                          # files in Nixup's /etc, like { "foo/foo.conf".text = "a = 1"; }
   environment.variables = { };                    # variables of every shell session, like { EDITOR = "nano"; }
+
+  # The shells, as on NixOS (with Nix packages; their files are NixOS's own: /etc/profile, /etc/bashrc, /etc/zshrc, ...).
+  environment.shellAliases = { };                # aliases of every shell, like { ll = "ls -l"; } (ls, ll and l are there)
+  environment.interactiveShellInit = "";          # lines every interactive shell runs, like 'set -o vi'
+  environment.loginShellInit = "";                # lines every login shell runs
+  environment.shellInit = "";                     # lines every shell runs
+  environment.localBinInPath = false;             # true: ~/.local/bin on PATH
+  environment.homeBinInPath = false;              # true: ~/bin on PATH
+  # users.defaultUserShell = pkgs.zsh;            # the users' shell (needs programs.zsh.enable); not set: bash
+  programs.bash.completion.enable = true;         # bash completes commands' arguments
+  programs.zsh.enable = false;                    # zsh, with /etc/zshrc (a user whose shell is zsh needs it)
+  programs.fish.enable = false;                   # fish, with /etc/fish (a user whose shell is fish needs it)
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
   networking.hosts = { };                         # names in Nixup's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
   networking.nameservers = [ ];                   # DNS servers of Nixup's services ([ ]: the network's), like [ "9.9.9.9" ]
@@ -741,7 +753,57 @@
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)
   nixpkgs.hostPlatform = "aarch64-linux";         # the phone's processor: 64-bit ARM
 
-  system.activationScripts = { };                 # scripts at each build: not on the phone yet
+  # Builds by themselves, as NixOS's system.autoUpgrade: the config built again with everything at its newest.
+  system.autoUpgrade = {
+    enable = false;                               # true: build again at dates
+    dates = "04:40";                              # when, like "daily", "Sun 03:00" (systemd's calendar events)
+    randomizedDelaySec = "0";                     # a random wait before each, like "45min"
+    fixedRandomDelay = false;                     # true: the same wait each time
+    persistent = true;                            # a time missed while the phone was off comes once it is on
+    upgrade = true;                               # false: build the config as flake.lock locks it
+    flake = null;                                 # another config, like "github:you/phone#logos"; null: the picked one (a git clone gets its new commits first)
+    channel = null;                               # nixpkgs of a configuration.nix alone, like "https://channels.nixos.org/nixos-26.05"
+    runGarbageCollection = false;                 # true: then frees up space (the app's Free up space)
+  };
+  android.autoUpgrade = {
+    onlyOnUnmetered = true;                       # build only on Wi-Fi (never on mobile data)
+    onlyWhileCharging = false;                    # true: only while charging
+  };
+
+  # Machines that build the packages cache.nixos.org has not got (an overlay's, an unfree one), as NixOS's: over ssh.
+  nix.distributedBuilds = false;                  # true: use nix.buildMachines; false: such a package stops the build
+  nix.buildMachines = [
+    # {
+    #   hostName = "builder.example.org";         # its address (a tailnet name works)
+    #   sshUser = "builder";                      # one of its nix.settings.trusted-users
+    #   sshKey = "/data/adb/nixup/secrets/builder_ed25519";   # a key on the phone, readable by root (secret)
+    #   systems = [ "aarch64-linux" ];            # the phone's packages' system (a PC builds it with binfmt emulation)
+    #   publicHostKey = "c3NoLWVkMjU1MTkg…";      # base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub on it
+    #   maxJobs = 4;
+    # }
+  ];
+
+  # Scripts, as NixOS's: each build and each start of the phone runs system.activationScripts as root (in Nixup's view,
+  # before the services start); system.preSwitchChecks run before a build changes anything (one that fails stops it);
+  # each normal user runs system.userActivationScripts. Examples (each would run on the phone, so they are comments):
+  #   system.activationScripts.stay-awake = {
+  #     text = "settings put global stay_on_while_plugged_in 3";   # what it does (bash): idempotent and fast
+  #     deps = [ "users" ];                                        # the scripts it runs after (NixOS's names too)
+  #     supportsDryActivation = false;                             # true: a dry run runs it too (NIXOS_ACTION=dry-activate)
+  #     undo = "settings put global stay_on_while_plugged_in 0";   # Nixup's own: puts it back when it leaves the config, or Nixup goes
+  #   };
+  #   system.preSwitchChecks.battery = ''[ "$(cat /sys/class/power_supply/battery/capacity)" -ge 20 ]'';   # $1: the profile, $2: switch or dry-activate
+  #   system.userActivationScripts.notes = "mkdir -p ~/notes";   # as each normal user, when it changes and at each start
+  system.activationScripts = { };                 # scripts at each build and start, as root
+  system.preSwitchChecks = { };                   # checks before a build changes anything
+  system.userActivationScripts = { };             # scripts each normal user runs
+
+  # The system's version and where it was built from, as on NixOS: the app's Generations shows each one's label and
+  # the config's commit, nixos-version tells them, and /etc/os-release has them (nix/version.nix).
+  system.stateVersion = "26.05";                  # the release of your first build: leave it there (NixOS's modules keep its defaults)
+  system.nixos.tags = [ ];                        # words before the version in each generation's label, like [ "travel" ]
+  system.configurationRevision = null;            # the config's git commit; in a flake: self.rev or self.dirtyRev or null
+  system.copySystemConfiguration = false;         # true: each generation keeps a copy of this configuration.nix (not with a flake)
 
   # Other versions of this config, built with it: switch with ⋮ → Specialisations (no new build),
   # or build.sh / nixup-rebuild --specialisation work. The phone keeps the one picked, also after

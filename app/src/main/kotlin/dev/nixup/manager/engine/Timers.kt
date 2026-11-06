@@ -26,6 +26,9 @@ import kotlin.random.Random
  *
  * The loop looks at the clock every 30 seconds: a phone asleep runs nothing, and a time that passed while it slept
  * comes once it wakes, as with systemd's timers without WakeSystem. AccuracySec and the like are taken.
+ *
+ * A timer with a job (system.autoUpgrade's nixos-upgrade) starts no unit: at its time it runs
+ * one of the module's scripts (see Units.fire), so it is there with or without services.
  */
 class Timers(private val data: File) {
     private val dir = File(data, "timers")
@@ -56,7 +59,7 @@ class Timers(private val data: File) {
         for ((name, timer) in wanted) problems += check(name, timer)
         had = applied()
         leaving = had.keys.filter { it !in wanted }
-        active = wanted.filter { (_, timer) -> timer.optBoolean("wanted") && timer.optString("unit") in units }.keys
+        active = wanted.filter { (_, timer) -> timer.optBoolean("wanted") && (isJob(timer) || timer.optString("unit") in units) }.keys
         val changed = wanted.keys.filter { name -> had[name]?.toString()?.let { it != wanted.getValue(name).toString() } == true }
         toStop = had.keys.filter { (it in leaving || it !in active || it in changed) && loopPid(it) != null }
         // One whose loop ended with no time left (done) is left until the next boot, as systemd leaves an elapsed timer.
@@ -84,13 +87,15 @@ class Timers(private val data: File) {
     /** What is wrong with [timer]'s times: an OnCalendar or time span systemd would not take. */
     private fun check(name: String, timer: JSONObject): List<String> {
         val problems = mutableListOf<String>()
-        val what = "systemd.timers.$name.timerConfig"
+        // A job's times are its option's (system.autoUpgrade.dates, ...), a timer's its timerConfig's.
+        val option = timer.string("option")
+        val what = option ?: "systemd.timers.$name.timerConfig"
         for (expression in timer.strings("onCalendar")) {
-            runCatching { Calendar.parse(expression) }.onFailure { problems += "$what.OnCalendar: \"$expression\": ${it.message}" }
+            runCatching { Calendar.parse(expression) }.onFailure { problems += "$what.${if (option != null) "dates" else "OnCalendar"}: \"$expression\": ${it.message}" }
         }
         for ((key, field) in SPANS) {
             val text = timer.string(field) ?: continue
-            if (span(text) == null) problems += "$what.$key: \"$text\" is not a time span like 30s, 5min or 1h 30min"
+            if (span(text) == null) problems += "$what.${if (option != null) "randomizedDelaySec" else key}: \"$text\" is not a time span like 30s, 5min or 1h 30min"
         }
         return problems
     }
@@ -125,7 +130,7 @@ class Timers(private val data: File) {
         for ((name, timer) in applied()) {
             File(dir, "$name/done").delete()
             File(dir, "$name/next").delete()
-            if (timer.optBoolean("wanted") && timer.optString("unit") in units) launch(name)
+            if (timer.optBoolean("wanted") && (isJob(timer) || timer.optString("unit") in units)) launch(name)
         }
     }
 
@@ -187,7 +192,14 @@ class Timers(private val data: File) {
         }
         val first = times.minOrNull() ?: return null
         val delay = timer.string("randomizedDelay")?.let { span(it) } ?: 0L
-        return maxOf(first, now) + if (random && delay > 0) Random.nextLong(delay) else 0L
+        // FixedRandomDelay: the same delay each time (one of its own, from the phone's machine id and its name, as
+        // systemd's); a plan's look at it has none.
+        val fixed = timer.optBoolean("fixedRandomDelay") && delay > 0
+        return maxOf(first, now) + when {
+            fixed -> Math.floorMod((machineId() + name).hashCode().toLong(), delay)
+            random && delay > 0 -> Random.nextLong(delay)
+            else -> 0L
+        }
     }
 
     /** Starts the loop of [name] (see [LOOP]), below the apps on the screen; whether it runs. */
@@ -226,6 +238,9 @@ class Timers(private val data: File) {
     private fun applied(): Map<String, JSONObject> = dir.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { folder ->
         runCatching { folder.name to JSONObject(File(folder, "spec.json").readText()) }.getOrNull()
     }.toMap()
+
+    /** The view's machine id (Etc writes it), for a fixed random delay. */
+    private fun machineId(): String = runCatching { File(data, "etc/machine-id").readText().trim() }.getOrDefault("")
 
     /** Its loop's process, while it runs. */
     private fun loopPid(name: String): Int? = number(File(dir, "$name/loop.pid"))?.toInt()
@@ -411,6 +426,9 @@ class Timers(private val data: File) {
 
     companion object {
         private const val MARK = "nixup-timer:"
+
+        /** Whether [timer] runs a script of the module (a job) rather than starting a unit. */
+        fun isJob(timer: JSONObject): Boolean = timer.optJSONObject("job") != null
 
         /** The time spans of a timer: its key in timerConfig, and in the profile. */
         private val SPANS = listOf(

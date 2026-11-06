@@ -31,6 +31,13 @@
 #            the config itself, and again and generation the specialisation they had
 #   --no-specialisation
 #            the config itself, for again and generation
+# switch and update take these too (system.autoUpgrade's timer gives them; its build keeps the
+# specialisation in use, unless one is asked for):
+#   --source=<config>   another config than the one picked, for this build (a flake's address)
+#   --channel=<url>     the nixexprs.tar.xz a configuration.nix alone gets its nixpkgs from
+#   --pull              a picked config in a git clone (the app's Git) gets its repository's new
+#                       commits first (git.sh pull)
+#   --gc                once the build has worked, as gc
 # The config is what the app's Config picked (config_source in common.sh): a
 # configuration.nix, built alone; a flake.nix, whose folder is the flake (as
 # nixos-rebuild --flake reads /etc/nixos); or a flake's address, like github:owner/repo,
@@ -57,11 +64,40 @@ esac
 [ -n "$SPECIALISATION_GIVEN" ] && SPECIALISATION_ARGS=${SPECIALISATION:+--specialisation $SPECIALISATION}
 [ -n "$SPECIALISATION_GIVEN" ] && [ -z "$SPECIALISATION" ] && SPECIALISATION_ARGS=--no-specialisation
 
+# switch's and update's options (see above), kept for a run picked up after a restart (resumable).
+OPTIONS= PULL= THEN_GC=
+case "$MODE" in
+  switch | update)
+    if [ $# -ge 2 ]; then shift 2; else set --; fi
+    for option; do
+      case "$option" in
+        --source=*) NIXUP_SOURCE=${option#--source=} ;;
+        --channel=*) NIXUP_CHANNEL=${option#--channel=} ;;
+        --pull) PULL=1 ;;
+        --gc) THEN_GC=1 ;;
+        *) fail "build.sh $MODE: no such option: $option (--source=, --channel=, --pull, --gc)" ;;
+      esac
+      OPTIONS="$OPTIONS $option"
+    done
+    export NIXUP_SOURCE NIXUP_CHANNEL
+    # An automatic upgrade (system.autoUpgrade) keeps the specialisation in use, as again does: a phone put in
+    # another mode by hand stays in it. A run picked up after a restart has it among its arguments already.
+    if [ -n "$OPTIONS" ] && [ "$BY" = timer ] && [ -z "$SPECIALISATION_GIVEN" ] && [ -s "$SPECIALISATION_IN_USE" ]; then
+      SPECIALISATION=$(head -n 1 "$SPECIALISATION_IN_USE") SPECIALISATION_GIVEN=1
+      SPECIALISATION_ARGS="--specialisation $SPECIALISATION"
+    fi ;;
+esac
+
 # The run: its log, and what the app is told (see run_open in common.sh).
 case "$MODE" in
-  switch) run_open build "Build"; event build start "Building the config" "$(config_source)" ;;
+  switch | update) if [ -n "$OPTIONS" ] && { [ "$BY" = timer ] || [ "$BY" = resume ]; }; then
+      run_open build "Automatic upgrade"; event build start "Automatic upgrade (system.autoUpgrade)" "$(config_source)"
+    elif [ "$MODE" = switch ]; then
+      run_open build "Build"; event build start "Building the config" "$(config_source)"
+    else
+      run_open build "Upgrade"; event build start "Upgrading: a build with everything at its newest" "$(config_source)"
+    fi ;;
   dry) run_open build "Dry run"; event build start "Dry run: what a build would change" "$(config_source)" ;;
-  update) run_open build "Upgrade"; event build start "Upgrading: a build with everything at its newest" "$(config_source)" ;;
   again) run_open build "Build"; event build start "Applying the last build again" ;;
   generation)
     run_open build "Generation $3"
@@ -74,7 +110,8 @@ NEW=$PROFILE.new-$$
 at_exit 'rm -f "$NEW"'
 # A restart (or a kill) in the middle: it starts again after (see resume.sh).
 case "$MODE" in
-  switch | update | again) resumable build build.sh "$MODE" $SPECIALISATION_ARGS ;;
+  switch | update) resumable build build.sh "$MODE" $OPTIONS $SPECIALISATION_ARGS ;;
+  again) resumable build build.sh "$MODE" $SPECIALISATION_ARGS ;;
   generation) resumable build build.sh generation "$3" ${4:+"$4"} $SPECIALISATION_ARGS ;;
 esac
 
@@ -122,6 +159,15 @@ case "$MODE" in
     exit 0 ;;
   *) fail "build.sh: no such thing to do: $MODE (switch, dry, update, again, generation, gc)" ;;
 esac
+
+# --pull: a picked config in a git clone gets its repository's new commits first (as the app's Pull and build).
+# (Its real folder: a config picked before the rename names it through /data/adb/seraph, a link to $DATA.)
+if [ -n "$PULL" ] && [ -z "$NIXUP_SOURCE" ]; then
+  picked=$(config_source)
+  case "$(readlink -f "${picked%%#*}" 2> /dev/null)" in
+    "$DATA/git/"*) sh "$MODDIR/git.sh" "$BY" pull < /dev/null || fail "the repository's new commits could not be pulled (see above); nothing was changed" ;;
+  esac
+fi
 
 SRC=$(config_source)
 [ -n "$SRC" ] || fail "there is no config yet: in the Nixup app, Config picks your configuration.nix or flake.nix (New makes one), or takes a flake's address, like github:you/phone"
@@ -274,7 +320,9 @@ eval_secrets() {
   else nix_eval --argstr reposDir "$DATA/repos" --argstr part secretsToDeliver; fi
 }
 
-GEN_SOURCE=$SRC GEN_LOCK=
+GEN_SOURCE=$SRC GEN_LOCK= GEN_CONFIG=
+# A configuration.nix alone: the file, which the generation keeps with system.copySystemConfiguration.
+[ -z "$FLAKE" ] && [ -f "$SRC" ] && GEN_CONFIG=$SRC
 if [ -n "$FLAKE" ]; then
   log "== Flake $WHERE"
   nix_etc || fail "Nix could not get its /etc (the network's DNS servers): is the phone online?"
@@ -367,3 +415,6 @@ if grep -q '"secrets":\["' "$NEW"; then
 fi
 
 switch_to "$NEW" "$MODE"
+# --gc: what no build keeps goes, now that this one has worked.
+[ -n "$THEN_GC" ] && sh "$MODDIR/build.sh" "$BY" gc < /dev/null
+exit 0

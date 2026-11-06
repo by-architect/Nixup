@@ -13,6 +13,13 @@
 # nix.optimise run it. Builds run as the nixbld users (nix.nrBuildUsers, with a uid from 400 to 999 each, which Android
 # lets use the network), and without Nix's sandbox (sandbox = false): Android's kernels lack the namespaces it needs.
 # Root uses the store itself; for the other users that log in (isNormalUser) Nix's daemon runs, as on NixOS.
+#
+# Build machines (nix.buildMachines, with nix.distributedBuilds), as on NixOS: a package cache.nixos.org has not got (an
+# overlay's, an unfree one) is built on those machines over ssh and copied to the phone, where a build otherwise stops at
+# it (the phone builds no package from its source), and the shells' builds go to them too (/etc/nix/machines). Nix's ssh
+# is nixpkgs' openssh, fetched with the packages; a machine's sshKey is a file on the phone, readable by root (in
+# /data/adb/nixup/secrets, say), and its publicHostKey (or root's known_hosts, /data/adb/nixup/home/.ssh) is how the
+# phone knows it. The files a config makes are still built on the phone.
 { config, options, lib, pkgs, _nixup, ... }:
 let
   inherit (lib) mkOption types;
@@ -82,6 +89,23 @@ let
   # nix-env's own folder, which nix-env makes the first time it runs: XDG's with use-xdg-base-directories.
   defexpr = if cfg.settings.use-xdg-base-directories or false then "\${XDG_STATE_HOME:-$HOME/.local/state}/nix/defexpr" else "$HOME/.nix-defexpr";
   nixpkgsOnPath = lib.any (entry: lib.hasPrefix "nixpkgs=" entry) cfg.nixPath;
+
+  # A line of Nix's machines file, as NixOS writes /etc/nix/machines (nixos/modules/config/nix-remote-build.nix).
+  machineLine = machine: lib.concatStringsSep " " [
+    "${lib.optionalString (machine.protocol != null) "${machine.protocol}://"}${lib.optionalString (machine.sshUser != null) "${machine.sshUser}@"}${machine.hostName}"
+    (if machine.system != null then machine.system else if machine.systems != [ ] then lib.concatStringsSep "," machine.systems else "-")
+    (if machine.sshKey != null then machine.sshKey else "-")
+    (toString machine.maxJobs)
+    (toString machine.speedFactor)
+    (let all = machine.supportedFeatures ++ machine.mandatoryFeatures; in if all == [ ] then "-" else lib.concatStringsSep "," all)
+    (if machine.mandatoryFeatures == [ ] then "-" else lib.concatStringsSep "," machine.mandatoryFeatures)
+    (if machine.publicHostKey != null then machine.publicHostKey else "-")
+  ];
+  machinesText = lib.concatMapStrings (machine: machineLine machine + "\n") cfg.buildMachines;
+  remoteBuilds = cfg.enable && cfg.distributedBuilds && cfg.buildMachines != [ ];
+  badMachines = map (machine: machine.hostName) (lib.filter (machine: machine.system == null && machine.systems == [ ]) cfg.buildMachines);
+  badKeys = map (machine: machine.hostName) (lib.filter (machine: machine.sshKey != null
+    && (!lib.hasPrefix "/" machine.sshKey || lib.hasPrefix builtins.storeDir machine.sshKey)) cfg.buildMachines);
 
   # Taken from NixOS: an option the phone does nothing with.
   taken = type: default: what: mkOption {
@@ -306,9 +330,47 @@ in
       distributedBuilds = mkOption {
         type = types.bool;
         default = false;
-        description = "As on NixOS, builds on other machines (nix.buildMachines): not on the phone yet.";
+        description = ''
+          Whether nix.buildMachines build what cache.nixos.org has not got, as on NixOS (and the shells' builds); else
+          such a package stops the build.
+        '';
       };
-      buildMachines = taken (types.listOf (types.attrsOf types.anything)) [ ] "the machines builds may run on";
+      buildMachines = mkOption {
+        type = types.listOf (types.submodule {
+          options = {
+            hostName = mkOption { type = types.str; example = "nixbuilder.example.org"; description = "The build machine's host name, as on NixOS."; };
+            protocol = mkOption {
+              type = types.enum [ null "ssh" "ssh-ng" ];
+              default = "ssh";
+              example = "ssh-ng";
+              description = "How Nix talks to it, as on NixOS.";
+            };
+            system = mkOption { type = types.nullOr types.str; default = null; example = "aarch64-linux"; description = "The system it builds for, as on NixOS (the phone's packages are aarch64-linux)."; };
+            systems = mkOption { type = types.listOf types.str; default = [ ]; example = [ "aarch64-linux" ]; description = "The systems it builds for, as on NixOS."; };
+            sshUser = mkOption { type = types.nullOr types.str; default = null; example = "builder"; description = "The user to log in as, as on NixOS (one of its nix.settings.trusted-users)."; };
+            sshKey = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              example = "/data/adb/nixup/secrets/builder_ed25519";
+              description = "The private key to log in with, as on NixOS: a file on the phone, readable by root, not in Nix's store.";
+            };
+            maxJobs = mkOption { type = types.int; default = 1; description = "How many builds it takes at once, as on NixOS."; };
+            speedFactor = mkOption { type = types.int; default = 1; description = "How fast it is next to the others, as on NixOS."; };
+            mandatoryFeatures = mkOption { type = types.listOf types.str; default = [ ]; example = [ "big-parallel" ]; description = "As on NixOS."; };
+            supportedFeatures = mkOption { type = types.listOf types.str; default = [ ]; example = [ "kvm" "big-parallel" ]; description = "As on NixOS."; };
+            publicHostKey = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = "Its ssh host key, base64 (base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub), as on NixOS; null: root's known_hosts (/data/adb/nixup/home/.ssh).";
+            };
+          };
+        });
+        default = [ ];
+        description = ''
+          Machines that build what cache.nixos.org has not got, as NixOS's nix.buildMachines (with nix.distributedBuilds):
+          the phone sends them the build over ssh and gets the package back.
+        '';
+      };
 
       sshServe = mkOption {
         type = types.submodule {
@@ -420,8 +482,12 @@ in
           message = "nix.daemonUser, nix.daemonGroup: Nix's daemon runs as root on the phone.";
         }
         {
-          assertion = !cfg.distributedBuilds;
-          message = "nix.distributedBuilds: builds on other machines are not on the phone yet.";
+          assertion = badMachines == [ ];
+          message = "nix.buildMachines: give each a system (or systems), like \"aarch64-linux\": ${lib.concatStringsSep ", " badMachines}.";
+        }
+        {
+          assertion = badKeys == [ ];
+          message = "nix.buildMachines: sshKey is the full path of a file on the phone, not in Nix's store: ${lib.concatStringsSep ", " badKeys}.";
         }
         {
           assertion = !cfg.sshServe.enable;
@@ -436,6 +502,19 @@ in
       # What the engine does with it: Nix's commands, linked into /etc/nixup/bin, and the paths the phone keeps
       # (the registry's flakes: the config's nixpkgs). None: Nix is off.
       system.build.nix = if !cfg.enable then null else { inherit commands kept; };
+
+      # For the phone's own builds (fetch_packages in common.sh): the machines, and the ssh Nix reaches them with.
+      system.build.nixBuilders = if !remoteBuilds then null else {
+        machines = machinesText;
+        ssh = builtins.unsafeDiscardStringContext "${pkgs.openssh}/bin";
+        sshPath = "${pkgs.openssh}";
+      };
+
+      warnings = lib.optional (cfg.distributedBuilds && cfg.buildMachines == [ ])
+        "nix.distributedBuilds: there are no nix.buildMachines, so a package cache.nixos.org has not got still stops the build."
+        ++ lib.optional (remoteBuilds && !lib.any (machine:
+          lib.elem config.nixpkgs.hostPlatform (lib.optional (machine.system != null) machine.system ++ machine.systems)) cfg.buildMachines)
+        "nix.buildMachines: none builds for ${config.nixpkgs.hostPlatform}, the phone's packages' system.";
     }
 
     (lib.mkIf (flake.source != null && flake.setFlakeRegistry) {
@@ -462,6 +541,9 @@ in
 
       environment.etc."nix/nix.conf".text = nixConf;
       environment.etc."nix/registry.json".text = registryJson;
+      # The build machines, as NixOS writes them; without distributedBuilds Nix leaves them, as on NixOS.
+      environment.etc."nix/machines" = lib.mkIf (cfg.buildMachines != [ ]) { text = machinesText; };
+      nix.settings.builders = lib.mkIf (!cfg.distributedBuilds) null;
 
       # That Nix first on the shells' PATH, as NixOS has it.
       environment.systemPackages = lib.mkIf packageSet [ cfg.package ];
@@ -501,6 +583,8 @@ in
       systemd.services.nix-daemon = lib.mkIf (loginUsers != [ ]) {
         description = "Nix Daemon";
         wantedBy = [ "multi-user.target" ];
+        # Its ssh, for the build machines, as on NixOS.
+        path = lib.optional remoteBuilds pkgs.openssh;
         environment = cfg.envVars // { CURL_CA_BUNDLE = config.security.pki.caBundle; }
           // lib.optionalAttrs (!packageSet) { NIX_BIN_DIR = nixBin; };
         serviceConfig = {

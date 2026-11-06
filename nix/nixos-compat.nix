@@ -1,9 +1,9 @@
 # NixOS's own options that its service modules set or read besides their own (nix/nixos.nix runs those modules on
 # the phone), each with NixOS's name and type, so a module builds here as it does there:
 #   - what the phone does, it does: /etc/hosts (networking.hosts, extraHosts), the DNS servers its services use
-#     (networking.nameservers), environment variables (environment.variables), a unit's targets, timers and sockets
-#     (systemd.targets, systemd.timers, systemd.sockets, in nix/units.nix), /etc (nix/etc.nix) and systemd.tmpfiles
-#     (nix/tmpfiles.nix);
+#     (networking.nameservers), a unit's targets, timers and sockets (systemd.targets, systemd.timers, systemd.sockets,
+#     in nix/units.nix), /etc (nix/etc.nix), systemd.tmpfiles (nix/tmpfiles.nix) and the shells' environment
+#     (environment.variables, ..., nix/shells.nix);
 #   - what has nothing to do on a phone is taken and does nothing: a firewall's open ports (a phone has none in the
 #     way), IPv6, PAM's services, the documentation, D-Bus's and udev's packages (Android has neither);
 #   - what it cannot do is there, so a module that only reads it builds, and turning it on stops the build and says
@@ -69,9 +69,6 @@ let
 
   hostsText = lib.concatStrings (lib.mapAttrsToList (ip: names: lib.optionalString (names != [ ]) "${ip} ${lib.concatStringsSep " " names}\n")
     config.networking.hosts) + config.networking.extraHosts;
-  # environment.variables (and sessionVariables), as every session in the view gets them.
-  variables = config.environment.variables // config.environment.sessionVariables;
-  exportLine = name: value: "export ${name}=${lib.escapeShellArg (if builtins.isList value then lib.concatStringsSep ":" (map toString value) else toString value)}";
 in
 {
   # NixOS's older names, which modules still use.
@@ -173,18 +170,8 @@ in
       };
     };
 
+    # (environment.variables, sessionVariables and the shells' environment are NixOS's own: nix/shells.nix.)
     environment = {
-      variables = mkOption {
-        type = types.attrsOf (types.oneOf [ types.str types.path types.int (types.listOf (types.oneOf [ types.str types.path ])) ]);
-        default = { };
-        example = { EDITOR = "nvim"; };
-        description = "Environment variables every session in Nixup's view gets (ssh, the app's terminal, nixup-shell), as on NixOS.";
-      };
-      sessionVariables = mkOption {
-        type = types.attrsOf (types.oneOf [ types.str types.path types.int (types.listOf (types.oneOf [ types.str types.path ])) ]);
-        default = { };
-        description = "As environment.variables, as on NixOS.";
-      };
       pathsToLink = taken (types.listOf types.str) [ ] "folders of packages linked into the system's profile";
       extraOutputsToInstall = taken (types.listOf types.str) [ ] "more outputs of the packages to install";
     };
@@ -240,15 +227,7 @@ in
     };
 
     system = {
-      stateVersion = mkOption {
-        type = types.str;
-        default = lib.trivial.release;
-        defaultText = lib.literalExpression "lib.trivial.release";
-        description = ''
-          The NixOS release whose defaults NixOS's modules keep, as on NixOS (where it has no default): here the
-          release of the config's nixpkgs.
-        '';
-      };
+      # (stateVersion, with the system's version: nix/version.nix.)
       nssModules = mkOption {
         type = types.listOf types.path;
         default = [ ];
@@ -279,7 +258,6 @@ in
         defaultText = lib.literalExpression "environment.systemPackages, with bash, coreutils, findutils, grep, sed and less";
         description = "The system's packages in one folder, as on NixOS (made on the phone when something uses it).";
       };
-      userActivationScripts = taken (types.attrsOf types.anything) { } "scripts run in each user's session, as Home Manager's startAsUserService sets them (the phone has no user sessions)";
       checks = taken (types.listOf types.package) [ ] "builds that check the system";
       extraDependencies = taken (types.listOf types.unspecified) [ ] "paths kept with the system";
       extraSystemBuilderCmds = taken types.lines "" "commands the system's build runs";
@@ -374,6 +352,9 @@ in
     documentation = {
       enable = taken types.bool true "documentation";
       man.enable = taken types.bool true "man pages";
+      # (programs.fish sets them, for its completions of the man pages.)
+      man.cache.enable = taken types.bool false "a cache of the man pages, made at each build";
+      man.cache.generateAtRuntime = taken types.bool false "a cache of the man pages, made at the first start";
       doc.enable = taken types.bool true "documentation";
       info.enable = taken types.bool true "info pages";
       nixos.enable = taken types.bool true "NixOS's manual";
@@ -381,16 +362,12 @@ in
 
     users = {
       mutableUsers = taken types.bool true "whether users can be changed outside the config";
-      defaultUserShell = taken (types.nullOr (types.either types.package types.str)) null "the users' shell (the phone's is /etc/nixup/login)";
       enforceIdUniqueness = taken types.bool true "unique uids and gids";
       allowNoPasswordLogin = taken types.bool false "logins without a password";
     };
   };
 
   config = {
-    environment.extraInit = lib.mkIf (variables != { }) (lib.mkBefore
-      (lib.concatStringsSep "\n" (lib.mapAttrsToList exportLine variables)));
-
     # The view's /etc/hosts and /etc/resolv.conf (Etc.kt writes them).
     system.build.network = lib.filterAttrs (_: value: value != null) {
       hosts = if hostsText == "" then null else hostsText;
