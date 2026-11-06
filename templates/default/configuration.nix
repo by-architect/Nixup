@@ -708,6 +708,7 @@
 
   environment.etc = { };                          # files in Nixup's /etc, like { "foo/foo.conf".text = "a = 1"; }
   environment.variables = { };                    # variables of every shell session, like { EDITOR = "nano"; }
+  environment.shellAliases = { };                 # aliases of every shell, like { ll = "ls -l"; } (with Nix packages, as on NixOS)
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
   networking.hosts = { };                         # names in Nixup's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
   networking.nameservers = [ ];                   # DNS servers of Nixup's services ([ ]: the network's), like [ "9.9.9.9" ]

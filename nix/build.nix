@@ -13,6 +13,15 @@ let
   anyPackages = config.environment.systemPackages != [ ] || lib.any (user: user.packages != [ ]) (lib.attrValues config.users.users);
   # What a shell has besides environment.systemPackages, as on NixOS.
   shellPackages = lib.optionals anyPackages (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+  # The shell's part of the profile, as a shell on NixOS has it: nixup-shell's PATH (environment.systemPackages first; a
+  # user's profile goes before it), the shell Nixup's login starts (users.defaultUserShell, else bash), and with NixOS's
+  # shells' environment (nix/shells.nix) /run/current-system/sw, which is system.path; none without Nix packages.
+  shellPart = if !anyPackages then null else {
+    path = "${lib.makeBinPath (config.environment.systemPackages ++ shellPackages)}:/system/bin";
+    bash = if config.system.build.users.defaultShell != null then config.system.build.users.defaultShell
+      else "${pkgs.bashInteractive}/bin/bash";
+    system = if config.system.build.nixosShells.enabled then "${config.system.path}" else null;
+  };
   # Whether a user has packages (users.users.<name>.packages), asked of the definitions alone: their packages need
   # nixpkgs, which a configuration.nix's first look has not got.
   userPackagesGiven = lib.any (def: builtins.isAttrs def && lib.any (user:
@@ -64,7 +73,9 @@ let
   needed = builtins.toJSON {
     inherit (config.system.build) units etc;
     packages = map (package: "${package}") (config.environment.systemPackages ++ shellPackages);
-    # The ssh Nix reaches nix.buildMachines with (nix/nix-builds.nix).
+    # The shell (see shellPart): the one the login starts, and system.path, which the phone makes.
+    shell = shellPart;
+    # The ssh Nix reaches nix.buildMachines with (nix/nix.nix).
     builders = if config.system.build.nixBuilders == null then null else config.system.build.nixBuilders.sshPath;
     # The scripts (system.activationScripts, preSwitchChecks: nix/activation.nix), with the bash they run with.
     inherit (config.system.build) activation;
@@ -109,6 +120,7 @@ in
         || config.android.backup.repository != null
         || (config.nix.distributedBuilds && config.nix.buildMachines != [ ])
         || config.system.build.nixosServices.used
+        || config.system.build.nixosShells.used
         || config.system.build.activationUsed;
     };
 
@@ -172,7 +184,9 @@ in
         inherit system;
         # The view's users and groups (nix/users.nix), and what each session runs first.
         users = config.system.build.users;
-        inherit (config.environment) extraInit;
+        # What a session of Android's sh runs first (environment.variables and extraInit, nix/shells.nix); with a Nix
+        # shell NixOS's /etc/set-environment has them, and this is empty.
+        extraInit = config.system.build.androidEnvironment;
         # The app's terminal: its font and colors (nix/terminal.nix).
         terminal = config.system.build.terminal;
         # The version and the config's revision, which each generation keeps (nix/version.nix).
@@ -210,13 +224,9 @@ in
         # Nix on the shells (nix/nix.nix): its commands, and the paths the phone keeps (the
         # registry's flakes, the config's nixpkgs among them); null with nix.enable = false.
         inherit (config.system.build) nix;
-        # nixup-shell's PATH (environment.systemPackages first; a user's profile goes before it) and
-        # its bash, as a shell on NixOS has them; none without Nix packages.
-        shell = if !anyPackages then null else {
-          path = builtins.unsafeDiscardStringContext
-            "${lib.makeBinPath (config.environment.systemPackages ++ shellPackages)}:/system/bin";
-          bash = builtins.unsafeDiscardStringContext "${pkgs.bashInteractive}/bin/bash";
-        };
+        # The shell (see shellPart above); none without Nix packages.
+        shell = if shellPart == null then null else lib.mapAttrs (_: value:
+          if value == null then null else builtins.unsafeDiscardStringContext value) shellPart;
       };
     };
   };

@@ -6,6 +6,17 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- The shells as on NixOS, with nixpkgs' own modules: `environment.shellAliases`, `shellInit`, `loginShellInit`,
+  `interactiveShellInit`, `localBinInPath`, `homeBinInPath`, `shells` and `profiles`, and `programs.bash`,
+  `programs.zsh`, `programs.fish` and `programs.xonsh` with their options and plugins (bash's completion, zsh's
+  autosuggestions and syntax highlighting, oh-my-zsh, ...). With Nix packages, `/etc/profile`, `/etc/bashrc`,
+  `/etc/zshrc`, `/etc/fish` and `/etc/set-environment` are NixOS's own, the prompt is NixOS's (with the phone's name),
+  and PATH is made of the profiles, as on NixOS: the user's own, `/etc/profiles/per-user/<user>`, root's, and
+  `/run/current-system/sw` (`system.path`), with Android's commands after them. `users.defaultUserShell` is the
+  users' shell (bash, as `programs.bash` makes it), and a user whose shell is zsh, fish or xonsh needs its
+  `programs.<shell>.enable`, as on NixOS. Each user that logs in gets a `/run/user/<uid>` (`XDG_RUNTIME_DIR`).
+  Without Nix packages the phone's shell stays Android's sh, with `environment.variables` and `extraInit`.
+
 - The system's version, as on NixOS: each generation keeps its label (`system.nixos.label`, with
   `system.nixos.tags` and the nixpkgs version) and the config's commit (`system.configurationRevision`), which
   the app's Generations shows; `system.copySystemConfiguration = true;` keeps a copy of the configuration.nix

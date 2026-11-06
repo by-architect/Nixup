@@ -697,6 +697,18 @@
 
   environment.etc = { };                          # files in Nixup's /etc, like { "foo/foo.conf".text = "a = 1"; }
   environment.variables = { };                    # variables of every shell session, like { EDITOR = "nano"; }
+
+  # The shells, as on NixOS (with Nix packages; their files are NixOS's own: /etc/profile, /etc/bashrc, /etc/zshrc, ...).
+  environment.shellAliases = { };                # aliases of every shell, like { ll = "ls -l"; } (ls, ll and l are there)
+  environment.interactiveShellInit = "";          # lines every interactive shell runs, like 'set -o vi'
+  environment.loginShellInit = "";                # lines every login shell runs
+  environment.shellInit = "";                     # lines every shell runs
+  environment.localBinInPath = false;             # true: ~/.local/bin on PATH
+  environment.homeBinInPath = false;              # true: ~/bin on PATH
+  # users.defaultUserShell = pkgs.zsh;            # the users' shell (needs programs.zsh.enable); not set: bash
+  programs.bash.completion.enable = true;         # bash completes commands' arguments
+  programs.zsh.enable = false;                    # zsh, with /etc/zshrc (a user whose shell is zsh needs it)
+  programs.fish.enable = false;                   # fish, with /etc/fish (a user whose shell is fish needs it)
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
   networking.hosts = { };                         # names in Nixup's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
   networking.nameservers = [ ];                   # DNS servers of Nixup's services ([ ]: the network's), like [ "9.9.9.9" ]

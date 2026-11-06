@@ -6,7 +6,8 @@
 #
 # environment.systemPackages are Nix packages the phone fetches (nix/nixpkgs.nix). The services,
 # with NixOS's names too, are in nix/units.nix and nix/services.nix; the scripts
-# (system.activationScripts, userActivationScripts, preSwitchChecks) in nix/activation.nix.
+# (system.activationScripts, userActivationScripts, preSwitchChecks) in nix/activation.nix; the shells'
+# environment (environment.variables, extraInit, shellAliases, ..., programs.bash, zsh, fish) in nix/shells.nix.
 { config, lib, options, ... }:
 let
   inherit (lib) mkOption types;
@@ -81,15 +82,6 @@ in
       '';
     };
 
-    environment.extraInit = mkOption {
-      type = types.lines;
-      default = "";
-      example = ''export PATH="$PATH:/data/data/com.termux/files/usr/bin"'';
-      description = ''
-        Shell commands every session in Nixup's view runs first, as NixOS's environment.extraInit: an ssh login or
-        command, the app's terminal and nixup-shell, for root and every user (plain sh).
-      '';
-    };
   };
 
   config = {
