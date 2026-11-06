@@ -213,7 +213,7 @@ new_generation() {
   mkdir -p "$generations/new"
   # The whole profile (with the specialisations), and the one in use; going back to it picks that one again.
   if [ -f "$SYSTEM" ]; then cp "$SYSTEM" "$generations/new/profile.json"; else cp "$PROFILE" "$generations/new/profile.json"; fi
-  [ -n "$SPECIALISATION" ] && printf '%s\n' "$SPECIALISATION" > "$generations/new/specialisation"
+  [ -s "$SPECIALISATION_IN_USE" ] && cp "$SPECIALISATION_IN_USE" "$generations/new/specialisation"
   [ -f "$DATA/resolved.json" ] && cp "$DATA/resolved.json" "$generations/new/apps.json"
   if [ -n "$GEN_SOURCE" ]; then
     printf '%s\n' "$GEN_SOURCE" > "$generations/new/source"
@@ -376,14 +376,16 @@ keep_packages() {
   return 0
 }
 
-# A specialisation's own profile (specialisation.<name> of the whole profile [1], named [2]), on stdout; when the
-# build has none of that name, it says which it has, and fails.
-specialisation_of() {
+# The part of a whole profile [1] the phone applies, on stdout: its specialisation named [2] (specialisation.<name>),
+# or with none the config's own, without the specialisations (profile.json holds one profile, as the engine and
+# apply.sh read it). When the build has no specialisation of that name, it says which it has, and fails.
+applied_of() {
   nix_env
   "$MODDIR/bin/nix-instantiate" --eval --strict --json --readonly-mode --store dummy:// \
     --argstr file "$1" --argstr name "$2" --expr '{ file, name }:
-      let all = (builtins.fromJSON (builtins.readFile file)).specialisation or { }; in
-      if all ? ${name} then all.${name}
+      let whole = builtins.fromJSON (builtins.readFile file); all = whole.specialisation or { }; in
+      if name == "" then removeAttrs whole [ "specialisation" ]
+      else if all ? ${name} then all.${name}
       else throw "this build has no specialisation named ${name} (its specialisations: ${
         if all == { } then "none" else builtins.concatStringsSep ", " (builtins.attrNames all)})"'
 }
@@ -396,14 +398,15 @@ specialisation_of() {
 # to apply (none: the config itself), which the phone keeps until another build.
 switch_to() {
   whole=$1
-  if [ -n "$SPECIALISATION" ]; then
-    log "== Specialisation $SPECIALISATION"
-    set -- "$1.specialisation" "$2"
+  if [ -n "$SPECIALISATION" ] || grep -q '"specialisation":{' "$1"; then
+    [ -n "$SPECIALISATION" ] && log "== Specialisation $SPECIALISATION"
+    set -- "$1.applied" "$2"
     at_exit "rm -f '$1'"
-    specialisation_of "$whole" "$SPECIALISATION" > "$1" 2> "$DATA/tmp/specialisation.err" || {
-      sed -n 's/^error: *//p' "$DATA/tmp/specialisation.err" | tail -n 1 >&2
+    applied_of "$whole" "$SPECIALISATION" > "$1" 2> "$DATA/tmp/specialisation.err" || {
+      sed -n 's/^ *error: *//p' "$DATA/tmp/specialisation.err" | grep . | tail -n 1 >&2
       rm -f "$whole" "$1"
-      fail "there is no specialisation $SPECIALISATION in this build; nothing was changed"
+      if [ -n "$SPECIALISATION" ]; then fail "there is no specialisation $SPECIALISATION in this build; nothing was changed"
+      else fail "the build's profile could not be read (see above); nothing was changed"; fi
     }
   fi
   fetch_packages "$1" "$2" || { rm -f "$1" "$whole"; fail "the config's packages could not be fetched from cache.nixos.org (Nix says why above); nothing was changed"; }
