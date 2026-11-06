@@ -6,11 +6,17 @@
 #                                 the assertions and shows the warnings, as nixos-rebuild does
 #   config.system.build.secrets   how each secret gets to the phone: { file = <its path where the
 #                                 config is built>; } or { text = true; } (secretTexts has it), or
-#                                 neither, which seraph-rebuild sends; never in the profile
+#                                 neither, which nixup-rebuild sends; never in the profile
 { config, options, lib, pkgs, ... }:
 let
+  # Whether there are Nix packages for a shell: environment.systemPackages, or a user's (its profile: nix/users.nix).
+  anyPackages = config.environment.systemPackages != [ ] || lib.any (user: user.packages != [ ]) (lib.attrValues config.users.users);
   # What a shell has besides environment.systemPackages, as on NixOS.
-  shellPackages = lib.optionals (config.environment.systemPackages != [ ]) (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+  shellPackages = lib.optionals anyPackages (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+  # Whether a user has packages (users.users.<name>.packages), asked of the definitions alone: their packages need
+  # nixpkgs, which a configuration.nix's first look has not got.
+  userPackagesGiven = lib.any (def: builtins.isAttrs def && lib.any (user:
+    builtins.isAttrs user && (user ? packages || (user.content or { }) ? packages)) (lib.attrValues def)) options.users.users.definitions;
 
   repos = lib.mapAttrs (_: repo: { url = repo.address; fingerprint = repo.signingKey; }) config.android.repos;
 
@@ -85,12 +91,15 @@ in
   config.system.build = {
     # needsNixpkgs: whether the config uses Nix packages, which a configuration.nix alone gets from
     # the phone's copy of nixpkgs (fetched the first time one does). Asked without the packages
-    # themselves, which need it: whether a module sets environment.systemPackages or the
-    # terminal's font, whether a unit is there, and whether there are backups (restic).
+    # themselves, which need it: whether there is a user of Home Manager, whether a module sets
+    # environment.systemPackages, a user's packages or the terminal's font, whether a unit is
+    # there, and whether there are backups (restic).
     repos = {
       android.repos = lib.foldl' (all: child: all // child.system.build.repos.android.repos) { } (lib.attrValues children) // repos;
       needsNixpkgs = lib.any (child: child.system.build.repos.needsNixpkgs) (lib.attrValues children)
+        || (options ? home-manager.users && config.home-manager.users != { })
         || options.environment.systemPackages.highestPrio < (lib.mkOptionDefault null).priority
+        || userPackagesGiven
         || options.terminal.font.highestPrio < (lib.mkOptionDefault null).priority
         || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { }
         || config.android.backup.repository != null
@@ -164,7 +173,7 @@ in
         adb = config.system.build.adb;
         # The secrets' names: the phone checks each is there, and removes one that left.
         secrets = lib.attrNames config.android.secrets;
-        # The services (systemd.services, Seraph's own and NixOS's modules' among them) as the
+        # The services (systemd.services, Nixup's own and NixOS's modules' among them) as the
         # engine runs them, with the view's /etc files (environment.etc), hosts and DNS servers
         # (networking.hosts, networking.nameservers) and the folders systemd.tmpfiles makes; and
         # every store path the phone needs for them, environment.systemPackages and the
@@ -177,12 +186,17 @@ in
         paths = config.system.build.paths;
         etc = config.system.build.etc;
         inherit (config.system.build) network tmpfiles;
-        storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths
-          ++ config.system.build.terminalStorePaths);
+        # (Without the paths the phone keeps but no cache has: the registry's nixpkgs, which /etc's
+        # registry.json names. See nix below.)
+        storePaths = lib.subtractLists (if config.system.build.nix == null then [ ] else config.system.build.nix.kept)
+          (lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths ++ config.system.build.terminalStorePaths));
         inherit derivations;
-        # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
-        # NixOS has them; none without Nix packages.
-        shell = if config.environment.systemPackages == [ ] then null else {
+        # Nix on the shells (nix/nix.nix): its commands, and the paths the phone keeps (the
+        # registry's flakes, the config's nixpkgs among them); null with nix.enable = false.
+        inherit (config.system.build) nix;
+        # nixup-shell's PATH (environment.systemPackages first; a user's profile goes before it) and
+        # its bash, as a shell on NixOS has them; none without Nix packages.
+        shell = if !anyPackages then null else {
           path = builtins.unsafeDiscardStringContext
             "${lib.makeBinPath (config.environment.systemPackages ++ shellPackages)}:/system/bin";
           bash = builtins.unsafeDiscardStringContext "${pkgs.bashInteractive}/bin/bash";

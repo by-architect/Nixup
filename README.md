@@ -1,4 +1,4 @@
-# Seraph
+# Nixup
 
 Configure an Android phone with Nix, as NixOS does: apps, app settings, system settings, services and
 backups, all from one `configuration.nix`.
@@ -12,7 +12,7 @@ This project aims to close the gap between Android and Nix. You can install NixO
 not support every phone. Nix-on-Droid, on the other hand, does not have the permissions needed to manage
 Android itself. What I found missing: a native app backup system driven by the config (NeoBackup does
 backups well, but Nix adds scripting to it), installing apps from F-Droid-like repositories from a config,
-stable background services and scripts, app settings, and more. Seraph is built to cover all of these.
+stable background services and scripts, app settings, and more. Nixup is built to cover all of these.
 
 ## Requirements
 
@@ -23,9 +23,9 @@ stable background services and scripts, app settings, and more. Seraph is built 
 
 ## How It Works
 
-You write a config, press **Build** in the Seraph app, and the phone is changed to match it. Every build is
+You write a config, press **Build** in the Nixup app, and the phone is changed to match it. Every build is
 checked before anything changes, and saved as a **generation** you can go back to. Take a line out of the
-config and the next build puts that setting back the way it was before Seraph.
+config and the next build puts that setting back the way it was before Nixup.
 
 <details>
 <summary><b>Repos And Android Apps</b></summary>
@@ -76,11 +76,11 @@ from it) are supported.
 
 Apps from Google Play are downloaded by the phone itself, as Aurora Store does, and installed and updated like
 the other apps. No Play Store, Google Play services or GApps are needed on the phone; a Google account is. Sign
-in once: Seraph app → ⋮ → **Google Play account** → **Sign in** (Google's own sign-in page). Then **Show
+in once: Nixup app → ⋮ → **Google Play account** → **Sign in** (Google's own sign-in page). Then **Show
 token** gives the account's token, to copy or save to Downloads, for a config on a PC. Or sign in on a PC:
 
 ```sh
-nix run github:by-architect/Seraph#seraph-play-login     # a sign-in window opens; then it saves ./google-play.token
+nix run github:by-architect/Nixup#nixup-play-login     # a sign-in window opens; then it saves ./google-play.token
 ```
 
 A build whose config lists apps from Google Play checks the account first: with none, or a token Google
@@ -102,7 +102,7 @@ refuses, it stops before changing anything and says to sign in.
   Google Play's.
 - The account's token stays on the phone, readable by root only; signing out removes it. Anyone with the token
   can use the account: keep a copy out of any repository others can read.
-- If the sign-in page says the app has no internet while the phone is online, the Seraph app's network access
+- If the sign-in page says the app has no internet while the phone is online, the Nixup app's network access
   is off (some ROMs switch it per app): turn it on in its App info; the downloads themselves don't need it.
 - Use a Google account made for this rather than your main one: Google may block accounts that download
   with unofficial clients (Aurora Store's FAQ warns about the same).
@@ -202,25 +202,94 @@ Programs from nixpkgs for the phone's shell, as NixOS's `environment.systemPacka
   terminal.font = "${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf";
   terminal.colors = { background = "#000000"; foreground = "#FFFFFF"; cursor = "#FFFFFF"; };
 
-  # A user that logs in over SSH, with no other app needed (it can use su like Seraph):
-  users.users.niobe = { isNormalUser = true; androidApp = "dev.seraph.manager"; };
+  # A user that logs in over SSH, with no other app needed (it can use su like Nixup):
+  users.users.niobe = { isNormalUser = true; androidApp = "dev.nixup.manager"; };
 }
 ```
 
 - Packages are downloaded from cache.nixos.org; nothing is compiled on the phone.
 - They are for the shell and services, not phone apps (apps come from repositories, above).
-- The **terminal** (the icon in Seraph's top bar) is built into the app (no Termux needed): a root shell with
-  these packages. The same shell: `su -c seraph-shell` from adb, or `ssh` with `services.openssh`.
+- The **terminal** (the icon in Nixup's top bar) is built into the app (no Termux needed): a root shell with
+  these packages. The same shell: `su -c nixup-shell` from adb, or `ssh` with `services.openssh`.
 - `terminal.font` must be a file from a Nix package; `terminal.colors` takes `background`, `foreground`,
   `cursor` and `color0` to `color15`.
 - A normal user's home is `/home/<name>`, ready right after the phone starts.
+- A user's own packages (`users.users.<name>.packages`) are in its profile, `/etc/profiles/per-user/<name>`, on its
+  `PATH` before `environment.systemPackages`, as on NixOS.
+
+</details>
+
+<details>
+<summary><b>Home Manager</b></summary>
+
+[Home Manager](https://github.com/nix-community/home-manager) works as on NixOS, through its own NixOS module, with
+all of its options: `programs.*`, `services.*`, `home.file`, `xdg.*`, `home.packages`, `home.activation`. One module
+file can configure a user on a NixOS machine and on the phone.
+
+```nix
+{ pkgs, ... }: {
+  # A flake: inputs.home-manager.url = "github:nix-community/home-manager";
+  #          modules = [ home-manager.nixosModules.home-manager ./configuration.nix ];
+  # A configuration.nix alone: the phone fetches Home Manager (as it fetches nixpkgs):
+  imports = [ <home-manager/nixos> ];
+
+  users.users.niobe = { isNormalUser = true; androidApp = "dev.nixup.manager"; };
+
+  home-manager.useGlobalPkgs = true;            # the phone's pkgs (one evaluation of nixpkgs, not two)
+  home-manager.backupFileExtension = "backup";  # a file of yours in the way is moved aside, not refused
+  home-manager.users.niobe = { pkgs, ... }: {
+    home.stateVersion = "26.05";
+    home.packages = [ pkgs.ripgrep ];
+    programs.git = { enable = true; settings.user.name = "Niobe"; };
+    programs.bash.enable = true;
+    services.gpg-agent = { enable = true; enableSshSupport = true; };
+  };
+}
+```
+
+- Each user's Home Manager runs at each build that changes it and at the phone's start, as the user: it links the
+  user's files into its home and runs each module's steps (`onChange`, `home.activation`). The Services tab shows it
+  as `home-manager-<name>`, with its log.
+- The services Home Manager makes (every `services.*` module's, and `systemd.user.services` of your own) run as the
+  user's own, named `user-<name>-<service>`, after its files are linked: with `%t` its `/run/user/<uid>`,
+  `StateDirectory` in `~/.local/state`, and its sockets its own, as its `systemd --user` would run them.
+- Its packages are the user's profile (`/etc/profiles/per-user/<name>`), whatever `useUserPackages` says: a user
+  cannot install into the phone's store.
+- Taking a user out of `home-manager.users` takes Home Manager's links out of its home again.
+- On a phone some defaults differ, to save downloads: no manual page, no desktop file types (`xdg.mime`), and only
+  the UTF-8 locales; each can be turned on again.
+- Not on the phone: a desktop session (what only `graphical-session.target` starts is not started, and the build says
+  so), a D-Bus session bus (the services that need one fail), and `startAsUserService`. Home Manager's files are
+  links into `/nix/store`, so they are there in Nixup's view of the phone (SSH, the app's terminal, the services), not
+  for Android's apps.
+
+Nix itself is in the same shells, as on NixOS, for packages you want without changing the config:
+
+```sh
+nix shell nixpkgs#htop          # a shell with htop (nix run nixpkgs#cowsay -- hi runs one program)
+nix profile add nixpkgs#htop    # installed for you, on PATH from then on (or: nix-env -iA nixpkgs.htop)
+nix-shell -p htop               # a shell with nixpkgs' build tools too (a big download the first time)
+nix-collect-garbage -d          # frees up space; the config's own packages stay
+```
+
+- `nixpkgs` there is your config's own nixpkgs (the registry's `nixpkgs` and `<nixpkgs>`, as on a NixOS built
+  from a flake), so nothing fetches nixpkgs again. The phone keeps it; a build from a PC sends it once when
+  the phone has not got it.
+- The commands are the module's own Nix, so nothing is downloaded for them. Settings: `nix.settings`
+  (`/etc/nix/nix.conf`, flakes on), `nix.registry`, `nix.gc`, `nix.optimise`, `nix.package`, as on NixOS;
+  `nix.enable = false` takes it all away.
+- Builds run as the `nixbld` users, without Nix's sandbox (Android's kernels cannot do it). Other users that
+  log in (`isNormalUser`) use Nix through its daemon, as on NixOS.
+- A user of an Android app (`androidApp`) has that app's network, which Android cuts while the app is in the
+  background: `nix-shell -p` and `nix-env -iA nixpkgs.…` work anyway (the daemon downloads), but `nix shell
+  nixpkgs#…` first fetches Nix's registry itself, which then fails.
 
 </details>
 
 <details>
 <summary><b>Services And Scripts</b></summary>
 
-There is no real systemd on Android: Seraph runs NixOS-style `systemd.services` itself, with the same
+There is no real systemd on Android: Nixup runs NixOS-style `systemd.services` itself, with the same
 syntax.
 
 ```nix
@@ -287,8 +356,8 @@ syntax.
   (`/storage`, `/sdcard`), which Android lets only apps and root open, such a service gets when its user is in
   `media_rw` (`serviceConfig.SupplementaryGroups = [ "media_rw" ];`, or the user's `extraGroups`), in its own
   view of the phone. Or it runs as root (`serviceConfig.User = lib.mkForce "root";`).
-- `environment.etc` (files in Seraph's `/etc`), `systemd.tmpfiles`, `networking.hosts` and
-  `networking.nameservers` work as on NixOS, in Seraph's view of the phone, where `/etc/localtime` is the
+- `environment.etc` (files in Nixup's `/etc`), `systemd.tmpfiles`, `networking.hosts` and
+  `networking.nameservers` work as on NixOS, in Nixup's view of the phone, where `/etc/localtime` is the
   phone's time zone (cron's jobs and every program keep the phone's time).
 - Services start again at boot, run below the app on the screen (so the phone does not stutter), and send a
   notification when they stop by themselves.
@@ -300,7 +369,7 @@ syntax.
 <summary><b>Ready-Made Services</b></summary>
 
 NixOS's own service modules run on the phone as they are, from your nixpkgs: `services.ntfy-sh.enable = true;`
-runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The ones Seraph has tried
+runs nixpkgs' module, with its options, its user and its settings file, as on NixOS. The ones Nixup has tried
 are AdGuard Home, aria2, at, Audiobookshelf, Bazarr, Blocky, Caddy, calibre-web, code-server, Conduit (Matrix),
 CoreDNS, CouchDB, cron, Deluge, dnscrypt-proxy, dnsmasq, endlessh, File Browser, Forgejo, FreshRSS, Gitea, gonic,
 GoToSocial, Gotify, Grafana, harmonia, Headscale, Homepage, i2pd, InfluxDB, Jellyfin, Kavita, Komga, Lidarr,
@@ -313,7 +382,7 @@ added by hand, as on NixOS: `imports = [ "${modulesPath}/services/web-apps/foo.n
 phone has not got stops the build and says so). The small files a module makes (its settings) the phone builds
 itself from what cache.nixos.org has; a package itself it never builds.
 
-Others need a bridge of their own, which Seraph has for Tailscale, Syncthing, SSH, Snapcast (server and client)
+Others need a bridge of their own, which Nixup has for Tailscale, Syncthing, SSH, Snapcast (server and client)
 and adb. Except for snapclient (which NixOS does not have), they take the same options as on NixOS, so one module
 file can work on a NixOS machine and on the phone.
 
@@ -384,7 +453,7 @@ Apps (APK and data) and folders are backed up by the phone itself with
 - **Before each backup** the storage is checked (SD card there, enough room). If something is missing, the
   backup waits and tries again later. A backup cut off by a restart starts again after you unlock the phone.
 - **Restore** is always by hand: the app's **Backups** tab (pick the backup, then the parts: APK, data, …),
-  or `su -c "seraph-backup restore org.example.app"`. An app that is not on the phone comes back whole: its
+  or `su -c "nixup-backup restore org.example.app"`. An app that is not on the phone comes back whole: its
   APK first, then its data. The APK comes from that backup, or from another backup of the app when that one
   has none (`android.backup.defaults.apk = false` backs up data only). If no backup has the APK, the restore
   says "app not found": install the app first, then restore its data.
@@ -399,21 +468,21 @@ Apps (APK and data) and folders are backed up by the phone itself with
 
 It works like `nixos-rebuild`:
 
-| NixOS | Seraph |
+| NixOS | Nixup |
 |---|---|
 | `nixos-rebuild switch` | **Build** in the app |
 | `nixos-rebuild dry-activate` | **Dry run** |
 | `nixos-rebuild switch --upgrade` | **Upgrade** |
 | `nixos-rebuild switch --rollback` | **Generations** → pick one → Switch to it |
-| `nixos-rebuild switch --specialisation work` | ⋮ → **Specialisations** → pick one (no new build), or `--specialisation work` with `build.sh` or `seraph-rebuild` |
-| `nixos-rebuild --target-host` | `seraph-rebuild switch --flake .#phone` on a PC |
+| `nixos-rebuild switch --specialisation work` | ⋮ → **Specialisations** → pick one (no new build), or `--specialisation work` with `build.sh` or `nixup-rebuild` |
+| `nixos-rebuild --target-host` | `nixup-rebuild switch --flake .#phone` on a PC |
 
 - A build reads and checks everything first; if anything is wrong, **nothing changes**.
 - Each build that changes something is saved as a generation, with what it was built from.
 - `specialisation.<name>.configuration` makes other versions of the config (a "work" or "travel" one) with
   each build, as on NixOS. The phone switches to one and back without building again, and keeps the one picked
   across restarts, until a build picks another.
-- The config can be a `configuration.nix`, a `flake.nix` (with `seraphConfigurations.<name>`), or a git
+- The config can be a `configuration.nix`, a `flake.nix` (with `nixupConfigurations.<name>`), or a git
   repository the app clones (**Git** button: Pull, Pull and build, Reclone).
 - You get a notification when a build, update or backup ends, and every run's log is in the **Logs** tab.
 - The **Updates**, **Backups**, **Services** and **Logs** tabs each have a search box, and so does every log
@@ -427,17 +496,17 @@ It works like `nixos-rebuild`:
 ### Install
 
 1. Root the phone (see [Requirements](#requirements)).
-2. Download `seraph-v<version>.zip` from the [releases](https://github.com/by-architect/Seraph/releases).
+2. Download `nixup-v<version>.zip` from the [releases](https://github.com/by-architect/Nixup/releases).
 3. Magisk → Modules → Install from storage → pick the zip.
 4. Restart the phone.
-5. Open **Seraph**, allow root and notifications.
+5. Open **Nixup**, allow root and notifications.
 
 ### Write A Config
 
 Start from the [template](templates/default), which has every option, or create one on a PC with:
 
 ```sh
-nix flake init -t github:by-architect/Seraph
+nix flake init -t github:by-architect/Nixup
 ```
 
 Edit it on the PC or on the phone.
@@ -454,51 +523,51 @@ Edit it on the PC or on the phone.
 
 The module must be installed on the phone first. Turn on USB debugging, connect, and allow the PC.
 
-Build on the PC and apply it on the phone (the flake needs `seraphConfigurations.phone`):
+Build on the PC and apply it on the phone (the flake needs `nixupConfigurations.phone`):
 
 ```sh
-nix run github:by-architect/Seraph -- switch --flake .#phone          # dry-activate: dry run; --upgrade: newest versions
-nix run github:by-architect/Seraph -- switch --flake .#phone --target-host phone   # over ssh instead
+nix run github:by-architect/Nixup -- switch --flake .#phone          # dry-activate: dry run; --upgrade: newest versions
+nix run github:by-architect/Nixup -- switch --flake .#phone --target-host phone   # over ssh instead
 ```
 
 Or let the phone build its own config:
 
 ```sh
-adb push configuration.nix /sdcard/Seraph/configuration.nix
-adb shell su -c "echo /storage/emulated/0/Seraph/configuration.nix > /data/adb/seraph/source"
-adb shell su -c "sh /data/adb/modules/seraph/build.sh adb"          # or: build.sh adb dry
+adb push configuration.nix /sdcard/Nixup/configuration.nix
+adb shell su -c "echo /storage/emulated/0/Nixup/configuration.nix > /data/adb/nixup/source"
+adb shell su -c "sh /data/adb/modules/nixup/build.sh adb"          # or: build.sh adb dry
 ```
 
 ### Good To Know
 
-Seraph's commands over adb (as root):
+Nixup's commands over adb (as root):
 
 ```sh
-adb shell su -c seraph-shell                                           # root shell with your Nix packages
-adb shell su -c "seraph-backup status"                                 # backups: list, status, now, restore
-adb shell su -c "seraph-backup restore org.example.app"
-adb shell su -c "sh /data/adb/modules/seraph/units.sh adb list"        # services: start, stop, restart, log
-adb shell su -c "sh /data/adb/modules/seraph/update.sh adb check"      # app updates: check, now
-adb shell su -c "tail -n 50 /data/adb/seraph/apply.log"                # the log
+adb shell su -c nixup-shell                                           # root shell with your Nix packages
+adb shell su -c "nixup-backup status"                                 # backups: list, status, now, restore
+adb shell su -c "nixup-backup restore org.example.app"
+adb shell su -c "sh /data/adb/modules/nixup/units.sh adb list"        # services: start, stop, restart, log
+adb shell su -c "sh /data/adb/modules/nixup/update.sh adb check"      # app updates: check, now
+adb shell su -c "tail -n 50 /data/adb/nixup/apply.log"                # the log
 ```
 
-`seraph-shell` and `seraph-backup` work after the first restart with the module installed.
+`nixup-shell` and `nixup-backup` work after the first restart with the module installed.
 
 ## Updating
 
-When a new release is out, Magisk shows an **Update** for Seraph, and Seraph's **Updates** tab shows it with
+When a new release is out, Magisk shows an **Update** for Nixup, and Nixup's **Updates** tab shows it with
 an **Install** button. The new version is used after a restart.
 
 ## Uninstall
 
-1. Magisk → Modules → Seraph → **Remove**. (If Remove is grayed out, an update is waiting: restart first.)
+1. Magisk → Modules → Nixup → **Remove**. (If Remove is grayed out, an update is waiting: restart first.)
 2. Restart the phone.
 
-At that restart every setting Seraph changed goes back to how it was before Seraph, and apps it removed come
-back. **Apps Seraph installed are uninstalled** (their data is kept). What stays: your config, your
+At that restart every setting Nixup changed goes back to how it was before Nixup, and apps it removed come
+back. **Apps Nixup installed are uninstalled** (their data is kept). What stays: your config, your
 backups, and apps you installed yourself.
 
 ## License
 
-[GPL-3.0](LICENSE). Seraph includes Termux's terminal code (Apache 2.0) and Nix-on-Droid's terminal options
+[GPL-3.0](LICENSE). Nixup includes Termux's terminal code (Apache 2.0) and Nix-on-Droid's terminal options
 (MIT), ships Nix (LGPL 2.1) and uses Aurora OSS's gplayapi (GPL-3.0) for Google Play; see [NOTICE](NOTICE).

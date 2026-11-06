@@ -1,4 +1,4 @@
-# A window with Google's sign-in page, for seraph-play-login, as the Seraph app's sign-in screen is on the phone: the
+# A window with Google's sign-in page, for nixup-play-login, as the Nixup app's sign-in screen is on the phone: the
 # page is this window's own, so the cookie Google sets once the account signs in (oauth_token, a token that lasts
 # minutes) can be read here, with no copying from a browser's developer tools. Prints the account's email address
 # and that token, one a line, and ends; ends with status 1 when the window is closed first. Nothing is kept: the
@@ -24,7 +24,7 @@ profile.setHttpUserAgent(AGENT)
 page = QWebEnginePage(profile)
 view = QWebEngineView()
 view.setPage(page)
-view.setWindowTitle("Sign in to Google Play (seraph-play-login)")
+view.setWindowTitle("Sign in to Google Play (nixup-play-login)")
 view.resize(480, 820)
 found = {}
 

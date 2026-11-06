@@ -1,4 +1,4 @@
-# What seraph-rebuild asks of the phone when a PC builds its config, as nixos-rebuild
+# What nixup-rebuild asks of the phone when a PC builds its config, as nixos-rebuild
 # --target-host does for NixOS: first the indexes the config's package names come from,
 # then the profile built there, applied as a build on the phone applies its own, with the
 # secrets sent along. What the PC sends is in $DATA/incoming, which root alone can read,
@@ -12,9 +12,10 @@
 #                           nothing; update: the releases asked for again too);
 #                           incoming/source says what it was built from, incoming/built-on
 #                           on which machine, and incoming/flake.lock is the flake's lock,
-#                           all three for the generation; with --specialisation <name>, the
-#                           build's specialisation of that name instead of the config itself
-#                           (see build.sh)
+#                           all three for the generation; incoming/paths.nar.gz (or
+#                           paths.nar) is what it sent of Nix's store; with --specialisation
+#                           <name>, the build's specialisation of that name instead of the
+#                           config itself (see build.sh)
 MODDIR=${0%/*}
 SPECIALISATION= rest=
 while [ $# -gt 0 ]; do
@@ -59,8 +60,11 @@ else event build start "Applying a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURC
 log "== Built on ${GEN_BUILT_ON:-a PC}: $GEN_SOURCE"
 log "Profile: $(cat "$IN/profile.json")"
 SECRETS_IN=$IN/secrets
-# The derivations of the files the config makes, which this phone builds (common.sh).
-import_paths "$IN/paths.nar" || fail "what the PC sent of Nix's store could not be taken in (Nix says why above); nothing was changed"
+# The derivations of the files the config makes, which this phone builds, and the config's
+# nixpkgs when the phone had not got it (common.sh); compressed by a newer nixup-rebuild.
+for nar in "$IN/paths.nar.gz" "$IN/paths.nar"; do
+  import_paths "$nar" || fail "what the PC sent of Nix's store could not be taken in (Nix says why above); nothing was changed"
+done
 # Its own (see build.sh), until switch_to makes it the phone's.
 NEW=$PROFILE.new-$$
 at_exit 'rm -f "$NEW"'

@@ -4,10 +4,10 @@
 # cache.nixos.org (nothing is built on it) and runs them where /nix exists: in its services' view
 # (nix/units.nix).
 #
-# nixpkgs itself comes from a flake's input (seraph's own, or the config's: inputs.seraph.inputs
+# nixpkgs itself comes from a flake's input (nixup's own, or the config's: inputs.nixup.inputs
 # .nixpkgs.follows = "nixpkgs";), or, for a configuration.nix alone, from the copy of nixos-unstable
 # the phone keeps, as a NixOS channel. A config that uses no Nix package never needs it.
-{ config, lib, _seraph, ... }:
+{ config, lib, _nixup, ... }:
 let
   inherit (lib) mkOption types;
   cfg = config.nixpkgs;
@@ -18,7 +18,7 @@ let
     if prev ? ${name}
     then throw "android.repos.${name}: nixpkgs has a package named ${name} (pkgs.${name}), which the repository would hide: name it otherwise."
     else tree
-  ) _seraph.repoTrees;
+  ) _nixup.repoTrees;
 
   overlayType = lib.mkOptionType {
     name = "nixpkgs-overlay";
@@ -49,7 +49,7 @@ in
     hostPlatform = mkOption {
       type = types.str;
       default = "aarch64-linux";
-      description = "The phone's processor, as NixOS's nixpkgs.hostPlatform: Seraph runs on aarch64-linux.";
+      description = "The phone's processor, as NixOS's nixpkgs.hostPlatform: Nixup runs on aarch64-linux.";
     };
   };
 
@@ -57,10 +57,10 @@ in
     # nixpkgs' pkgs.formats, as modules use it, writes YAML, JSON and TOML without Python (nix/formats.nix); the
     # packages are nixpkgs' own, so cache.nixos.org has them.
     _module.args.pkgs =
-      if _seraph.nixpkgs == null then _seraph.repoTrees
+      if _nixup.nixpkgs == null then _nixup.repoTrees
       else
         let
-          pkgs = import _seraph.nixpkgs {
+          pkgs = import _nixup.nixpkgs {
             system = cfg.hostPlatform;
             inherit (cfg) config;
             overlays = [ repos ] ++ cfg.overlays;
@@ -71,7 +71,7 @@ in
     assertions = [
       {
         assertion = cfg.hostPlatform == "aarch64-linux";
-        message = "nixpkgs.hostPlatform: Seraph runs on 64-bit ARM phones (aarch64-linux), not ${cfg.hostPlatform}.";
+        message = "nixpkgs.hostPlatform: Nixup runs on 64-bit ARM phones (aarch64-linux), not ${cfg.hostPlatform}.";
       }
     ];
   };

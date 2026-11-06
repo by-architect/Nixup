@@ -10,7 +10,7 @@
 #
 # snapclient plays a server's stream on the phone: speaker, headphones or Bluetooth, as any app's
 # music, with Android's volume. Android has no ALSA, PulseAudio or PipeWire for it to play into, so
-# it writes the sound into a pipe (its "file" player), which Seraph's engine plays with Android's
+# it writes the sound into a pipe (its "file" player), which Nixup's engine plays with Android's
 # audio (AudioTrack); the time Android's audio takes is measured at each start and given to it as
 # its latency, so it plays in time with the other rooms.
 { config, lib, pkgs, ... }:
@@ -227,9 +227,9 @@ in
         environment.HOME = "/var/lib/snapserver";
         # Its config, written at each start: the phone builds no files (NixOS's is /etc/snapserver.conf).
         preStart = ''
-          cat > ${configFile} << 'SERAPH_SNAPSERVER_CONF'
+          cat > ${configFile} << 'NIXUP_SNAPSERVER_CONF'
           ${configText}
-          SERAPH_SNAPSERVER_CONF
+          NIXUP_SNAPSERVER_CONF
         '';
         serviceConfig = {
           ExecStart = "${lib.getExe' server.package "snapserver"} --config=${configFile}";
@@ -247,15 +247,15 @@ in
         wantedBy = [ "multi-user.target" ];
         after = [ "tailscaled.service" "snapserver.service" ];
         environment.HOME = "/var/lib/snapclient";
-        # Android's audio (the engine's audio-out, from Seraph's module) plays what snapclient writes
+        # Android's audio (the engine's audio-out, from Nixup's module) plays what snapclient writes
         # into a pipe; the pipe is opened both ways, so neither side waits for the other to open it.
         # When one of them ends, so does the other, and the unit starts them again.
         script = ''
           pipe=/run/snapclient/sound latency=/run/snapclient/latency
-          module=''${SERAPH_MODULE:-/data/adb/modules/seraph}
+          module=''${NIXUP_MODULE:-/data/adb/modules/nixup}
           rm -f "$pipe" "$latency"
           mkfifo "$pipe"
-          CLASSPATH="$module/app.apk" /system/bin/app_process /system/bin dev.seraph.manager.engine.Main \
+          CLASSPATH="$module/app.apk" /system/bin/app_process /system/bin dev.nixup.manager.engine.Main \
             audio-out --format=${client.sampleFormat} --latency-file="$latency" <> "$pipe" &
           player=$!
           client=

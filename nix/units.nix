@@ -1,15 +1,15 @@
-# Services as NixOS writes them, systemd.services.<name>, which Seraph's engine runs on the phone the
+# Services as NixOS writes them, systemd.services.<name>, which Nixup's engine runs on the phone the
 # way systemd runs them on NixOS: each unit's commands (serviceConfig.ExecStart, or script), as its
 # user (serviceConfig.User, else root), with its environment and PATH; its folders in /var/lib,
 # /var/cache, /var/log, /run and /etc, kept across restarts and builds; started again when it stops
 # (Restart); in order (after, before, wants, requires); and with each build and at boot when it is
 # wantedBy multi-user.target (or a target that is). Its programs are Nix packages
 # (${pkgs.foo}/bin/foo), which the phone fetches from cache.nixos.org (and the small files a config
-# makes, which it builds), run in a view of the phone where /nix exists, as are Seraph's own
+# makes, which it builds), run in a view of the phone where /nix exists, as are Nixup's own
 # services (services.tailscale, services.syncthing) and NixOS's own service modules (nix/nixos.nix).
 #
-# In that view the phone is as it is (/system, /data, /storage, /dev, ...), with /nix (Seraph's
-# store), Seraph's /etc (the network's DNS servers, Android's certificates, environment.etc),
+# In that view the phone is as it is (/system, /data, /storage, /dev, ...), with /nix (Nixup's
+# store), Nixup's /etc (the network's DNS servers, Android's certificates, environment.etc),
 # /var and /run (the units' state, which stays) and a /tmp of the unit's own. Android's commands are
 # on PATH too.
 #
@@ -56,7 +56,9 @@
 # Sockets (systemd.sockets: listenStreams, listenDatagrams, socketConfig.ListenStream and
 # ListenDatagram; TCP, UDP and unix sockets) the phone opens as root and hands to their service as
 # systemd does (as fds 3 and on, with LISTEN_FDS and LISTEN_PID, through systemfd), so a port below
-# 1024 is a service user's too. One nothing else wants starts at its first connection, as on NixOS
+# 1024 is a service user's too, each with its name (FileDescriptorName, else its socket unit's, as
+# LISTEN_FDNAMES), and a unix one's folder made with DirectoryMode when it is not there. One
+# nothing else wants starts at its first connection, as on NixOS
 # (the phone sees one waiting in a TCP or UDP socket's queue, every half second; a unix socket's it
 # cannot, so a service with one starts at once). Accept = true gives each connection to a run of
 # the socket's template service (foo.socket's foo@), as its input and output (StandardInput =
@@ -66,9 +68,13 @@
 # those of systemd.services."foo@bar" (its settings over the template's). Path units
 # (systemd.paths) start their unit while a path is there or when it changes (Paths.kt: the phone
 # looks every 2 seconds). Units in packages (systemd.packages: their own unit files) are read as
-# NixOS reads them, under what the config says of each. Users' units (systemd.user) run for each
-# normal user, as each lingers on NixOS: as that user, from the build and the phone's start,
-# named user-<user>-<unit>.
+# NixOS reads them, under what the config says of each. Users' units (systemd.user, and a user's
+# own: Home Manager's, see nix/home-manager.nix) run for each normal user, as each lingers on
+# NixOS: as that user, from the build and the phone's start, named user-<user>-<unit>, as its
+# systemd --user runs them: %t is its /run/user/<uid>, %S, %C, %E and %L are in its home
+# (~/.local/state, ~/.cache, ~/.config, ~/.local/state/log), and so are its StateDirectory,
+# CacheDirectory, LogsDirectory and ConfigurationDirectory (its RuntimeDirectory in
+# /run/user/<uid>); its sockets and their folders are its own.
 #
 # unitConfig.RequiresMountsFor: the phone's storage a unit needs (an SD card's folder, the shared
 # storage), which Android mounts only once the phone is first unlocked after it starts, or which may
@@ -419,9 +425,34 @@ let
         type = types.bool;
         default = true;
         description = ''
-          Seraph's own (NixOS has no such thing): whether the app tells, in a notification, when it
+          Nixup's own (NixOS has no such thing): whether the app tells, in a notification, when it
           stops by itself, fails, or runs again after a failure (the Logs tab has it either way).
           Off for what is about the phone's security (sshd), so its state shows on no screen.
+        '';
+      };
+      userManager = mkOption {
+        type = types.bool;
+        default = false;
+        internal = true;
+        description = ''
+          Whether it is a user's own unit (systemd.user, Home Manager's), run as that user's systemd --user runs it:
+          its specifiers (%t, %S, %C, %E, %L) and folders (StateDirectory, RuntimeDirectory, ...) are the user's
+          (/run/user/<uid>, ~/.local/state, ~/.cache, ~/.config), and its sockets are the user's.
+        '';
+      };
+      origin = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        internal = true;
+        description = "Where the config gives it, when not here (home-manager.users.<name>.systemd.user.services.<unit>): the build's messages name that.";
+      };
+      cleanup = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        internal = true;
+        description = ''
+          Nixup's own: command lines (as ExecStop's) run as its user once it leaves the config, as its last step. Home
+          Manager's unit of a user (nix/home-manager.nix) takes the user's links out of its home with it.
         '';
       };
       serviceConfig = mkOption {
@@ -508,6 +539,13 @@ let
     default = [ ];
     description = "As on NixOS.";
   });
+  # Where the config gives a socket, timer or path unit, when not here (see the units' origin).
+  originOption = mkOption {
+    type = types.nullOr types.str;
+    default = null;
+    internal = true;
+    description = "Where the config gives it, when not here (home-manager.users.<name>.systemd.user.timers.<unit>): the build's messages name that.";
+  };
 
   # A socket: the phone opens it and hands it to its service (see the top).
   socketModule = { ... }: {
@@ -546,6 +584,7 @@ let
         default = { };
         description = "Its [Unit] section's other keys (taken).";
       };
+      origin = originOption;
     };
   };
 
@@ -577,6 +616,7 @@ let
         default = { };
         description = "Its [Unit] section's other keys (taken).";
       };
+      origin = originOption;
     };
   };
   # A path unit: it starts its unit when a path is there, or changes (see the top).
@@ -607,6 +647,7 @@ let
         default = { };
         description = "Its [Unit] section's other keys (taken).";
       };
+      origin = originOption;
     };
   };
   pathKinds = [ "PathExists" "PathExistsGlob" "DirectoryNotEmpty" "PathChanged" "PathModified" ];
@@ -618,11 +659,11 @@ let
   };
   timerTaken = [ "Persistent" "Unit" "AccuracySec" "FixedRandomDelay" "WakeSystem" "RemainAfterElapse" "OnClockChange"
     "OnTimezoneChange" "RandomizedOffsetSec" "DeferReactivation" ];
-  socketSupported = [ "ListenStream" "ListenDatagram" "Accept" "Service" ];
+  socketSupported = [ "ListenStream" "ListenDatagram" "Accept" "Service" "FileDescriptorName" "DirectoryMode" ];
   socketTaken = [ "Backlog" "BindIPv6Only" "FreeBind" "ReusePort" "NoDelay" "KeepAlive" "KeepAliveTimeSec"
-    "KeepAliveIntervalSec" "KeepAliveProbes" "ReceiveBuffer" "SendBuffer" "RemoveOnStop" "SocketMode" "DirectoryMode"
+    "KeepAliveIntervalSec" "KeepAliveProbes" "ReceiveBuffer" "SendBuffer" "RemoveOnStop" "SocketMode"
     "SocketUser" "SocketGroup" "PassCredentials" "PassSecurity" "PassPacketInfo" "MaxConnections" "MaxConnectionsPerSource"
-    "Timestamping" "Transparent" "Broadcast" "IPTOS" "IPTTL" "Mark" "PipeSize" "Priority" "Symlinks" "FileDescriptorName"
+    "Timestamping" "Transparent" "Broadcast" "IPTOS" "IPTTL" "Mark" "PipeSize" "Priority" "Symlinks"
     "TriggerLimitIntervalSec" "TriggerLimitBurst" "PollLimitIntervalSec" "PollLimitBurst" "DeferTrigger" ];
 
   # A unit's name as the others give it: foo.service is foo.
@@ -730,14 +771,15 @@ let
   sockets = lib.filterAttrs (_: socket: socket.enable) config.systemd.sockets;
   socketWanted = socket: lib.any (target: lib.elem target reached) (socket.wantedBy ++ socket.requiredBy);
   serviceOfSocket = name: socket: nameOf (toString (socket.socketConfig.Service or "${name}.service"));
-  # A Listen* value as systemfd takes it: "8080" (every address), "127.0.0.1:8080", "[::1]:8080", "/run/foo.sock";
-  # null for what it cannot open (an abstract socket, a unix datagram socket).
+  # A Listen* value as systemfd takes it: "8080" (every address), "127.0.0.1:8080", "[::1]:8080", "/run/foo.sock" (or
+  # "%t/foo.sock", whose specifiers the engine fills in); null for what it cannot open (an abstract socket, a unix
+  # datagram socket).
   listenSpec = kind: address:
     let
       a = toString address;
       net = if kind == "stream" then "tcp" else "udp";
     in
-    if lib.hasPrefix "/" a then (if kind == "stream" then "unix::${a}" else null)
+    if lib.hasPrefix "/" a || builtins.match "%[A-Za-z].*" a != null then (if kind == "stream" then "unix::${a}" else null)
     else if lib.hasPrefix "@" a then null
     else if builtins.match "[0-9]+" a != null then "${net}::[::]:${a}"
     else "${net}::${a}";
@@ -765,6 +807,13 @@ let
   };
   socketsOf = name: lib.concatLists (lib.mapAttrsToList (socketName: socket:
     lib.optionals (serviceOfSocket socketName socket == name) (lib.filter (spec: spec != null) (socketSpecs socket))) wantedSockets);
+  # Each of those sockets' name, as systemd hands them over (LISTEN_FDNAMES): its FileDescriptorName, else its socket
+  # unit's name; and the mode of the folder a unix one's path makes (DirectoryMode), in socketsOf's order.
+  socketFieldsOf = name: lib.concatLists (lib.mapAttrsToList (socketName: socket:
+    lib.optionals (serviceOfSocket socketName socket == name) (map (_: {
+      name = toString (lib.last ([ "${socketName}.socket" ] ++ listOf (socket.socketConfig.FileDescriptorName or [ ])));
+      directoryMode = toString (lib.last ([ "0755" ] ++ listOf (socket.socketConfig.DirectoryMode or [ ])));
+    }) (lib.filter (spec: spec != null) (socketSpecs socket)))) wantedSockets);
   socketServices = lib.unique (lib.mapAttrsToList serviceOfSocket wantedSockets);
 
   # Timers (systemd.timers, with those a unit's startAt makes, below): the engine starts their unit at their
@@ -914,7 +963,12 @@ let
     // lib.optionalAttrs (binds sc != [ ]) { binds = binds sc; }
     // lib.optionalAttrs (creds != [ ]) { credentials = creds; }
     // lib.optionalAttrs (unitChecks != [ ]) { checks = unitChecks; }
-    // lib.optionalAttrs (unitSockets != [ ]) { sockets = unitSockets; systemfd = "${pkgs.systemfd}/bin/systemfd"; }
+    // lib.optionalAttrs (unitSockets != [ ]) {
+      sockets = unitSockets;
+      socketNames = map (socket: socket.name) (socketFieldsOf name);
+      socketDirectoryModes = map (socket: socket.directoryMode) (socketFieldsOf name);
+      systemfd = "${pkgs.systemfd}/bin/systemfd";
+    }
     // lib.optionalAttrs (socketInput sc) { stdinSocket = true; }
     // lib.optionalAttrs (storageOf user unit) { storage = true; }
     # Started at its sockets' first connection, as on NixOS, when nothing else wants it.
@@ -922,7 +976,11 @@ let
     // lib.optionalAttrs (lib.elem type [ "notify" "notify-reload" ]) { notify = true; socat = "${pkgs.socat}/bin/socat"; }
     // lib.optionalAttrs (!lib.elem watchdog [ "0" "" "infinity" ]) { inherit watchdog; }
     // lib.optionalAttrs (lib.any (entry: entry.encrypted or false) creds) { credsTool = "${pkgs.systemd}/bin/systemd-creds"; }
-    // lib.optionalAttrs (!unit.restartIfChanged && !unit.reloadIfChanged) { restartIfChanged = false; };
+    // lib.optionalAttrs (!unit.restartIfChanged && !unit.reloadIfChanged) { restartIfChanged = false; }
+    # A user's own unit (systemd.user, Home Manager's): its specifiers, folders and sockets are the user's (Units.kt).
+    // lib.optionalAttrs unit.userManager { userManager = true; }
+    # What it runs once it leaves the config (Home Manager's unit: the user's links go).
+    // lib.optionalAttrs (unit.cleanup != [ ]) { cleanup = commands unit.cleanup; };
 
   profile = lib.mapAttrs toProfile units // lib.mapAttrs (name: unit: toProfile name unit // acceptFields name) acceptUnits;
 
@@ -979,10 +1037,13 @@ let
           (map (dropin: builtins.readFile "${folder}/${file}.d/${dropin}")
             (lib.attrNames (lib.filterAttrs (dropin: _: lib.hasSuffix ".conf" dropin) (builtins.readDir "${folder}/${file}.d"))));
       }) (builtins.readDir folder)))) [ "lib/systemd/system" "etc/systemd/system" ];
-  fromUnitFile = kind: texts:
+  # A unit's sections, as a unit file has them ({ Unit = { After = [ "a.service" ]; ... }; Service = { ... }; }, each key's
+  # values in order: parseUnit's, or Home Manager's units, below), as NixOS's options: [Unit]'s own keys as after, wants,
+  # ..., the rest of each section as unitConfig, serviceConfig, ...; with install its [Install] too, as wantedBy and
+  # requiredBy (NixOS leaves a package's [Install]: wantedBy in the config starts one). wrap takes each key's value:
+  # lib.mkDefault for a package's units, under what the config says of them, as NixOS's drop-ins are.
+  fromSections = { kind, sections, install ? false, wrap ? lib.id }:
     let
-      sections = lib.foldl' (all: one: lib.zipAttrsWith (_: values: lib.zipAttrsWith (_: lib.concatLists) values) [ all one ]) { }
-        (map parseUnit texts);
       unit = sections.Unit or { };
       # Keys that add up (ExecStartPre=, Environment=, After=, ...), as systemd takes them; another's last value wins,
       # as a drop-in's does.
@@ -991,14 +1052,18 @@ let
         "Before" "Wants" "Requires" "Documentation" "StateDirectory" "CacheDirectory" "LogsDirectory" "RuntimeDirectory"
         "ConfigurationDirectory" "UnsetEnvironment" "RequiresMountsFor" ];
       value = key: values: if adds key then (if builtins.length values == 1 then builtins.head values else values) else lib.last values;
-      keys = section: lib.mapAttrs (key: values: lib.mkDefault (value key values)) (sections.${section} or { });
-      listed = key: lib.filter (word: word != "") (lib.concatMap (lib.splitString " ") (unit.${key} or [ ]));
-      lists = names: lib.genAttrs names (name: listed (lib.toUpper (lib.substring 0 1 name) + lib.substring 1 (-1) name));
+      keys = section: lib.mapAttrs (key: values: wrap (value key values)) (sections.${section} or { });
+      listed = section: key: lib.filter (word: word != "") (lib.concatMap (lib.splitString " ") (section.${key} or [ ]));
+      lists = names: lib.genAttrs names (name: listed unit (lib.toUpper (lib.substring 0 1 name) + lib.substring 1 (-1) name));
       common = [ "after" "before" "wants" "requires" "bindsTo" "partOf" "conflicts" "documentation" ];
       own = [ "Description" "After" "Before" "Wants" "Requires" "BindsTo" "PartOf" "Conflicts" "Documentation" "Requisite" "Upholds" ];
     in
-    { description = lib.mkDefault (lib.last ([ "" ] ++ unit.Description or [ ])); unitConfig = builtins.removeAttrs (keys "Unit") own; }
+    { description = wrap (lib.last ([ "" ] ++ unit.Description or [ ])); unitConfig = builtins.removeAttrs (keys "Unit") own; }
     // lists common
+    // lib.optionalAttrs install {
+      wantedBy = listed (sections.Install or { }) "WantedBy";
+      requiredBy = listed (sections.Install or { }) "RequiredBy";
+    }
     // {
       service = lists [ "requisite" "upholds" ] // { serviceConfig = keys "Service"; };
       socket = { socketConfig = keys "Socket"; };
@@ -1006,38 +1071,89 @@ let
       path = { pathConfig = keys "Path"; };
       target = lists [ "requisite" "upholds" ];
     }.${kind};
+  fromUnitFile = kind: texts: fromSections {
+    inherit kind;
+    sections = lib.foldl' (all: one: lib.zipAttrsWith (_: values: lib.zipAttrsWith (_: lib.concatLists) values) [ all one ]) { }
+      (map parseUnit texts);
+    wrap = lib.mkDefault;
+  };
   packagedUnits = lib.concatMap unitFiles config.systemd.packages;
 
-  # Units of users' own systemd (systemd.user): the phone has no session of a user's, so each normal user's run as it
-  # lingers on NixOS (users.users.<name>.linger): from the build and the phone's start, as that user, named
-  # user-<user>-<unit>, with its XDG_RUNTIME_DIR (/run/user/<uid>). default.target is one the phone reaches.
+  # Users' own units, as each user's systemd --user has them: systemd.user's, each normal user's (the phone has no
+  # session of a user's, so they run as each lingers on NixOS: from the build and the phone's start), and those
+  # systemd.user.byUser gives one user (Home Manager's: nix/home-manager.nix), which win over one of systemd.user's of
+  # the same name, as ~/.config/systemd/user's win over /etc/systemd/user's. Each runs as its user, named
+  # user-<user>-<unit>, as its systemd --user would run it (userManager): with its XDG_RUNTIME_DIR (/run/user/<uid>),
+  # the user's specifiers and folders (%t, %S, StateDirectory in ~/.local/state, ...), and the user's packages
+  # (/etc/profiles/per-user/<user>) and the system's on its PATH. default.target is one the phone reaches; a desktop
+  # session's (graphical-session.target) is not, and what only that starts is not started.
   normalUsers = lib.attrNames (lib.filterAttrs (_: user: user.isNormalUser) config.users.users);
   userUnit = user: name: "user-${user}-${name}";
-  ownUserUnits = lib.concatLists (lib.mapAttrsToList (_: units': lib.attrNames units') {
-    inherit (config.systemd.user) services sockets timers paths targets;
-  });
+  userKinds = { services = "service"; sockets = "socket"; timers = "timer"; paths = "path"; targets = "target"; };
+  # A value of a section as Home Manager gives it (text, a number, true or false, a path, or a list of them), as a unit
+  # file's lines have it.
+  sectionWords = value: map (one: if builtins.isBool one then (if one then "true" else "false") else toString one)
+    (lib.filter (one: one != null) (lib.toList value));
+  # The units systemd.user.byUser gives a user, of one kind (services, ...), as NixOS's options; its services after (and
+  # wanting) what byUser says (the user's activation), with the variables its systemd gives them. Home Manager's
+  # restart triggers (X-Restart-Triggers, X-Reload-Triggers: a changed one starts the unit again) are the unit's
+  # restartTriggers, and X-SwitchMethod = keep-old is restartIfChanged = false, as sd-switch takes them.
+  givenUnits = user: attr: lib.mapAttrs (name: sections:
+    let
+      given = config.systemd.user.byUser.${user};
+      # (A key left null or [ ] is not in the unit, as Home Manager leaves it out of its unit file.)
+      clean = lib.mapAttrs (_: section: lib.filterAttrs (_: words: words != [ ]) (lib.mapAttrs (_: sectionWords) section))
+        (lib.filterAttrs (section: value: builtins.isAttrs value && !lib.hasPrefix "_" section) sections);
+      unit = clean.Unit or { };
+      converted = fromSections { kind = userKinds.${attr}; sections = clean; install = true; };
+    in
+    converted
+    // lib.optionalAttrs (attr != "targets") { origin = "${given.origin}.${attr}.${name}"; }
+    // lib.optionalAttrs (attr == "services") ({
+      restartTriggers = unit."X-Restart-Triggers" or [ ] ++ unit."X-Reload-Triggers" or [ ];
+      environment = given.environment;
+      after = converted.after ++ given.after;
+      wants = converted.wants ++ given.after;
+    } // lib.optionalAttrs (lib.elem "keep-old" (unit."X-SwitchMethod" or [ ])) { restartIfChanged = false; })
+  ) config.systemd.user.byUser.${user}.${attr};
+  usersWithUnits = lib.unique (normalUsers ++ lib.attrNames config.systemd.user.byUser);
+  userUnits = lib.genAttrs usersWithUnits (user: lib.mapAttrs (attr: _:
+    let given = lib.optionalAttrs (config.systemd.user.byUser ? ${user}) (givenUnits user attr); in
+    lib.optionalAttrs (lib.elem user normalUsers) (removeAttrs config.systemd.user.${attr} (lib.attrNames given)) // given
+  ) userKinds);
+  # Each user's own units' names: a unit names another of them by its name alone, which becomes the user's.
+  ownUserUnits = lib.mapAttrs (_: units': lib.concatLists (lib.mapAttrsToList (_: lib.attrNames) units')) userUnits;
   renameFor = user: entry:
     let
       suffix = builtins.match ".*(\\.(service|socket|timer|path|target))" entry;
       bare = if suffix == null then entry else lib.removeSuffix (builtins.head suffix) entry;
-    in if lib.elem bare ownUserUnits then userUnit user bare + (if suffix == null then "" else builtins.head suffix) else entry;
+    in if lib.elem bare ownUserUnits.${user} then userUnit user bare + (if suffix == null then "" else builtins.head suffix) else entry;
   forUser = user: unit:
     let rename = map (renameFor user); in
     builtins.removeAttrs unit [ "_module" ]
     // lib.mapAttrs (_: rename) (lib.filterAttrs (key: value: builtins.isList value && lib.elem key [ "wantedBy" "requiredBy"
       "upheldBy" "after" "before" "wants" "upholds" "requires" "bindsTo" "requisite" "partOf" "conflicts" ]) unit);
   userService = user: unit: forUser user unit // {
-    serviceConfig = unit.serviceConfig // {
+    userManager = true;
+    serviceConfig = (unit.serviceConfig or { }) // {
       User = user;
       ExecStartPre = [ "+${pkgs.coreutils}/bin/install -d -m 0700 -o %U -g %G /run/user/%U" ] ++ listOf (unit.serviceConfig.ExecStartPre or [ ]);
     };
-    environment = { XDG_RUNTIME_DIR = "/run/user/%U"; } // unit.environment;
+    environment = { XDG_RUNTIME_DIR = "/run/user/%U"; } // (unit.environment or { });
+    path = (unit.path or [ ]) ++ [ "/etc/profiles/per-user/${user}" config.system.path ];
   };
-  forUsers = kind: make: lib.mkMerge (lib.concatMap (user: [ (lib.mapAttrs' (name: unit: lib.nameValuePair (userUnit user name) (make user name unit))
-    config.systemd.user.${kind}) ]) normalUsers);
+  forUsers = attr: make: lib.mkMerge (map (user: lib.mapAttrs' (name: unit: lib.nameValuePair (userUnit user name)
+    (make user name unit // lib.optionalAttrs (attr != "targets") {
+      origin = if unit.origin or null != null then unit.origin else "systemd.user.${attr}.${name}";
+    })
+  ) userUnits.${user}.${attr}) usersWithUnits);
+  # A socket's, timer's or path unit's own unit (Service, Unit) becomes the user's too; a user's socket is handed over
+  # by its own name (LISTEN_FDNAMES), as its systemd --user names it.
   withUnit = key: user: name: unit: forUser user unit // lib.optionalAttrs (unit ? ${key}) {
-    ${key} = unit.${key} // { ${if key == "socketConfig" then "Service" else "Unit"} = renameFor user (toString
-      (unit.${key}.${if key == "socketConfig" then "Service" else "Unit"} or "${name}.service")); };
+    ${key} = lib.optionalAttrs (key == "socketConfig") { FileDescriptorName = "${name}.socket"; } // unit.${key} // {
+      ${if key == "socketConfig" then "Service" else "Unit"} = renameFor user (toString
+        (unit.${key}.${if key == "socketConfig" then "Service" else "Unit"} or "${name}.service"));
+    };
   };
 
   problems = lib.concatLists (lib.mapAttrsToList (name: unit:
@@ -1051,7 +1167,7 @@ let
       badCodes = badExitCodes (sc.SuccessExitStatus or [ ]) ++ badExitCodes (sc.RestartForceExitStatus or [ ])
         ++ badExitCodes (sc.RestartPreventExitStatus or [ ]);
       relativeBinds = lib.filter (b: !lib.hasPrefix "/" b.from || !lib.hasPrefix "/" b.to) (binds sc);
-      unit' = "systemd.services.${name}";
+      unit' = if unit.origin != null then unit.origin else "systemd.services.${name}";
       them = list: "${lib.concatStringsSep ", " list} ${if builtins.length list == 1 then "is" else "are"}";
     in
     lib.optional (builtins.match "[A-Za-z0-9_.:@\\\\-]+" name == null) "${unit'}: a unit's name is letters, digits and _ . : @ \\ -."
@@ -1075,7 +1191,7 @@ let
       tc = timer.timerConfig;
       unit = nameOf (toString (tc.Unit or "${name}.service"));
       other = lib.filter (key: !(timerKeys ? ${key}) && !lib.elem key timerTaken) (lib.attrNames tc);
-      timer' = "systemd.timers.${name}";
+      timer' = if timer.origin != null then timer.origin else "systemd.timers.${name}";
     in
     # (One there but turned off leaves the timer off.)
     lib.optional (!(hasUnit unit)) "${timer'}: its unit ${unit} is not in systemd.services."
@@ -1089,7 +1205,7 @@ let
       service = serviceOfSocket name socket;
       other = lib.filter (key: !lib.elem key socketSupported && !lib.elem key socketTaken) (lib.attrNames sc);
       unopened = lib.filter (spec: spec == null) (socketSpecs socket);
-      socket' = "systemd.sockets.${name}";
+      socket' = if socket.origin != null then socket.origin else "systemd.sockets.${name}";
     in
     lib.optional (!acceptOf socket && !(hasUnit service)) "${socket'}: its service ${service} is not in systemd.services."
     ++ lib.optional (acceptOf socket && !(templates ? "${name}@")) "${socket'}: with Accept = true its connections go to the template ${name}@, which is not in systemd.services."
@@ -1104,7 +1220,7 @@ let
       pc = path.pathConfig;
       unit = nameOf (toString (pc.Unit or "${name}.service"));
       other = lib.filter (key: !lib.elem key (pathKinds ++ pathTaken ++ [ "Unit" "MakeDirectory" "DirectoryMode" ])) (lib.attrNames pc);
-      path' = "systemd.paths.${name}";
+      path' = if path.origin != null then path.origin else "systemd.paths.${name}";
     in
     lib.optional (!(hasUnit unit)) "${path'}: its unit ${unit} is not in systemd.services."
     ++ lib.optional (lib.all (kind: !(pc ? ${kind})) pathKinds) "${path'}.pathConfig: give it a path (PathExists, PathChanged, ...)."
@@ -1189,6 +1305,37 @@ in
       tmpfiles = mkOption { type = types.lazyAttrsOf types.anything; default = { }; description = "As on NixOS: users' tmpfiles (taken)."; };
       extraConfig = mkOption { type = types.lines; default = ""; description = "As on NixOS: the user manager's settings (taken)."; };
       packages = mkOption { type = types.listOf types.package; default = [ ]; description = "As on NixOS: packages of users' units (taken: give the units in systemd.user.services)."; };
+      byUser = mkOption {
+        type = types.attrsOf (types.submodule {
+          options = lib.genAttrs (lib.attrNames userKinds) (attr: mkOption {
+            type = types.attrsOf (types.attrsOf types.anything);
+            default = { };
+            description = "The user's ${attr}, by name, as unit files' sections ({ Unit = { ... }; ... }).";
+          }) // {
+            environment = mkOption {
+              type = types.attrsOf types.str;
+              default = { };
+              description = "Variables each of the user's services gets, as its systemd --user gives them (environment.d).";
+            };
+            after = mkOption {
+              type = types.listOf types.str;
+              default = [ ];
+              description = "Units each of the user's services wants and starts after (its Home Manager's activation).";
+            };
+            origin = mkOption {
+              type = types.str;
+              description = "Where the config gives these units, for the build's messages (home-manager.users.<name>.systemd.user).";
+            };
+          };
+        });
+        default = { };
+        internal = true;
+        description = ''
+          Units of one user's own systemd, as unit files have them ({ Unit = { ... }; Service = { ... }; Install =
+          { ... }; }), as Home Manager makes them (nix/home-manager.nix): run as that user's, as its systemd --user
+          would, over one of systemd.user of the same name (see nix/units.nix).
+        '';
+      };
     };
 
     globalEnvironment = mkOption {
@@ -1229,5 +1376,12 @@ in
     system.build.paths = pathProfile;
     system.build.unitStorePaths = lib.unique (storePathsIn (builtins.toJSON profile));
     assertions = map (message: { assertion = false; inherit message; }) problems;
+    # A user's own unit that only a target the phone never reaches starts (a desktop session's: graphical-session.target)
+    # is there, and not started.
+    warnings = lib.concatLists (lib.mapAttrsToList (name: unit:
+      let by = lib.filter (lib.hasSuffix ".target") (unit.wantedBy ++ unit.requiredBy); in
+      lib.optional (unit.userManager && by != [ ] && !lib.any (target: lib.elem target reached) by)
+        "${if unit.origin != null then unit.origin else "systemd.services.${name}"}: not started, as what starts it (${lib.concatStringsSep ", " by}) is not on the phone (a desktop session's)."
+    ) plainUnits);
   };
 }

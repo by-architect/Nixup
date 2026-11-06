@@ -1,11 +1,11 @@
-Seraph
+Nixup
 Copyright (C) 2026 neo (github.com/by-architect)
 
-Seraph is free software: you can redistribute it and/or modify it under the terms of the GNU
+Nixup is free software: you can redistribute it and/or modify it under the terms of the GNU
 General Public License version 3, as published by the Free Software Foundation (see LICENSE). It
 comes with no warranty.
 
-Seraph contains, or its release zip carries, the following work of others, each under its own
+Nixup contains, or its release zip carries, the following work of others, each under its own
 license:
 
 - terminal-emulator/ and terminal-view/: Termux's terminal emulator and its view, copied from
@@ -34,5 +34,5 @@ license:
     (https://github.com/protocolbuffers/protobuf). BSD 3-Clause License:
     licenses/protobuf-BSD-3-Clause.txt.
 
-The Nix packages a config names (Tailscale, Syncthing, restic, ...) are not part of Seraph: the
+The Nix packages a config names (Tailscale, Syncthing, restic, ...) are not part of Nixup: the
 phone fetches them from cache.nixos.org, each under its own license.

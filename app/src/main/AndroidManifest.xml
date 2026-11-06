@@ -40,7 +40,7 @@
             </intent-filter>
         </activity>
 
-        <!-- The terminal: root's shell in Seraph's view, with the config's Nix packages. -->
+        <!-- The terminal: root's shell in Nixup's view, with the config's Nix packages. -->
         <activity
             android:name=".terminal.TerminalActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"

@@ -1,10 +1,10 @@
 # The config from a git repository (GitHub's, or any other's): cloned onto the phone, into
-# /data/adb/seraph/git/<repository>, with its flake.nix (or configuration.nix) as the config the
+# /data/adb/nixup/git/<repository>, with its flake.nix (or configuration.nix) as the config the
 # build reads, as /etc/nixos is a clone on many NixOS machines; then brought up to date from the
 # repository (pull: its new commits merged with what was changed here), or cloned again. build.sh
 # builds a flake there as Nix builds one in a git repository: the files git tracks, with their
 # changes, and its submodules when they were cloned too. Git is nixpkgs' (gitMinimal), fetched from cache.nixos.org into
-# Seraph's store the first time, and run where /nix exists (the services' view).
+# Nixup's store the first time, and run where /nix exists (the services' view).
 # Runs as root. Arguments: who started it (app, shell, ...), then what to do:
 #   clone <address> [--branch=<branch>] [--dir=<folder in it>] [--name=<configuration>] [--submodules]
 #                     clones it (and removes a clone made before), and makes its config the one the
@@ -14,7 +14,7 @@
 #   pull              merges the repository's new commits (local changes are put aside, then back)
 #   reclone           clones the same repository again, from scratch (local changes go)
 #   status [--json]   the clone: its address, branch, commit and local changes (--json: for the app)
-# A private repository's token is the one Nix takes for it: /data/adb/seraph/secrets/
+# A private repository's token is the one Nix takes for it: /data/adb/nixup/secrets/
 # nix-access-tokens, a line like github.com=ghp_…; git gets it for each command, never in a file.
 MODDIR=${0%/*}
 BY=${1:-manual}
@@ -24,7 +24,7 @@ MODE=${2:-status}
 
 CLONES=$DATA/git
 STATE=$CLONES/clone
-GITROOT=$DATA/nix/nix/var/nix/gcroots/seraph-git
+GITROOT=$DATA/nix/nix/var/nix/gcroots/nixup-git
 
 # What the clone is (key=value lines: url, branch, dir, name, submodules, path, pulled).
 value() { sed -n "s/^$1=//p" "$STATE" 2> /dev/null | head -n 1; }
@@ -45,13 +45,13 @@ address_of() {
   esac
 }
 
-# nixpkgs' git, in Seraph's store (a root of it, so it stays): GIT is its program.
+# nixpkgs' git, in Nixup's store (a root of it, so it stays): GIT is its program.
 git_package() {
   path=$(readlink "$GITROOT" 2> /dev/null)
   if [ -z "$path" ] || [ ! -x "$DATA/nix$path/bin/git" ]; then
     log "== Git (nixpkgs' gitMinimal, from cache.nixos.org; once)"
     channel || return 1
-    nixpkgs=$(readlink "$DATA/nix/nix/var/nix/gcroots/seraph-channel")
+    nixpkgs=$(readlink "$DATA/nix/nix/var/nix/gcroots/nixup-channel")
     path=$(nix_store build --no-link --print-out-paths --impure \
       --expr "(import $nixpkgs { config = { }; overlays = [ ]; }).gitMinimal") || return 1
     mkdir -p "${GITROOT%/*}"
@@ -66,7 +66,7 @@ git_package() {
 git_environment() {
   export HOME=$DATA/home GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/system/bin/false
   export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt
-  export GIT_AUTHOR_NAME=Seraph GIT_COMMITTER_NAME=Seraph GIT_AUTHOR_EMAIL=seraph@localhost GIT_COMMITTER_EMAIL=seraph@localhost
+  export GIT_AUTHOR_NAME=Nixup GIT_COMMITTER_NAME=Nixup GIT_AUTHOR_EMAIL=nixup@localhost GIT_COMMITTER_EMAIL=nixup@localhost
   n=0
   set_config() { export "GIT_CONFIG_KEY_$n=$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
   set_config url.https://github.com/.insteadOf git@github.com:
@@ -83,7 +83,7 @@ git_environment() {
   export GIT_CONFIG_COUNT=$n
 }
 
-# Runs git in the services' view (where /nix is), with Seraph's /etc (DNS, certificates).
+# Runs git in the services' view (where /nix is), with Nixup's /etc (DNS, certificates).
 git_run() {
   script=$DATA/tmp/git-$$.sh
   {
@@ -98,11 +98,11 @@ git_run() {
 }
 quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
-# Git and what it needs, ready: its package, Seraph's /etc and view, its settings.
+# Git and what it needs, ready: its package, Nixup's /etc and view, its settings.
 git_ready() {
   [ -n "$BUSYBOX" ] || { log "There is no busybox (Magisk's or KernelSU's) to run git with"; return 1; }
   nix_env
-  nix_etc > /dev/null || { log "Seraph's /etc could not be written (the network's DNS servers): is the phone online?"; return 1; }
+  nix_etc > /dev/null || { log "Nixup's /etc could not be written (the network's DNS servers): is the phone online?"; return 1; }
   git_package || { log "Git could not be fetched (Nix says why above)"; return 1; }
   git_environment
 }
@@ -176,9 +176,10 @@ case "$MODE" in
     git_ready || fail "git is not ready (see above); nothing was changed"
     before=$(git_run -C "$top" rev-parse HEAD)
     log "Pulling $url"
-    recurse=--recurse-submodules=no
-    submodules_of && recurse=--recurse-submodules
-    if ! git_run -C "$top" pull --no-rebase --autostash --no-edit "$recurse"; then
+    # Submodules are left to the update below, which fetches only the commits the merged branch
+    # names: a pull's own --recurse-submodules fetches those every branch's new commits name, and
+    # one no longer on the submodule's server (an old branch's) fails the whole pull.
+    if ! git_run -C "$top" pull --no-rebase --autostash --no-edit --recurse-submodules=no; then
       # A merge that cannot be made goes back to how it was, with the local changes.
       git_run -C "$top" merge --abort > /dev/null 2>&1
       fail "the repository's new commits and the changes made here do not merge (git says where above): nothing was changed; Reclone takes the repository's as they are"

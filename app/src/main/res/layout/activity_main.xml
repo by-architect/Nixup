@@ -264,9 +264,9 @@
                 android:layout_height="wrap_content"
                 android:textAppearance="?android:attr/textAppearanceSmall" />
 
-            <!-- A newer Seraph, when there is one (the module's update.json). -->
+            <!-- A newer Nixup, when there is one (the module's update.json). -->
             <LinearLayout
-                android:id="@+id/seraph_update"
+                android:id="@+id/nixup_update"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -275,17 +275,17 @@
                 android:visibility="gone">
 
                 <TextView
-                    android:id="@+id/seraph_update_text"
+                    android:id="@+id/nixup_update_text"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:textAppearance="?android:attr/textAppearanceMedium" />
 
                 <Button
-                    android:id="@+id/seraph_update_install"
+                    android:id="@+id/nixup_update_install"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/seraph_install" />
+                    android:text="@string/nixup_install" />
             </LinearLayout>
 
             <LinearLayout

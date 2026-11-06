@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.seraph.manager"
+    namespace = "dev.nixup.manager"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.seraph.manager"
+        applicationId = "dev.nixup.manager"
         minSdk = 30
         targetSdk = 36
         versionCode = 1

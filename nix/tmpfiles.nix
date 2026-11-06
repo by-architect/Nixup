@@ -1,6 +1,6 @@
 # Folders and files the services need, as NixOS's systemd.tmpfiles (tmpfiles.d(5)): each build and each start of the
 # phone makes them (the engine, Tmpfiles.kt), before the units start, as systemd-tmpfiles does at boot. On the phone
-# they are in Seraph's view, under its own /var, /run, /etc and /home: a rule elsewhere (Android's own folders) stops
+# they are in Nixup's view, under its own /var, /run, /etc and /home: a rule elsewhere (Android's own folders) stops
 # the build. A rule's age (cleaning old files) is taken and nothing is done with it.
 { config, lib, ... }:
 let
@@ -69,7 +69,7 @@ in
       example = [ "d /var/lib/foo 0750 foo foo - -" ];
       description = ''
         Rules of tmpfiles.d(5), as on NixOS: folders, files and links each build and start of the phone makes in
-        Seraph's view (its /var, /run, /etc and /home), before the services start.
+        Nixup's view (its /var, /run, /etc and /home), before the services start.
       '';
     };
     settings = mkOption {
@@ -90,7 +90,7 @@ in
     assertions = [
       {
         assertion = outside == [ ];
-        message = "systemd.tmpfiles: ${lib.concatStringsSep "; " outside}: on the phone a rule is for Seraph's own /var, /run, /etc or /home, not Android's folders.";
+        message = "systemd.tmpfiles: ${lib.concatStringsSep "; " outside}: on the phone a rule is for Nixup's own /var, /run, /etc or /home, not Android's folders.";
       }
       {
         assertion = cfg.packages == [ ];

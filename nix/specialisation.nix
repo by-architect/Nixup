@@ -7,12 +7,12 @@
 #     android.apps."org.example.game".debloat = true;
 #   };
 #
-# A specialisation is the whole config with its own lines over it (inheritParentConfig = false: Seraph's options with
+# A specialisation is the whole config with its own lines over it (inheritParentConfig = false: Nixup's options with
 # its lines alone). Its profile goes into the config's, under specialisation.<name> (nix/build.nix), so a generation
 # keeps all of them, and the phone applies the one picked as it applies a config: its apps, settings and services.
 # Unlike NixOS, which starts the config itself again after a restart (its boot entry), the phone keeps the one picked
 # across restarts, until a build or a switch picks another (or none: the config itself).
-{ config, lib, extendModules, _seraph, ... }:
+{ config, lib, extendModules, _nixup, ... }:
 let
   inherit (lib) mkOption types;
 
@@ -36,20 +36,20 @@ in
       example = lib.literalExpression ''{ work.configuration = { services.syncthing.enable = false; }; }'';
       description = ''
         Other versions of the config, as NixOS's specialisation: each build makes them too, and the phone switches to
-        one (build.sh again --specialisation <name>, seraph-rebuild switch --specialisation <name>, or the app's
+        one (build.sh again --specialisation <name>, nixup-rebuild switch --specialisation <name>, or the app's
         Specialisations) and back without building again. A specialisation is the config with its own lines over it,
         or (inheritParentConfig = false) its own lines alone. The phone keeps the one picked across restarts, until
         a build picks another, or none.
       '';
       type = types.attrsOf (types.submodule (local@{ ... }:
         let
-          extend = if local.config.inheritParentConfig then extendModules else _seraph.noUserModules.extendModules;
+          extend = if local.config.inheritParentConfig then extendModules else _nixup.noUserModules.extendModules;
         in
         {
           options.inheritParentConfig = mkOption {
             type = types.bool;
             default = true;
-            description = "Whether it is the whole config with its own lines over it (false: Seraph's options and its lines alone).";
+            description = "Whether it is the whole config with its own lines over it (false: Nixup's options and its lines alone).";
           };
 
           options.configuration = mkOption {
