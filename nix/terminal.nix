@@ -1,6 +1,6 @@
 # The app's terminal, as Nix-on-Droid's terminal module sets its own (options and their meaning from
 # nix-on-droid's modules/terminal.nix, https://github.com/nix-community/nix-on-droid, MIT License; see NOTICE):
-# its font and its colors. The engine writes them for the app (/data/adb/seraph/etc/seraph/terminal.json), which
+# its font and its colors. The engine writes them for the app (/data/adb/nixup/etc/nixup/terminal.json), which
 # takes them each time the terminal opens; the font's package is fetched with the build's other Nix packages.
 { config, lib, ... }:
 let

@@ -8,7 +8,7 @@
 #     way), IPv6, PAM's services, the documentation, D-Bus's and udev's packages (Android has neither);
 #   - what it cannot do is there, so a module that only reads it builds, and turning it on stops the build and says
 #     why: a firewall, units started when a path changes, mounts, kernel modules, polkit, sudo, another service NixOS
-#     has and Seraph not.
+#     has and Nixup not.
 { config, lib, pkgs, options, ... }:
 let
   inherit (lib) mkOption types;
@@ -89,7 +89,7 @@ in
             enable = mkOption {
               type = types.bool;
               default = false;
-              description = "As on NixOS, a firewall: a phone has none in the way of its services, and Seraph has none yet, so it is off (NixOS's is on).";
+              description = "As on NixOS, a firewall: a phone has none in the way of its services, and Nixup has none yet, so it is off (NixOS's is on).";
             };
             allowPing = taken types.bool true "whether the firewall answers ping";
             trustedInterfaces = taken (types.listOf types.str) [ ] "interfaces the firewall lets everything in from";
@@ -155,7 +155,7 @@ in
         default = [ ];
         example = [ "1.1.1.1" "9.9.9.9" ];
         description = ''
-          The DNS servers Seraph's services and shells ask, as on NixOS (the view's /etc/resolv.conf); empty: those of
+          The DNS servers Nixup's services and shells ask, as on NixOS (the view's /etc/resolv.conf); empty: those of
           the network in use. Android's own apps keep asking the network's (or Private DNS).
         '';
       };
@@ -178,7 +178,7 @@ in
         type = types.attrsOf (types.oneOf [ types.str types.path types.int (types.listOf (types.oneOf [ types.str types.path ])) ]);
         default = { };
         example = { EDITOR = "nvim"; };
-        description = "Environment variables every session in Seraph's view gets (ssh, the app's terminal, seraph-shell), as on NixOS.";
+        description = "Environment variables every session in Nixup's view gets (ssh, the app's terminal, nixup-shell), as on NixOS.";
       };
       sessionVariables = mkOption {
         type = types.attrsOf (types.oneOf [ types.str types.path types.int (types.listOf (types.oneOf [ types.str types.path ])) ]);
@@ -195,7 +195,7 @@ in
           type = types.str;
           readOnly = true;
           default = "/etc/ssl/certs/ca-certificates.crt";
-          description = "The trusted certificates, as on NixOS: in Seraph's view, Android's.";
+          description = "The trusted certificates, as on NixOS: in Nixup's view, Android's.";
         };
         certificateFiles = mkOption {
           type = types.listOf types.path;
@@ -252,7 +252,7 @@ in
       nssModules = mkOption {
         type = types.listOf types.path;
         default = [ ];
-        description = "NSS modules, as on NixOS. Taken; the phone's services find users and hosts in Seraph's /etc.";
+        description = "NSS modules, as on NixOS. Taken; the phone's services find users and hosts in Nixup's /etc.";
         apply = list: { inherit list; path = lib.makeLibraryPath list; };
       };
       nssDatabases = anyAttrs;
@@ -360,7 +360,7 @@ in
     };
 
     nix = {
-      enable = taken types.bool true "Nix's daemon (Seraph runs Nix itself)";
+      enable = taken types.bool true "Nix's daemon (Nixup runs Nix itself)";
       package = mkOption {
         type = types.package;
         default = pkgs.nix;
@@ -388,7 +388,7 @@ in
 
     users = {
       mutableUsers = taken types.bool true "whether users can be changed outside the config";
-      defaultUserShell = taken (types.nullOr (types.either types.package types.str)) null "the users' shell (the phone's is /etc/seraph/login)";
+      defaultUserShell = taken (types.nullOr (types.either types.package types.str)) null "the users' shell (the phone's is /etc/nixup/login)";
       enforceIdUniqueness = taken types.bool true "unique uids and gids";
       allowNoPasswordLogin = taken types.bool false "logins without a password";
     };
@@ -411,19 +411,19 @@ in
     };
 
     assertions = [
-      (off "networking.firewall.enable" config.networking.firewall.enable "Seraph has no firewall yet (a phone has none in the way of its services): leave it off.")
-      (off "networking.nftables.enable" config.networking.nftables.enable "not on the phone (it has no firewall of Seraph's).")
+      (off "networking.firewall.enable" config.networking.firewall.enable "Nixup has no firewall yet (a phone has none in the way of its services): leave it off.")
+      (off "networking.nftables.enable" config.networking.nftables.enable "not on the phone (it has no firewall of Nixup's).")
       (off "networking.networkmanager.enable" config.networking.networkmanager.enable "Android manages the phone's networks.")
       (off "networking.wireless.enable" config.networking.wireless.enable "Android manages the phone's Wi-Fi.")
       (off "networking.interfaces" (config.networking.interfaces != { }) "Android manages the phone's network interfaces.")
       (off "security.acme.certs" (config.security.acme.certs != { }) "certificates from Let's Encrypt are not on the phone yet.")
-      (off "security.pki.certificateFiles" (config.security.pki.certificateFiles != [ ] || config.security.pki.certificates != [ ]) "more trusted certificates are not on the phone yet (Seraph's view trusts Android's).")
+      (off "security.pki.certificateFiles" (config.security.pki.certificateFiles != [ ] || config.security.pki.certificates != [ ]) "more trusted certificates are not on the phone yet (Nixup's view trusts Android's).")
       (off "security.polkit.enable" config.security.polkit.enable "polkit is not on the phone.")
       (off "security.sudo.enable" config.security.sudo.enable "sudo is not on the phone (root is su there).")
       (off "security.doas.enable" config.security.doas.enable "doas is not on the phone.")
       (off "security.rtkit.enable" config.security.rtkit.enable "RealtimeKit is not on the phone.")
       (off "security.apparmor.enable" config.security.apparmor.enable "AppArmor is not on the phone (Android has SELinux).")
-      (off "boot.extraModulePackages" (config.boot.extraModulePackages != [ ] || config.boot.kernelParams != [ ]) "the phone's kernel is Android's: Seraph loads no modules of its own and sets no parameters.")
+      (off "boot.extraModulePackages" (config.boot.extraModulePackages != [ ] || config.boot.kernelParams != [ ]) "the phone's kernel is Android's: Nixup loads no modules of its own and sets no parameters.")
       (off "systemd.mounts" (config.systemd.mounts != [ ] || config.systemd.automounts != [ ]) "mount units are not on the phone.")
       (off "systemd.network.enable" config.systemd.network.enable "Android manages the phone's networks.")
       (off "services.resolved.enable" config.services.resolved.enable "not on the phone (networking.nameservers sets its services' DNS servers).")
@@ -437,7 +437,7 @@ in
     ];
 
     warnings = lib.optional (config.boot.kernelModules != [ ])
-      "boot.kernelModules: the phone's kernel is Android's, and Seraph loads none of its modules (${lib.concatStringsSep ", " config.boot.kernelModules}): what is built into it is there."
+      "boot.kernelModules: the phone's kernel is Android's, and Nixup loads none of its modules (${lib.concatStringsSep ", " config.boot.kernelModules}): what is built into it is there."
     ++ lib.optional (config.boot.kernel.sysctl != { })
       "boot.kernel.sysctl: not set on the phone yet (${lib.concatStringsSep ", " (lib.attrNames config.boot.kernel.sysctl)})."
       ++ lib.optional (config.security.wrappers != { })

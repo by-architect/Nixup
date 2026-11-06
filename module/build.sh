@@ -14,7 +14,7 @@
 # The config's Nix packages (its services' programs, environment.systemPackages) are
 # fetched from cache.nixos.org before anything changes (fetch_packages in common.sh).
 #   again    the last profile applied again as it is, nothing evaluated: after a build
-#            on a PC (seraph-rebuild), whose config the phone may not have
+#            on a PC (nixup-rebuild), whose config the phone may not have
 #   gc       frees up space, as nix-collect-garbage: the Nix packages no root keeps go (the last
 #            build's packages, nixpkgs and git stay; an older generation fetches its own again)
 #   generation <n> [dry]
@@ -25,7 +25,7 @@
 # The config is what the app's Config picked (config_source in common.sh): a
 # configuration.nix, built alone; a flake.nix, whose folder is the flake (as
 # nixos-rebuild --flake reads /etc/nixos); or a flake's address, like github:owner/repo,
-# fetched. Seraph keeps no config folder of its own.
+# fetched. Nixup keeps no config folder of its own.
 MODDIR=${0%/*}
 BY=${1:-manual}
 MODE=${2:-switch}
@@ -78,23 +78,23 @@ case "$MODE" in
     exit 0 ;;
   gc)
     # As nix-collect-garbage: what no root keeps goes (the last build's packages, nixpkgs and git stay).
-    [ -d "$DATA/nix/nix/store" ] || { log "Seraph's store is empty: nothing to free"; run_end info "Nothing to free up" "Seraph's store is empty"; exit 0; }
+    [ -d "$DATA/nix/nix/store" ] || { log "Nixup's store is empty: nothing to free"; run_end info "Nothing to free up" "Nixup's store is empty"; exit 0; }
     nix_env
     before=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
     log "== Freeing up space: the Nix packages the last build does not use"
     nix_store store gc || fail "Nix could not free up space (it says why above)"
     after=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
     freed=$(( (${before:-0} - ${after:-0}) / 1024 ))
-    log "Freed $freed MB; Seraph's store has $(( ${after:-0} / 1024 )) MB"
-    run_end ok "Freed up $freed MB" "Seraph's store has $(( ${after:-0} / 1024 )) MB left"
+    log "Freed $freed MB; Nixup's store has $(( ${after:-0} / 1024 )) MB"
+    run_end ok "Freed up $freed MB" "Nixup's store has $(( ${after:-0} / 1024 )) MB left"
     exit 0 ;;
   *) fail "build.sh: no such thing to do: $MODE (switch, dry, update, again, generation, gc)" ;;
 esac
 
 SRC=$(config_source)
-[ -n "$SRC" ] || fail "there is no config yet: in the Seraph app, Config picks your configuration.nix or flake.nix (New makes one), or takes a flake's address, like github:you/phone"
+[ -n "$SRC" ] || fail "there is no config yet: in the Nixup app, Config picks your configuration.nix or flake.nix (New makes one), or takes a flake's address, like github:you/phone"
 # A phone set up before the config could be picked keeps the one it had, now as picked.
-if [ -z "$SERAPH_SOURCE" ] && [ ! -s "$SOURCE" ]; then
+if [ -z "$NIXUP_SOURCE" ] && [ ! -s "$SOURCE" ]; then
   printf '%s\n' "$SRC" > "$SOURCE"
   log "The config is $SRC, as before (the app's Config picks another)"
 fi
@@ -181,7 +181,7 @@ nix_env
 # needs no store (dummy://): read-only, it works out the packages' store paths without
 # writing any, and the phone fetches them after.
 nix_eval() {
-  # With nixpkgs, in Seraph's store: the small files the config makes (a service's settings)
+  # With nixpkgs, in Nixup's store: the small files the config makes (a service's settings)
   # are derivations the phone builds, which the evaluation writes there.
   store="--readonly-mode --store dummy://"
   [ -n "$NIXPKGS" ] && [ "$1" != --arg ] && store="--read-write-mode --store $DATA/nix"
@@ -189,29 +189,40 @@ nix_eval() {
     "$MODDIR/nix/profile.nix" --argstr configFile "$CONFIG" --argstr nixpkgs "$NIXPKGS" "$@"
 }
 
-# A flake, as `nixos-rebuild --flake`: Nix fetches its inputs (Seraph's options,
+# A flake, as `nixos-rebuild --flake`: Nix fetches its inputs (Nixup's options,
 # nixpkgs' lib) as flake.lock pins them, and a flake named by its address itself, into a
 # store of its own ($DATA/nix), in a namespace with its own /etc (nix_run). The
-# repositories' package names come from the indexes here (SERAPH_REPOS, so --impure):
+# repositories' package names come from the indexes here (NIXUP_REPOS, so --impure):
 # always the latest, not pinned. A flake on the phone is named by its real folder: Nix
 # takes no path through a symlink, and /sdcard is one (to /storage/emulated/0).
 nix_flake() { nix_run "$MODDIR/bin/nix" --store "$DATA/nix" "$@" $LOCKED; }
 
+# Where the flake keeps its configurations: nixupConfigurations, or seraphConfigurations in a
+# flake made when Nixup was called Seraph, which builds as it is.
+flake_configs() {
+  if ! nix_flake eval $REFRESH "$FLAKE#nixupConfigurations" --apply 'c: true' > /dev/null 2>&1 \
+    && nix_flake eval "$FLAKE#seraphConfigurations" --apply 'c: true' > /dev/null 2>&1; then
+    echo seraphConfigurations
+  else
+    echo nixupConfigurations
+  fi
+}
+
 # The configuration to build: the one named after the #, else the flake's only
-# seraphConfigurations, or the one named after the phone (its device name), as NixOS
+# nixupConfigurations, or the one named after the phone (its device name), as NixOS
 # takes the hostname.
 flake_name() {
   [ -n "$NAME" ] && echo "$NAME" && return 0
-  names=$(nix_flake eval --json $REFRESH "$FLAKE#seraphConfigurations" --apply builtins.attrNames) || return 1
+  names=$(nix_flake eval --json $REFRESH "$FLAKE#$CONFIGS" --apply builtins.attrNames) || return 1
   set -- $(echo "$names" | tr -d '[]"' | tr ',' ' ')
   [ $# -eq 1 ] && echo "$1" && return 0
   device=$(settings get global device_name < /dev/null)
   for name; do [ "$name" = "$device" ] && echo "$name" && return 0; done
   # Said on stderr: what this says (its stdout) is the name.
   if [ $# -eq 0 ]; then
-    log "The flake has no seraphConfigurations (one made by a file it imports, from a submodule not cloned? Clone it again with its submodules)" >&2
+    log "The flake has no $CONFIGS (one made by a file it imports, from a submodule not cloned? Clone it again with its submodules)" >&2
   else
-    log "The flake has $# seraphConfigurations ($*), and none is named after this phone ($device): name one after a # in the app's Config" >&2
+    log "The flake has $# $CONFIGS ($*), and none is named after this phone ($device): name one after a # in the app's Config" >&2
   fi
   return 1
 }
@@ -220,11 +231,12 @@ eval_repos() {
   if [ -n "$FLAKE" ]; then nix_flake eval --json --impure "$BUILT.repos"; else nix_eval --arg reposOnly true; fi
 }
 eval_profile() {
-  if [ -n "$FLAKE" ]; then SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.profile"
+  # SERAPH_REPOS too, for a flake.lock that still pins Nixup from when it was called Seraph.
+  if [ -n "$FLAKE" ]; then NIXUP_REPOS=$DATA/repos SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.profile"
   else nix_eval --argstr reposDir "$DATA/repos"; fi
 }
 eval_secrets() {
-  if [ -n "$FLAKE" ]; then SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.secretsToDeliver"
+  if [ -n "$FLAKE" ]; then NIXUP_REPOS=$DATA/repos SERAPH_REPOS=$DATA/repos nix_flake eval --json --impure "$BUILT.secretsToDeliver"
   else nix_eval --argstr reposDir "$DATA/repos" --argstr part secretsToDeliver; fi
 }
 
@@ -235,8 +247,9 @@ if [ -n "$FLAKE" ]; then
   if [ "$MODE" = update ] && [ -n "$DIR" ] && [ -z "$CLONE" ]; then
     nix_flake flake update --flake "$FLAKE" || fail "flake.lock could not be updated (Nix says why above); nothing was changed"
   fi
+  CONFIGS=$(flake_configs)
   name=$(flake_name) || fail "the flake did not build (Nix says why above); nothing was changed"
-  BUILT="$FLAKE#seraphConfigurations.$name.config.system.build"
+  BUILT="$FLAKE#$CONFIGS.$name.config.system.build"
   CONFIG="$WHERE#$name"
   GEN_SOURCE="$WHERE#$name"
   if [ -n "$DIR" ] && [ -z "$CLONE" ]; then
@@ -267,7 +280,7 @@ fi
 log "== Repositories"
 [ -z "$FLAKE" ] && [ -d "$DATA/channels/nixpkgs/" ] && NIXPKGS=$(readlink -f "$DATA/channels/nixpkgs")
 if ! eval_repos > "$DATA/tmp/repos.json" 2> "$DATA/tmp/repos.err"; then
-  if [ -z "$FLAKE" ] && grep -q 'seraph:needs-nixpkgs' "$DATA/tmp/repos.err"; then
+  if [ -z "$FLAKE" ] && grep -q 'nixup:needs-nixpkgs' "$DATA/tmp/repos.err"; then
     channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
     eval_repos > "$DATA/tmp/repos.json" \
       || fail "the config did not build (Nix says why above); nothing was changed"

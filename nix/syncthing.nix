@@ -7,7 +7,7 @@
 # reinstall): android.secrets is the place for them.
 #
 # Its files are in /var/lib/syncthing, as on NixOS (in the services' view; on the phone itself
-# /data/adb/seraph/var/lib/syncthing). A folder's path is a full path on the phone, like
+# /data/adb/nixup/var/lib/syncthing). A folder's path is a full path on the phone, like
 # /storage/emulated/0/Documents, or an SD card's: the files Syncthing writes there are the phone's
 # own, as any app's would be. Its GUI and API answer on a socket only root can reach, by default.
 { config, lib, pkgs, ... }:
@@ -177,7 +177,7 @@ let
     # Its API answers once it is up (a first start makes its keys and index first).
     ${waitUp}
     key=$(sed -n 's:.*<apikey>\(.*\)</apikey>.*:\1:p' ${home}/config.xml)
-    [ -n "$key" ] || { echo "Syncthing does not answer (its log: /data/adb/seraph/units/syncthing/log)"; exit 1; }
+    [ -n "$key" ] || { echo "Syncthing does not answer (its log: /data/adb/nixup/units/syncthing/log)"; exit 1; }
     st() { curl -sSf -H "X-API-Key: $key" "$@"; }
     me=$(st ${api "/rest/system/status"} | jq -r .myID)
 

@@ -1,16 +1,16 @@
 # Logos's config: a POCO X3 NFC on crDroid (Android 16, based on LineageOS), as it is set up now
 # (read from the phone on 2026-11-02). It builds as it is, with no flake:
-#   on the phone   Seraph app: Config, pick this file, then Build (or Git: clone the repository
+#   on the phone   Nixup app: Config, pick this file, then Build (or Git: clone the repository
 #                  it is in; Pull and build brings its new commits)
-#   on a PC        nix run github:by-architect/Seraph -- switch --file ./configuration.nix
+#   on a PC        nix run github:by-architect/Nixup -- switch --file ./configuration.nix
 #
 # As a start for another phone it builds there too: what that phone does not have (an app given
 # settings here, a LineageOS setting, a sensor) is told while building and left out. Put in your
 # own secrets first (marked "secret" below); they never go into this file.
 #
 # null: not managed, the phone keeps what you set by hand. An option taken out again goes back
-# to the value it had before Seraph changed it. Every option, explained: nix/*.nix in
-# github:by-architect/Seraph.
+# to the value it had before Nixup changed it. Every option, explained: nix/*.nix in
+# github:by-architect/Nixup.
 #
 #   1. Apps, packages and repositories
 #   2. App settings
@@ -65,7 +65,7 @@
   ];
 
   # Apps from Google Play, by package name in quotes, downloaded as Aurora Store does, with the
-  # Google account signed in on the phone (Seraph app: ⋮ → Google Play account): a build that lists
+  # Google account signed in on the phone (Nixup app: ⋮ → Google Play account): a build that lists
   # some stops until one is. No Play Store or GApps needed.
   android.packages.playstore = [
     # "com.whatsapp"                              # WhatsApp: messenger
@@ -73,7 +73,7 @@
 
   android.playstore = {
     account = null;                               # "you@gmail.com": builds stop if another one is signed in
-    tokenFile = null;                             # ./google-play.token (seraph-play-login on a PC): no sign-in needed (secret)
+    tokenFile = null;                             # ./google-play.token (nixup-play-login on a PC): no sign-in needed (secret)
   };
 
   # Updates of each source's apps: true installs them by itself (every 6 hours, on Wi-Fi), false
@@ -88,7 +88,7 @@
   };
 
   # The phone's other apps (sideloaded, debug builds, and Google Play apps not listed above) come
-  # from no repository here, so Seraph leaves them as they are. F-Droid has its own builds of
+  # from no repository here, so Nixup leaves them as they are. F-Droid has its own builds of
   # Tailscale, KDE Connect, LocalSend, Organic Maps, Proton VPN and addy.io, signed with another
   # key than the ones installed: moving to them means reinstalling (the app's data goes).
 
@@ -269,7 +269,7 @@
 
   android.settings.developer = {
     enable = true;                                # Developer options shown
-    usbDebugging = true;                          # adb (false cuts it, also for seraph-rebuild)
+    usbDebugging = true;                          # adb (false cuts it, also for nixup-rebuild)
     stayAwake = false;                            # screen on while charging
     animationScale = 1;                           # 0.5: twice as fast, 0: off
     showTaps = false;
@@ -397,7 +397,7 @@
   # Each app's APK and data, and folders, backed up by the phone itself into a restic repository
   # (encrypted, each file stored once). An app is backed up after it was used, a build that installs
   # it brings its data back, and an app not on any list comes back from its backup. By hand, any app
-  # (its APK, its data) or folder: the app's Backups tab, or su -c seraph-backup (list, status, now,
+  # (its APK, its data) or folder: the app's Backups tab, or su -c nixup-backup (list, status, now,
   # restore, restic ...). Off while repository is null.
   android.backup = {
     repository = null;                            # "/storage/<card>/Backup", "sftp:me@pc:/backup/phone", ...
@@ -422,7 +422,7 @@
   # ==== 5. Scripts and services ================================================================
   # Services with NixOS's names and options, run from Nix packages, which the phone fetches from
   # cache.nixos.org (nixos-unstable) and runs where /nix exists. Logs: the app's Logs tab
-  # (/data/adb/seraph/units). A service that stops by itself or fails is told in a notification, and
+  # (/data/adb/nixup/units). A service that stops by itself or fails is told in a notification, and
   # so is Tailscale's connection; the SSH server and adb, the phone's security, never are.
 
   services.tailscale = {
@@ -430,7 +430,7 @@
     package = pkgs.tailscale;                     # which build
     port = 41641;                                 # UDP port for direct connections; 0: any
     interfaceName = "userspace-networking";       # the only mode on a phone
-    authKeyFile = "/data/adb/seraph/secrets/tailscale.key";   # secret: auth key, logs in without a link
+    authKeyFile = "/data/adb/nixup/secrets/tailscale.key";   # secret: auth key, logs in without a link
     # (or ./tailscale.key: a file next to this one; or the key itself, read from elsewhere, like
     #  hostConfig.tailscale.key from a JSON of secrets; or pkgs.writeText "key" …, as a module shared
     #  with NixOS makes it: each build puts any of them on the phone, root-only)
@@ -527,7 +527,7 @@
     enable = true;                                # adb on (USB debugging); null: not managed
     port = null;                                  # 5555: over the network too, from boot (adb connect <phone>:5555)
     trustedKeys = [ ];                            # computers let in without asking: each one's ~/.android/adbkey.pub ("QAAAA…= neo@laptop")
-    trustedKeyFiles = [ ];                        # the same from files: ./laptop-adbkey.pub, or "/data/adb/seraph/secrets/adb_keys" on the phone
+    trustedKeyFiles = [ ];                        # the same from files: ./laptop-adbkey.pub, or "/data/adb/nixup/secrets/adb_keys" on the phone
     forgetUnused = null;                          # false: keep every computer (Android forgets one unused for 7 days)
   };
 
@@ -548,7 +548,7 @@
     ];
     banner = null;                                # text before a login
     authorizedKeysFiles = [ ];                    # more key files (in a folder only root can write to)
-    authorizedKeysInHomedir = true;               # ~/.ssh/authorized_keys too (/data/adb/seraph/home/.ssh)
+    authorizedKeysInHomedir = true;               # ~/.ssh/authorized_keys too (/data/adb/nixup/home/.ssh)
     authorizedKeysCommand = "none";               # a program that gives keys: not on the phone yet
     authorizedKeysCommandUser = "nobody";
     moduliFile = "${pkgs.openssh}/etc/ssh/moduli";   # Diffie-Hellman groups
@@ -560,7 +560,7 @@
       X11Forwarding = false;
       UseDns = false;                             # look up clients' names
       StrictModes = true;                         # refuse key files others can write to
-      LogLevel = "INFO";                          # its log: /data/adb/seraph/units/sshd/log
+      LogLevel = "INFO";                          # its log: /data/adb/nixup/units/sshd/log
       GatewayPorts = "no";
       PrintMotd = false;
       UsePAM = false;                             # a phone has no PAM
@@ -578,16 +578,16 @@
   # Who may log in over SSH, as on NixOS: root, with these public keys.
   users.users.root.openssh.authorizedKeys = {
     keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleOnlyPutYourOwnKeyHere neo@laptop" ];   # public keys (an example)
-    keyFiles = [ ];                               # ./laptop.pub, or "/data/adb/seraph/secrets/ssh_keys" on the phone
+    keyFiles = [ ];                               # ./laptop.pub, or "/data/adb/nixup/secrets/ssh_keys" on the phone
   };
 
   # A user that logs in over SSH, as NixOS's users.users (an example): an Android app's own uid makes a user that
-  # shares that app's files, storage access and su grant. Seraph's own app needs no other app: su works as Seraph's.
+  # shares that app's files, storage access and su grant. Nixup's own app needs no other app: su works as Nixup's.
   users.users.niobe = {
     isNormalUser = true;                          # a user that logs in
-    androidApp = "dev.seraph.manager";            # the uid of this app, looked up at each build (or uid = 10355;)
+    androidApp = "dev.nixup.manager";            # the uid of this app, looked up at each build (or uid = 10355;)
     description = "Niobe";                        # full name
-    home = "/home/niobe";                         # its home: Seraph's own, there from the phone's start on
+    home = "/home/niobe";                         # its home: Nixup's own, there from the phone's start on
     createHome = true;                            # make the home, owned by it
     group = "niobe";                              # its own group (made with its uid)
     extraGroups = [ "inet" "everybody" "external_storage" ];   # network, shared storage (users.groups has Android's)
@@ -601,7 +601,7 @@
   terminal.colors = { };                          # like { background = "#000000"; foreground = "#FFFFFF"; cursor = "#FFFFFF"; color1 = "#CC0000"; }
 
   # Your own services, as NixOS's systemd.services. Example: the Download folder as a web page for
-  # your tailnet. Bound to 127.0.0.1, Wi-Fi cannot reach it, but Seraph's Tailscale passes it on:
+  # your tailnet. Bound to 127.0.0.1, Wi-Fi cannot reach it, but Nixup's Tailscale passes it on:
   # http://<the phone's tailnet name>:8080 (like logos-1).
   systemd.services.web-share = {
     enable = false;                               # true: run it
@@ -615,7 +615,7 @@
     postStart = "echo 'web-share: port 8080'";    # commands once started
     restartTriggers = [ ];                        # values whose change restarts it
     unitConfig.RequiresMountsFor = [ "/storage/emulated/0/Download" ];   # storage it needs: it starts once that is mounted
-    notifications = true;                         # Seraph's own: tell when it stops by itself, fails, or runs again
+    notifications = true;                         # Nixup's own: tell when it stops by itself, fails, or runs again
     serviceConfig = {
       Type = "simple";                            # keeps running ("oneshot": runs once)
       ExecStart = "${pkgs.darkhttpd}/bin/darkhttpd $SHARE --addr 127.0.0.1 --port 8080";   # what it runs (or script)
@@ -659,17 +659,17 @@
     serviceConfig = {
       DynamicUser = true;                         # its own user (uid 400–999: Android lets it on the network, not into the shared storage)
       StateDirectory = "notes";                   # /var/lib/notes, its user's ("CacheDirectory", "LogsDirectory" alike)
-      LoadCredential = "token:/data/adb/seraph/secrets/notes-token";   # a file only it may read: $CREDENTIALS_DIRECTORY/token
-      EnvironmentFile = "-/data/adb/seraph/secrets/notes.env";        # variables from a file ("-": it may be missing)
+      LoadCredential = "token:/data/adb/nixup/secrets/notes-token";   # a file only it may read: $CREDENTIALS_DIRECTORY/token
+      EnvironmentFile = "-/data/adb/nixup/secrets/notes.env";        # variables from a file ("-": it may be missing)
       ExecStart = "${pkgs.python3}/bin/python3 -m http.server 8081 --bind 127.0.0.1 --directory /var/lib/notes";
       UMask = "0027";                             # its files' mode
       LimitNOFILE = 4096;                         # its limits (Limit*)
       ProtectSystem = "strict";                   # what only hardens it on NixOS: taken, and nothing done
     };
-    unitConfig.ConditionPathExists = "/data/adb/seraph/secrets/notes-token";   # starts only when this is there
+    unitConfig.ConditionPathExists = "/data/adb/nixup/secrets/notes-token";   # starts only when this is there
   };
 
-  # NixOS's own service modules, from nixpkgs, as they are: the ones Seraph has tried (nix/nixos.nix lists them) with
+  # NixOS's own service modules, from nixpkgs, as they are: the ones Nixup has tried (nix/nixos.nix lists them) with
   # all their NixOS options. Each runs as its own user, so one that needs the phone's shared storage (a music folder)
   # gets root: systemd.services.<name>.serviceConfig.User = lib.mkForce "root". The small files a module makes (its
   # settings) the phone builds itself.
@@ -683,13 +683,13 @@
   #   imports = [ "${modulesPath}/services/web-apps/foo.nix" ];
   #   disabledModules = [ "services/misc/ntfy-sh.nix" ];   # leaves one of the list out, for a module of your own
 
-  environment.etc = { };                          # files in Seraph's /etc, like { "foo/foo.conf".text = "a = 1"; }
+  environment.etc = { };                          # files in Nixup's /etc, like { "foo/foo.conf".text = "a = 1"; }
   environment.variables = { };                    # variables of every shell session, like { EDITOR = "nano"; }
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
-  networking.hosts = { };                         # names in Seraph's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
-  networking.nameservers = [ ];                   # DNS servers of Seraph's services ([ ]: the network's), like [ "9.9.9.9" ]
+  networking.hosts = { };                         # names in Nixup's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
+  networking.nameservers = [ ];                   # DNS servers of Nixup's services ([ ]: the network's), like [ "9.9.9.9" ]
 
-  environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c seraph-shell), like htop rsync
+  environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c nixup-shell), like htop rsync
 
   nixpkgs.config = { };                           # nixpkgs settings, like { allowUnfree = true; }
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)

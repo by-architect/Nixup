@@ -1,15 +1,15 @@
-# Services as NixOS writes them, systemd.services.<name>, which Seraph's engine runs on the phone the
+# Services as NixOS writes them, systemd.services.<name>, which Nixup's engine runs on the phone the
 # way systemd runs them on NixOS: each unit's commands (serviceConfig.ExecStart, or script), as its
 # user (serviceConfig.User, else root), with its environment and PATH; its folders in /var/lib,
 # /var/cache, /var/log, /run and /etc, kept across restarts and builds; started again when it stops
 # (Restart); in order (after, before, wants, requires); and with each build and at boot when it is
 # wantedBy multi-user.target (or a target that is). Its programs are Nix packages
 # (${pkgs.foo}/bin/foo), which the phone fetches from cache.nixos.org (and the small files a config
-# makes, which it builds), run in a view of the phone where /nix exists, as are Seraph's own
+# makes, which it builds), run in a view of the phone where /nix exists, as are Nixup's own
 # services (services.tailscale, services.syncthing) and NixOS's own service modules (nix/nixos.nix).
 #
-# In that view the phone is as it is (/system, /data, /storage, /dev, ...), with /nix (Seraph's
-# store), Seraph's /etc (the network's DNS servers, Android's certificates, environment.etc),
+# In that view the phone is as it is (/system, /data, /storage, /dev, ...), with /nix (Nixup's
+# store), Nixup's /etc (the network's DNS servers, Android's certificates, environment.etc),
 # /var and /run (the units' state, which stays) and a /tmp of the unit's own. Android's commands are
 # on PATH too.
 #
@@ -419,7 +419,7 @@ let
         type = types.bool;
         default = true;
         description = ''
-          Seraph's own (NixOS has no such thing): whether the app tells, in a notification, when it
+          Nixup's own (NixOS has no such thing): whether the app tells, in a notification, when it
           stops by itself, fails, or runs again after a failure (the Logs tab has it either way).
           Off for what is about the phone's security (sshd), so its state shows on no screen.
         '';

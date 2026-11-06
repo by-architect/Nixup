@@ -1,15 +1,15 @@
 # Logos's config: a POCO X3 NFC on crDroid (Android 16, based on LineageOS), as it is set up now
 # (read from the phone on 2026-11-02). It builds as it is, with no flake:
-#   on the phone   Seraph app: Config, pick this file, then Build
-#   on a PC        nix run github:by-architect/Seraph -- switch --file ./configuration.nix
+#   on the phone   Nixup app: Config, pick this file, then Build
+#   on a PC        nix run github:by-architect/Nixup -- switch --file ./configuration.nix
 #
 # As a start for another phone it builds there too: what that phone does not have (an app given
 # settings here, a LineageOS setting, a sensor) is told while building and left out. Put in your
 # own secrets first (marked "secret" below); they never go into this file.
 #
 # null: not managed, the phone keeps what you set by hand. An option taken out again goes back
-# to the value it had before Seraph changed it. Every option, explained: nix/*.nix in
-# github:by-architect/Seraph.
+# to the value it had before Nixup changed it. Every option, explained: nix/*.nix in
+# github:by-architect/Nixup.
 #
 #   1. Apps, packages and repositories
 #   2. App settings
@@ -125,7 +125,7 @@
   };
 
   # The phone's other apps (sideloaded, debug builds, and its Google Play apps not listed above)
-  # come from no repository here, so Seraph leaves them as they are. F-Droid has its own builds of
+  # come from no repository here, so Nixup leaves them as they are. F-Droid has its own builds of
   # Tailscale, KDE Connect, LocalSend, Organic Maps, Proton VPN and addy.io, signed with another
   # key than the ones installed: moving to them means reinstalling (the app's data goes).
 
@@ -355,7 +355,7 @@
 
   android.settings.developer = {
     enable = true;                                # Developer options shown
-    usbDebugging = true;                          # adb (false cuts it, also for seraph-rebuild)
+    usbDebugging = true;                          # adb (false cuts it, also for nixup-rebuild)
     stayAwake = false;                            # screen on while charging
     animationScale = 1;                           # 0.5: twice as fast, 0: off
     showTaps = false;
@@ -480,12 +480,12 @@
   android.settings.lineage.statsCollection = false;   # anonymous statistics to LineageOS
 
   # ==== 4. Backups =============================================================================
-  # Seraph's own backups are off on this phone: Neo Backup (above) backs up its apps, and its
+  # Nixup's own backups are off on this phone: Neo Backup (above) backs up its apps, and its
   # folders are copied to the PCs over SSH. Turned on, they would look like this (the SD card is
   # full, so a PC over SSH; the password file stays out of the repo, in a copy on the phone):
   #   android.backup = {
   #     repository = "sftp:neo@nebuchadnezzar:/backup/logos";
-  #     passwordFile = "/data/adb/seraph/secrets/backup-password";
+  #     passwordFile = "/data/adb/nixup/secrets/backup-password";
   #     apps = [ "com.machiav3lli.fdroid" "io.heckel.ntfy" "net.thunderbird.android" ];
   #     folders = [ "/storage/emulated/0/Documents" ];
   #   };
@@ -493,14 +493,14 @@
 
   # ==== 5. Scripts and services ================================================================
   # Services with NixOS's names and options, run by root from Nix packages, which the phone fetches
-  # from cache.nixos.org (nixos-unstable) and runs where /nix exists. Logs: /data/adb/seraph/units.
+  # from cache.nixos.org (nixos-unstable) and runs where /nix exists. Logs: /data/adb/nixup/units.
 
   services.tailscale = {
     enable = true;                                # Tailscale run by root, next to the Tailscale app (no VPN slot)
     package = pkgs.tailscale;                     # which build
     port = 41641;                                 # UDP port for direct connections; 0: any
     interfaceName = "userspace-networking";       # the only mode on a phone
-    authKeyFile = "/data/adb/seraph/secrets/tailscale.key";   # secret: auth key, logs in without a link
+    authKeyFile = "/data/adb/nixup/secrets/tailscale.key";   # secret: auth key, logs in without a link
     # (or ./tailscale.key: a file next to this one; or the key itself, read from elsewhere, like
     #  hostConfig.tailscale.key from a JSON of secrets: each build puts either on the phone, root-only)
     authKeyParameters = {                         # with an OAuth client secret as the key:
@@ -565,7 +565,7 @@
     enable = true;                                # adb on (USB debugging); null: not managed
     port = 5555;                                  # over the network too: adb connect <phone>:5555
     trustedKeys = [ ];                            # computers let in without asking: each one's ~/.android/adbkey.pub
-    trustedKeyFiles = [ "/data/adb/seraph/secrets/adb_keys" ];   # secret: the same, from a file on the phone
+    trustedKeyFiles = [ "/data/adb/nixup/secrets/adb_keys" ];   # secret: the same, from a file on the phone
     forgetUnused = false;                         # keep every computer (Android forgets one unused for 7 days)
   };
 
@@ -586,7 +586,7 @@
     ];
     banner = null;                                # text before a login
     authorizedKeysFiles = [ ];                    # more key files (in a folder only root can write to)
-    authorizedKeysInHomedir = true;               # ~/.ssh/authorized_keys too (/data/adb/seraph/home/.ssh)
+    authorizedKeysInHomedir = true;               # ~/.ssh/authorized_keys too (/data/adb/nixup/home/.ssh)
     authorizedKeysCommand = "none";               # a program that gives keys: not on the phone yet
     authorizedKeysCommandUser = "nobody";
     moduliFile = "${pkgs.openssh}/etc/ssh/moduli";   # Diffie-Hellman groups
@@ -598,7 +598,7 @@
       X11Forwarding = false;
       UseDns = false;                             # look up clients' names
       StrictModes = true;                         # refuse key files others can write to
-      LogLevel = "INFO";                          # its log: /data/adb/seraph/units/sshd/log
+      LogLevel = "INFO";                          # its log: /data/adb/nixup/units/sshd/log
       GatewayPorts = "no";
       PrintMotd = false;
       UsePAM = false;                             # a phone has no PAM
@@ -616,11 +616,11 @@
   # Who may log in over SSH, as on NixOS: root, with these public keys.
   users.users.root.openssh.authorizedKeys = {
     keys = [ ];                                   # public keys, like "ssh-ed25519 AAAA… neo@laptop"
-    keyFiles = [ "/data/adb/seraph/secrets/ssh_authorized_keys" ];   # secret: the same, from a file on the phone
+    keyFiles = [ "/data/adb/nixup/secrets/ssh_authorized_keys" ];   # secret: the same, from a file on the phone
   };
 
   # Your own services, as NixOS's systemd.services. Example: the Download folder as a web page for
-  # your tailnet. Bound to 127.0.0.1, Wi-Fi cannot reach it, but Seraph's Tailscale passes it on:
+  # your tailnet. Bound to 127.0.0.1, Wi-Fi cannot reach it, but Nixup's Tailscale passes it on:
   # http://<the phone's tailnet name>:8080 (like logos-1).
   systemd.services.web-share = {
     enable = false;                               # true: run it
@@ -665,7 +665,7 @@
     };
   };
 
-  environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c seraph-shell), like htop rsync
+  environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c nixup-shell), like htop rsync
 
   nixpkgs.config = { };                           # nixpkgs settings, like { allowUnfree = true; }
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)

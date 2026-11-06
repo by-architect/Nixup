@@ -1,4 +1,4 @@
-# What seraph-rebuild asks of the phone when a PC builds its config, as nixos-rebuild
+# What nixup-rebuild asks of the phone when a PC builds its config, as nixos-rebuild
 # --target-host does for NixOS: first the indexes the config's package names come from,
 # then the profile built there, applied as a build on the phone applies its own, with the
 # secrets sent along. What the PC sends is in $DATA/incoming, which root alone can read,

@@ -1,11 +1,11 @@
-# Files in /etc, as NixOS's environment.etc: Seraph's view of the phone has an /etc of its own (Etc.kt writes it),
+# Files in /etc, as NixOS's environment.etc: Nixup's view of the phone has an /etc of its own (Etc.kt writes it),
 # where its services and shells look, and each build puts these there: a file's text, or a link to its source (a Nix
 # package's file, or one the config makes), or with mode a copy owned by user and group. One the config no longer
 # has goes. Android's own /etc (/system/etc) is not touched.
 #
-# Seraph writes some of that /etc itself: passwd and group (users.users), hosts (networking.hosts), resolv.conf (the
+# Nixup writes some of that /etc itself: passwd and group (users.users), hosts (networking.hosts), resolv.conf (the
 # network's DNS servers, or networking.nameservers), ssl/certs/ca-certificates.crt (Android's certificates), profile
-# and seraph/. A file of environment.etc cannot be one of those.
+# and nixup/. A file of environment.etc cannot be one of those.
 { config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
@@ -69,10 +69,10 @@ let
   };
 
   entries = lib.filter (entry: entry.enable) (lib.attrValues config.environment.etc);
-  # The files Seraph writes itself, which an entry cannot be.
+  # The files Nixup writes itself, which an entry cannot be.
   own = [ "passwd" "group" "hosts" "resolv.conf" "ssl/certs/ca-certificates.crt" "profile" ];
   clean = target: lib.removePrefix "/" target;
-  mine = entry: lib.elem (clean entry.target) own || lib.hasPrefix "seraph/" (clean entry.target) || clean entry.target == "seraph";
+  mine = entry: lib.elem (clean entry.target) own || lib.hasPrefix "nixup/" (clean entry.target) || clean entry.target == "nixup";
 in
 {
   options.environment.etc = mkOption {
@@ -88,7 +88,7 @@ in
       }
     '';
     description = ''
-      Files in Seraph's /etc, where its services and shells look, as NixOS's environment.etc: text, or a link to a
+      Files in Nixup's /etc, where its services and shells look, as NixOS's environment.etc: text, or a link to a
       source file, or with mode a copy owned by user and group. Android's own /etc is not touched.
     '';
   };
@@ -102,7 +102,7 @@ in
 
     assertions = map (entry: {
       assertion = !mine entry;
-      message = "environment.etc.\"${entry.target}\": Seraph writes /etc/${clean entry.target} itself (users.users, networking.hosts, networking.nameservers, Android's certificates).";
+      message = "environment.etc.\"${entry.target}\": Nixup writes /etc/${clean entry.target} itself (users.users, networking.hosts, networking.nameservers, Android's certificates).";
     }) entries
     ++ map (entry: {
       assertion = entry.mode == "symlink" || entry.mode == "direct-symlink" || builtins.match "[0-7]{3,4}" entry.mode != null;

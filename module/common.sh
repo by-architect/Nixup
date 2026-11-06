@@ -1,11 +1,11 @@
 # What the module's scripts share: where things are, the log, and the status shown
 # in the Magisk app. Sourced with MODDIR set to the module's folder.
-DATA=/data/adb/seraph
+DATA=/data/adb/nixup
 PROFILE=$DATA/profile.json
 LOG=$DATA/apply.log
 BY=${BY:-manual}
 # Who started it, for the engine's events too.
-export SERAPH_BY=$BY
+export NIXUP_BY=$BY
 
 mkdir -p "$DATA/tmp"
 # Keep the log small: past 64 KB the old one is set aside.
@@ -31,7 +31,7 @@ fail() {
 
 # What happened, for the app: the journal of events (its Logs tab) and its notifications (see
 # notify.sh): event <kind> <level> <title> [text] [key].
-event() { SERAPH_BY=$BY SERAPH_RUN=$RUN sh "$MODDIR/notify.sh" "$@"; }
+event() { NIXUP_BY=$BY NIXUP_RUN=$RUN sh "$MODDIR/notify.sh" "$@"; }
 
 # A run: one build, update, backup, ... with a log of its own ($DATA/logs/<run>.log: all it says),
 # which its events point to. One that fails (fail, or a step that stops it) is told as "<title>
@@ -46,7 +46,7 @@ run_open() {
   RUN=$(date +%Y%m%d-%H%M%S)-$1-$$
   RUN_LOG=$LOGS/$RUN.log
   # The engine's events belong to it too.
-  export SERAPH_RUN=$RUN SERAPH_KIND=$1 SERAPH_BY=$BY
+  export NIXUP_RUN=$RUN NIXUP_KIND=$1 NIXUP_BY=$BY
   # The newest 60 runs' logs stay.
   ls -t "$LOGS"/*.log 2> /dev/null | tail -n +60 | while read -r old; do rm -f "$old"; done
   : > "$RUN_LOG"
@@ -86,7 +86,7 @@ run_priority() {
 }
 
 # A run that a restart (or a kill) breaks off starts again, from resume.sh: $PENDING/<name> says
-# how (when it began, how often it was picked up, the test profile it had (SERAPH_PROFILE, so a
+# how (when it began, how often it was picked up, the test profile it had (NIXUP_PROFILE, so a
 # test never goes on with the phone's own), then the script and its arguments, one a line),
 # until the run ends, however it ends. One that cannot run now (status 75: its storage is not
 # there, ...) stays, to run once it can. Arguments: its name, the script, and its arguments without
@@ -103,7 +103,7 @@ resumable() {
   shift
   echo $$ > "$PENDING/$RESUME_NAME.pid"
   echo "$BY" > "$PENDING/$RESUME_NAME.by"
-  { date +%s; echo "${SERAPH_RESUMED:-0}"; echo "$SERAPH_PROFILE"; printf '%s\n' "$@"; } > "$PENDING/$RESUME_NAME"
+  { date +%s; echo "${NIXUP_RESUMED:-0}"; echo "$NIXUP_PROFILE"; printf '%s\n' "$@"; } > "$PENDING/$RESUME_NAME"
 }
 
 # The process of the run of that name still running (a module script's sh), if there is one.
@@ -127,7 +127,7 @@ finish() {
   if [ -n "$RESUME_NAME" ]; then
     if [ "$status" = 75 ]; then
       # Waiting is no try: its count goes back.
-      [ -n "$SERAPH_RESUMED" ] && sed -i "2s/.*/$((SERAPH_RESUMED - 1))/" "$PENDING/$RESUME_NAME"
+      [ -n "$NIXUP_RESUMED" ] && sed -i "2s/.*/$((NIXUP_RESUMED - 1))/" "$PENDING/$RESUME_NAME"
     else
       rm -f "$PENDING/$RESUME_NAME"
     fi
@@ -159,15 +159,15 @@ remember() {
 # is a flake when it is a flake.nix (its folder is the flake, as /etc/nixos is for
 # nixos-rebuild --flake) and a configuration.nix built alone otherwise; or a flake's address,
 # like github:owner/repo, which the build fetches. Either may end in #name, the configuration
-# of the flake to build. Seraph keeps no config folder of its own.
-# (SERAPH_SOURCE: another one, for one build.)
+# of the flake to build. Nixup keeps no config folder of its own.
+# (NIXUP_SOURCE: another one, for one build.)
 SOURCE=$DATA/source
 config_source() {
-  if [ -n "$SERAPH_SOURCE" ]; then echo "$SERAPH_SOURCE"; return 0; fi
+  if [ -n "$NIXUP_SOURCE" ]; then echo "$NIXUP_SOURCE"; return 0; fi
   [ -s "$SOURCE" ] && { head -n 1 "$SOURCE"; return 0; }
-  # Before the config could be picked it was in /sdcard/Seraph, with the app's Build from
+  # Before the config could be picked it was in /sdcard/Nixup, with the app's Build from
   # choosing flake.nix or configuration.nix there: a phone set up then goes on with it.
-  old=/storage/emulated/0/Seraph
+  old=/storage/emulated/0/Nixup
   case "$(cat "$DATA/build-from" 2> /dev/null)" in
     flake) [ -f "$old/flake.nix" ] && echo "$old/flake.nix" ;;
     configuration) [ -f "$old/configuration.nix" ] && echo "$old/configuration.nix" ;;
@@ -190,7 +190,7 @@ readable_path() {
 # The engine, from the app's APK, run as root; what it says is shown and logged (and goes to the
 # run's log with the rest of what the script says).
 engine() {
-  { CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.seraph.manager.engine.Main "$@" 2>&1
+  { CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.nixup.manager.engine.Main "$@" 2>&1
     echo $? > "$DATA/tmp/engine.status"; } | tee -a "$LOG"
   return "$(cat "$DATA/tmp/engine.status")"
 }
@@ -232,7 +232,7 @@ new_generation() {
 
 # Nix is a Linux program: it looks for DNS servers, trusted certificates and users
 # in /etc ($DATA/etc), where Android has none. To download (a flake's inputs), it runs in a mount
-# namespace of its own whose /etc is Seraph's: the DNS servers of the network in use,
+# namespace of its own whose /etc is Nixup's: the DNS servers of the network in use,
 # Android's trusted certificates and a root user. The namespace's mounts are private,
 # so the rest of the phone never sees it (its / is shared: a mount without that would
 # reach everything).
@@ -243,10 +243,10 @@ done
 
 # The engine writes it (tailscaled runs with it too); it fails without a network.
 nix_etc() {
-  CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.seraph.manager.engine.Main etc < /dev/null
+  CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.nixup.manager.engine.Main etc < /dev/null
 }
 
-# Runs a command with Seraph's /etc (nix_etc makes it), in that namespace.
+# Runs a command with Nixup's /etc (nix_etc makes it), in that namespace.
 nix_run() {
   [ -n "$BUSYBOX" ] || { log "There is no busybox (Magisk's or KernelSU's) to give Nix its own /etc"; return 1; }
   "$BUSYBOX" unshare -m --propagation private sh -c \
@@ -269,11 +269,11 @@ nix_env() {
   nix_tokens
 }
 
-# Nix with Seraph's store ($DATA/nix: the paths are /nix/store/... to Nix, and the
-# services see them there), in the namespace with Seraph's /etc (nix_run).
+# Nix with Nixup's store ($DATA/nix: the paths are /nix/store/... to Nix, and the
+# services see them there), in the namespace with Nixup's /etc (nix_run).
 nix_store() { nix_run "$MODDIR/bin/nix" --store "$DATA/nix" "$@"; }
 
-# Nix in Seraph's view, where its store is /nix itself, as on NixOS: what it builds runs
+# Nix in Nixup's view, where its store is /nix itself, as on NixOS: what it builds runs
 # there (the small files a config makes need their store at /nix/store). Arguments: Nix's
 # command (nix, nix-store), then its arguments, each a word (they go into a script).
 nix_view() {
@@ -287,7 +287,7 @@ nix_view() {
 
 # The Nix packages a profile needs (its derivations and storePaths: the services'
 # programs, the files the config makes for them, environment.systemPackages), into
-# Seraph's store: fetched from cache.nixos.org, and the small files a config makes (a
+# Nixup's store: fetched from cache.nixos.org, and the small files a config makes (a
 # service's settings file, a script; their derivations are here, written by the phone's
 # evaluation or sent by the PC that built the config) built here, from what the cache has;
 # with dry, only said. A package the cache has not got (built from source: unfree, or
@@ -330,7 +330,7 @@ fetch_packages() {
 }
 
 # What a PC that built the config sent of Nix's store (incoming/paths.nar: the derivations
-# of the files the config makes, with all they need, and the files it added): into Seraph's
+# of the files the config makes, with all they need, and the files it added): into Nixup's
 # store, for fetch_packages to build.
 import_paths() {
   [ -s "$1" ] || return 0
@@ -340,9 +340,9 @@ import_paths() {
 }
 
 # The packages of the profile in use, kept from Nix's garbage collection (each a root
-# in Seraph's store), as a NixOS system's are.
+# in Nixup's store), as a NixOS system's are.
 keep_packages() {
-  roots=$DATA/nix/nix/var/nix/gcroots/seraph
+  roots=$DATA/nix/nix/var/nix/gcroots/nixup
   rm -rf "$roots" && mkdir -p "$roots"
   i=0
   for path in $(engine paths "$PROFILE" | grep '^/nix/store/'); do
@@ -401,13 +401,13 @@ nix_tokens() {
 # Tells the app something through its receiver (as notify.sh does for events): "schedule" makes
 # sure its update check and backup check are scheduled.
 tell_app() {
-  am broadcast --user current -f 0x20 -n dev.seraph.manager/.EventsReceiver \
-    -a dev.seraph.manager.action.EVENT --es event "$1" < /dev/null > /dev/null 2>&1
+  am broadcast --user current -f 0x20 -n dev.nixup.manager/.EventsReceiver \
+    -a dev.nixup.manager.action.EVENT --es event "$1" < /dev/null > /dev/null 2>&1
 }
 
 # The phone's copy of nixpkgs, as a NixOS channel: nixos-unstable (or the one $DATA/channel names),
 # fetched the first time something needs it (a configuration.nix's Nix packages, git), and again
-# with update. It is kept in Seraph's store, as a root of it: NIXPKGS is its path there.
+# with update. It is kept in Nixup's store, as a root of it: NIXPKGS is its path there.
 NIXPKGS=
 channel() {
   # (Names of its own: the scripts that call it have their own url and path.)
@@ -420,7 +420,7 @@ channel() {
     channel_path=$(nix_run "$MODDIR/bin/nix" --store "$DATA/nix" eval --raw --impure --option tarball-ttl 0 \
       --expr "builtins.fetchTarball \"$channel_url\"") || return 1
     mkdir -p "$DATA/channels" "$DATA/nix/nix/var/nix/gcroots"
-    ln -sfn "$channel_path" "$DATA/nix/nix/var/nix/gcroots/seraph-channel"
+    ln -sfn "$channel_path" "$DATA/nix/nix/var/nix/gcroots/nixup-channel"
     ln -sfn "$DATA/nix$channel_path" "$channel_link"
   fi
   NIXPKGS=$(readlink -f "$channel_link")

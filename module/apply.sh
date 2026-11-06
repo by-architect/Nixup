@@ -1,4 +1,4 @@
-# Makes the phone match the profile (/data/adb/seraph/profile.json): reads each
+# Makes the phone match the profile (/data/adb/nixup/profile.json): reads each
 # setting, changes only what differs, reads it back, and logs what it did. An
 # option that left the config gets its value from before the module back.
 # Runs as root; the first argument says who started it (boot, action, app, adb).

@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Seraph"
+rootProject.name = "Nixup"
 include(":app")
 // Termux's terminal (Apache License 2.0), for the app's terminal.
 include(":terminal-emulator", ":terminal-view")

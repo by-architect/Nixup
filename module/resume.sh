@@ -23,7 +23,7 @@ until [ "$(getprop sys.user.0.ce_available)" = true ]; do
   sleep 10
 done
 
-# Online: Seraph's /etc gets the network's DNS servers (the engine says so when there are none).
+# Online: Nixup's /etc gets the network's DNS servers (the engine says so when there are none).
 online() { nix_etc > /dev/null 2>&1; }
 
 for name in build update backup-restore backup-now backup-auto; do
@@ -54,7 +54,7 @@ for name in build update backup-restore backup-now backup-auto; do
   fi
   if [ $(( $(date +%s) - ${started:-0} )) -gt 259200 ]; then
     rm -f "$file"
-    SERAPH_QUIET=1 event "$kind" info "${what#the } broken off long ago: let go" "Started $(date -d "@$started" '+%F %H:%M' 2> /dev/null)"
+    NIXUP_QUIET=1 event "$kind" info "${what#the } broken off long ago: let go" "Started $(date -d "@$started" '+%F %H:%M' 2> /dev/null)"
     continue
   fi
   case "$name" in
@@ -69,6 +69,6 @@ for name in build update backup-restore backup-now backup-auto; do
   # Its run writes it again, with this try counted, until it ends.
   rm -f "$file" "$file.pid" "$file.by"
   event "$kind" info "Picking up $what a restart broke off" "Started $(date -d "@$started" '+%F %H:%M' 2> /dev/null); try $((tries + 1))"
-  SERAPH_PROFILE=$profile SERAPH_RESUMED=$((tries + 1)) sh "$MODDIR/$script" resume "$@" < /dev/null
+  NIXUP_PROFILE=$profile NIXUP_RESUMED=$((tries + 1)) sh "$MODDIR/$script" resume "$@" < /dev/null
 done
 exit 0

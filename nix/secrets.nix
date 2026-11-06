@@ -1,8 +1,8 @@
 # Secrets: files that programs of the config read on the phone (a login key, a token), which never go
-# into the profile or Nix's store. Seraph's own, not a user's to name: the options that take a secret
+# into the profile or Nix's store. Nixup's own, not a user's to name: the options that take a secret
 # file (services.tailscale.authKeyFile, services.syncthing.cert, ...; see secret-files.nix) keep one
 # here when they are given a file from the config's folder. Each build puts it on the phone (a build
-# on the PC sends it, seraph-rebuild; one on the phone copies it), as /data/adb/seraph/secrets/<name>,
+# on the PC sends it, nixup-rebuild; one on the phone copies it), as /data/adb/nixup/secrets/<name>,
 # which root alone can read, and the option's program reads it there. The profile has each secret's
 # name only; a build stops before changing anything when one cannot be had, and one that leaves the
 # config goes. A module can also give a secret as text it reads from elsewhere (a JSON file of
@@ -11,7 +11,7 @@
 let
   inherit (lib) mkOption types;
 
-  dir = "/data/adb/seraph/secrets";
+  dir = "/data/adb/nixup/secrets";
 
   secretModule = { name, ... }: {
     options = {
@@ -20,8 +20,8 @@ let
         default = null;
         example = lib.literalExpression "./secrets/tailscale.key";
         description = ''
-          The file on the machine the config is built on, which seraph-rebuild sends to the phone. A
-          path (./secrets/tailscale.key) is read where it is: Seraph never puts it in Nix's store or
+          The file on the machine the config is built on, which nixup-rebuild sends to the phone. A
+          path (./secrets/tailscale.key) is read where it is: Nixup never puts it in Nix's store or
           the profile (a flake's whole folder is in the store anyway, so keep the file out of a flake
           that others can read). null: it gets to the phone another way, and a build only checks that
           it is there.
@@ -34,7 +34,7 @@ let
         example = lib.literalExpression ''lib.concatLines secrets.syncthing.devices.phone.cert'';
         description = ''
           The secret itself, as text the config reads from elsewhere (a JSON file of secrets, which
-          stays out of the profile too), for seraph-rebuild to send; instead of file.
+          stays out of the profile too), for nixup-rebuild to send; instead of file.
         '';
       };
 
@@ -60,8 +60,8 @@ in
     '';
     description = ''
       Secrets, by a name of your choosing: files that programs of the config read on the phone,
-      which seraph-rebuild sends there from the machine the config is built on. On the phone each is
-      /data/adb/seraph/secrets/<name> (android.secrets.<name>.path), readable by root alone.
+      which nixup-rebuild sends there from the machine the config is built on. On the phone each is
+      /data/adb/nixup/secrets/<name> (android.secrets.<name>.path), readable by root alone.
     '';
   };
 

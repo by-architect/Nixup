@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# nixup-play-login: signs in to Google Play here, on a PC, as the Nixup app's Google Play account does on the phone,
+# and gives the account's token (an AAS token, aas_et/…) for the phone's config: android.playstore.tokenFile takes it,
+# and each build puts it on the phone, which then needs no sign-in.
+#
+#   nixup-play-login [--out <file>]   the token goes to <file> too (default: ./google-play.token), readable by you alone
+#   nixup-play-login --paste          no window: sign in in your own browser and paste its cookie
+#
+# A window opens with Google's own sign-in page (https://accounts.google.com/EmbeddedSetup, the one Android's setup
+# shows), as the Nixup app's sign-in screen does on the phone: sign in there (two-step verification works). Signed
+# in, the page gets a token that lasts minutes (its cookie oauth_token), which the window takes by itself, since the
+# page is its own (play-login-window.py, with Qt WebEngine: from python3's PyQt6, or fetched by nix). Google then
+# trades it for the account's lasting token, as it does for Android's setup and Aurora Store. Without a window (no
+# desktop, no Qt WebEngine, or --paste), the page opens in your browser, and you copy that cookie from its developer
+# tools. Needs curl. The token acts as the account itself: keep it out of any repository others can read.
+set -euo pipefail
+# What it writes is for its user alone.
+umask 077
+
+usage() { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; }
+die() { echo "nixup-play-login: $*" >&2; exit 1; }
+
+page="https://accounts.google.com/EmbeddedSetup"
+out="google-play.token"
+paste=0
+while (($#)); do
+  case $1 in
+    --out) [[ $# -ge 2 ]] || die "--out needs a file"; out=$2; shift 2 ;;
+    --out=*) out=${1#--out=}; shift ;;
+    --paste) paste=1; shift ;;
+    -h | --help) usage; exit 0 ;;
+    *) die "no such option: $1 (--help says which there are)" ;;
+  esac
+done
+command -v curl > /dev/null || die "there is no curl here"
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+# --- The sign-in window: it prints the account's email address and the page's token, one a line. Its Python is the
+# package's (NIXUP_PLAY_PYTHON), python3 when it has Qt WebEngine, or one nix fetches (once; it stays in the store).
+# Without LD_LIBRARY_PATH: a system's own libraries there (sound, on NixOS) would be taken over Qt's.
+window() {
+  local script="$here/play-login-window.py"
+  if [[ -n ${NIXUP_PLAY_PYTHON:-} ]]; then
+    env -u LD_LIBRARY_PATH "$NIXUP_PLAY_PYTHON" "$script"
+  elif command -v python3 > /dev/null && python3 -c 'import PyQt6.QtWebEngineWidgets' 2> /dev/null; then
+    env -u LD_LIBRARY_PATH python3 "$script"
+  elif command -v nix > /dev/null; then
+    echo "(Getting Qt WebEngine for the window with nix: the first time takes a while.)" >&3
+    nix --extra-experimental-features 'nix-command flakes' shell --impure --expr \
+      '(builtins.getFlake "nixpkgs").legacyPackages.${builtins.currentSystem}.python3.withPackages (ps: [ ps.pyqt6-webengine ])' \
+      --command env -u LD_LIBRARY_PATH python3 "$script"
+  else
+    return 1
+  fi
+}
+
+email="" oauth=""
+if ((!paste)) && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} || $(uname) == Darwin ]]; then
+  echo "Sign in to Google in the window that opens (better an account of its own for this: Google may block an"
+  echo "account that downloads with an unofficial client). After \"I agree\" the window closes by itself."
+  log="$(mktemp)"
+  # What the browser says goes to a log, shown only when the window fails.
+  if signed="$(window 3>&2 2> "$log")"; then
+    email="$(sed -n 1p <<< "$signed")"
+    oauth="$(sed -n 2p <<< "$signed")"
+  else
+    echo "(The window did not give a token$([[ -s $log ]] && echo ": $(grep -v '^\s*$' "$log" | tail -n 3 | tr '\n' ' ')"); now the browser instead.)"
+  fi
+  rm -f "$log"
+fi
+if [[ -n $oauth ]]; then
+  [[ $email == *@*.* ]] || read -r -p "The account's email address: " email
+else
+# --- The sign-in page, in the browser.
+if command -v xdg-open > /dev/null; then
+  xdg-open "$page" > /dev/null 2>&1 &
+elif command -v open > /dev/null; then
+  open "$page"
+fi
+cat << EOF
+1. Sign in to Google on this page (it opened in the browser, or open it):
+     $page
+   Better an account of its own for this: Google may block an account that downloads with an unofficial client.
+2. After "I agree" the page stays as it is (or keeps loading): that is all it does, it was made for a phone's
+   setup screen, and the cookie is there now. Open the browser's developer tools on that page (F12), then:
+     Firefox, Zen, LibreWolf:  Storage → Cookies → https://accounts.google.com
+     Chrome, Chromium, Brave:  Application → Cookies → https://accounts.google.com
+   find the cookie oauth_token (its value starts with oauth2_4/), double-click its value, copy it, and paste
+   it below (it is not shown), then press Enter. It lasts a few minutes: paste it soon.
+
+EOF
+read -r -p "The account's email address: " email
+read -r -s -p "oauth_token (not shown): " oauth
+echo
+# As copied: the value alone, or with its name or quotes around it.
+oauth=${oauth//[[:space:]\"\']/}
+oauth=${oauth#oauth_token=}
+[[ -n $oauth ]] || die "no oauth_token given"
+[[ $oauth == oauth2_4/* ]] || echo "(That does not start with oauth2_4/, as the cookie's value does; trying it anyway.)"
+fi
+[[ $email == *@*.* ]] || die "\"$email\" is not an email address (like you@gmail.com)"
+
+# --- The lasting token, from Google, as the phone's sign-in asks for it (PlayStore.kt's lastingToken). The short token
+# goes in on curl's input, never on its command line, which other users here can see.
+answer="$(printf '%s' "$oauth" | curl -sS -m 30 https://android.clients.google.com/auth \
+  -H 'app: com.google.android.gms' -H 'User-Agent;' \
+  --data-urlencode 'lang=en-US' \
+  --data-urlencode 'google_play_services_version=19629032' \
+  --data-urlencode 'sdk_version=28' \
+  --data-urlencode 'device_country=us' \
+  --data-urlencode "Email=$email" \
+  --data-urlencode 'service=ac2dm' \
+  --data-urlencode 'get_accountid=1' \
+  --data-urlencode 'ACCESS_TOKEN=1' \
+  --data-urlencode 'callerPkg=com.google.android.gms' \
+  --data-urlencode 'add_account=1' \
+  --data-urlencode 'Token@-' \
+  --data-urlencode 'callerSig=38918a453d07199354f8b19af05ec6562ced5788' \
+  --data-urlencode 'droidguard_results=null')" || die "Google could not be reached (curl says why above)"
+value() { printf '%s\n' "$answer" | tr -d '\r' | sed -n "s/^$1=//p" | head -n 1; }
+token="$(value Token)"
+[[ $token == aas_et/* ]] || die "Google gave no token ($(value Error | grep . || echo "it said nothing more")): sign in again and paste a fresh oauth_token"
+account="$(value Email)"
+account=${account:-$email}
+
+printf '%s\n' "$token" > "$out"
+cat << EOF
+
+Signed in to Google Play as $account. Its token (also in $out, readable by you alone):
+
+$token
+
+In the phone's config, with that file next to it (or the token as text, from a file of secrets):
+  android.playstore.account = "$account";
+  android.playstore.tokenFile = ./$(basename "$out");
+Each build puts it on the phone (nixup-rebuild sends it; a build on the phone reads it from the config's folder).
+It acts as the account itself: keep it out of any repository others can read.
+EOF

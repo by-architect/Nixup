@@ -99,7 +99,7 @@ in
       example = lib.literalExpression "with pkgs; [ htop rsync ]";
       description = ''
         Nix packages (from nixpkgs) for the phone, as NixOS's environment.systemPackages: each build
-        fetches them from cache.nixos.org into Seraph's store, for the phone's own commands to use.
+        fetches them from cache.nixos.org into Nixup's store, for the phone's own commands to use.
       '';
     };
 
@@ -108,8 +108,8 @@ in
       default = "";
       example = ''export PATH="$PATH:/data/data/com.termux/files/usr/bin"'';
       description = ''
-        Shell commands every session in Seraph's view runs first, as NixOS's environment.extraInit: an ssh login or
-        command, the app's terminal and seraph-shell, for root and every user (plain sh).
+        Shell commands every session in Nixup's view runs first, as NixOS's environment.extraInit: an ssh login or
+        command, the app's terminal and nixup-shell, for root and every user (plain sh).
       '';
     };
 

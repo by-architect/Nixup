@@ -2,7 +2,7 @@
 # the computers it lets in without asking ("Allow USB debugging?"). NixOS has nothing like it, so it is Android's own:
 # android.adb. The engine does it (see Adb.kt): it adds the trusted keys to the phone's own list
 # (/data/misc/adb/adb_keys) at each build and boot, and sets the port adbd listens on, as `adb tcpip` does until a
-# restart. A key taken out of the config goes from the list again, unless it was trusted before Seraph added it; the
+# restart. A key taken out of the config goes from the list again, unless it was trusted before Nixup added it; the
 # port goes back too.
 { config, lib, ... }:
 let
@@ -55,7 +55,7 @@ in
     trustedKeyFiles = mkOption {
       type = types.listOf (types.either types.path types.str);
       default = [ ];
-      example = lib.literalExpression ''[ ./laptop-adbkey.pub "/data/adb/seraph/secrets/adb_keys" ]'';
+      example = lib.literalExpression ''[ ./laptop-adbkey.pub "/data/adb/nixup/secrets/adb_keys" ]'';
       description = ''
         The same from files of keys, one a line: a file from the config's folder (read when the config is built), or,
         as a string, the full path of one on the phone (read there at each build and boot).

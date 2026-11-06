@@ -1,9 +1,9 @@
 # NixOS's own service modules, from the config's nixpkgs, on the phone as they are: services.ntfy-sh.enable = true;
 # runs nixpkgs' nixos/modules/services/misc/ntfy-sh.nix, which makes its systemd.services units, its users and its
-# /etc files, as on NixOS. Seraph runs those (nix/units.nix, nix/users.nix, nix/etc.nix), with NixOS's other options
+# /etc files, as on NixOS. Nixup runs those (nix/units.nix, nix/users.nix, nix/etc.nix), with NixOS's other options
 # such a module sets or reads (nix/nixos-compat.nix).
 #
-# The ones below are those Seraph has tried: they build with its options (scripts/test-nix-services.sh), and ask for
+# The ones below are those Nixup has tried: they build with its options (scripts/test-nix-services.sh), and ask for
 # nothing the build knows the phone has not got (a few ran on a phone; ~/Projects/Andronix/tests/nixos-bridge.md
 # says which). Some are here as other modules use their options (nginx, PostgreSQL, Redis, ...). Another of
 # nixpkgs' modules can be added by hand, as on NixOS (imports = [ "${modulesPath}/services/web-apps/foo.nix" ];):
@@ -13,10 +13,10 @@
 #
 # A configuration.nix built alone (no flake) has no nixpkgs until it uses a Nix package: a first look at it has these
 # services' options as placeholders, which take anything, so that look can say whether it needs nixpkgs (one is set).
-{ options, lib, _seraph, ... }:
+{ options, lib, _nixup, ... }:
 let
   inherit (lib) mkOption types;
-  nixpkgs = _seraph.nixpkgs;
+  nixpkgs = _nixup.nixpkgs;
   source = if nixpkgs == null then null else nixpkgs.outPath or nixpkgs;
 
   # Each service's option (services.<name>), and its module in nixpkgs' nixos/modules.

@@ -1,12 +1,12 @@
-# The users of Seraph's view of the phone, as NixOS's users.users and users.groups: root, and users that log in over
+# The users of Nixup's view of the phone, as NixOS's users.users and users.groups: root, and users that log in over
 # SSH (services.openssh) with a shell of their own. They live in the view's /etc/passwd and /etc/group (written by the
 # engine, Etc.kt), not in Android: a user is a Linux uid there, so an Android app's own uid makes a user that shares
 # the app's files, its storage access and its su grant. androidApp names the app and the engine looks its uid up on
-# the phone at each build (an app installed again gets another one): "dev.seraph.manager" makes a user of Seraph's own
-# app, which root solutions let use su once Seraph may, so the user needs no other app.
+# the phone at each build (an app installed again gets another one): "dev.nixup.manager" makes a user of Nixup's own
+# app, which root solutions let use su once Nixup may, so the user needs no other app.
 #
 # A normal user's home is /home/<name>, as on NixOS: in the view (where its sessions and the services run) /home is
-# Seraph's own /data/adb/seraph/users, there from the start of the phone on, before it is first unlocked (an app's
+# Nixup's own /data/adb/nixup/users, there from the start of the phone on, before it is first unlocked (an app's
 # own folders are locked until then).
 #
 # A user without uid or androidApp (a service's user: isSystemUser, as NixOS's service modules make them, or a unit's
@@ -41,11 +41,13 @@ let
       androidApp = mkOption {
         type = types.nullOr types.str;
         default = null;
-        example = "dev.seraph.manager";
+        example = "dev.nixup.manager";
+        # Nixup's app from when it was called Seraph, which the install replaced with this one.
+        apply = app: if app == "dev.seraph.manager" then "dev.nixup.manager" else app;
         description = ''
           The Android app whose own uid the user has, looked up on the phone at each build, in place of uid (which
-          changes when the app is installed again). "dev.seraph.manager" is Seraph's own app: the user may use su as
-          Seraph may, and needs no other app.
+          changes when the app is installed again). "dev.nixup.manager" is Nixup's own app: the user may use su as
+          Nixup may, and needs no other app.
         '';
       };
       isNormalUser = mkOption {
@@ -77,12 +79,12 @@ let
       };
       home = mkOption {
         type = types.str;
-        default = if name == "root" then "/data/adb/seraph/home" else if config.isNormalUser then "/home/${name}" else "/var/empty";
-        defaultText = lib.literalExpression ''"/home/''${name}" for a normal user, "/var/empty" else (root's: /data/adb/seraph/home)'';
+        default = if name == "root" then "/data/adb/nixup/home" else if config.isNormalUser then "/home/${name}" else "/var/empty";
+        defaultText = lib.literalExpression ''"/home/''${name}" for a normal user, "/var/empty" else (root's: /data/adb/nixup/home)'';
         example = "/data/data/com.termux/files/home";
         description = ''
-          The user's home folder: a normal user's is /home/<name>, Seraph's own (/data/adb/seraph/users/<name>), there
-          from the start of the phone on (root's: /data/adb/seraph/home).
+          The user's home folder: a normal user's is /home/<name>, Nixup's own (/data/adb/nixup/users/<name>), there
+          from the start of the phone on (root's: /data/adb/nixup/home).
         '';
       };
       createHome = mkOption {
@@ -101,15 +103,15 @@ let
         default = null;
         example = lib.literalExpression "pkgs.bashInteractive";
         description = ''
-          The user's shell, as on NixOS: a package (its shellPath, or bin/<name>) or a full path. null: Seraph's
-          login shell (/etc/seraph/login: environment.systemPackages on PATH) for root, a normal user and one with
+          The user's shell, as on NixOS: a package (its shellPath, or bin/<name>) or a full path. null: Nixup's
+          login shell (/etc/nixup/login: environment.systemPackages on PATH) for root, a normal user and one with
           useDefaultShell, and none (/system/bin/false) for any other (a service's), which logs in nowhere.
         '';
       };
       useDefaultShell = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether a system user gets Seraph's login shell too, as on NixOS it gets users.defaultUserShell.";
+        description = "Whether a system user gets Nixup's login shell too, as on NixOS it gets users.defaultUserShell.";
       };
       packages = mkOption {
         type = types.listOf types.package;
@@ -128,7 +130,7 @@ let
           keyFiles = mkOption {
             type = types.listOf (types.either types.path types.str);
             default = [ ];
-            example = lib.literalExpression ''[ ./laptop.pub "/data/adb/seraph/secrets/ssh_keys" ]'';
+            example = lib.literalExpression ''[ ./laptop.pub "/data/adb/nixup/secrets/ssh_keys" ]'';
             description = ''
               Files of public keys that may log in as this user: a file from the config's folder (read when the config
               is built, as on NixOS), or, as a string, the full path of one on the phone (read there when sshd starts).
@@ -197,12 +199,12 @@ let
     ++ lib.attrNames (lib.filterAttrs (_: user: lib.elem name user.extraGroups) users)
     ++ map (user: user.name) (lib.filter (user: lib.elem name (user.groups ++ [ "inet" ])) unitAccounts));
 
-  # Its shell: one it names, Seraph's login shell (root's, a normal user's), or none, as NixOS gives a service's user.
+  # Its shell: one it names, Nixup's login shell (root's, a normal user's), or none, as NixOS gives a service's user.
   shellOf = user:
     if user.shell != null then
       (if builtins.isString user.shell then user.shell
        else "${user.shell}${user.shell.passthru.shellPath or "/bin/${user.shell.meta.mainProgram or (lib.getName user.shell)}"}")
-    else if user.name == "root" || user.isNormalUser || user.useDefaultShell then "/etc/seraph/login"
+    else if user.name == "root" || user.isNormalUser || user.useDefaultShell then "/etc/nixup/login"
     else "/system/bin/false";
   passwdLine = user: lib.concatStringsSep ":" [
     user.name "x" (uidText user) (toString (gidOf user.group)) user.description user.home (shellOf user)
@@ -288,7 +290,7 @@ in
     assertions = [
       {
         assertion = missingUid == [ ];
-        message = "users.users: ${lib.concatStringsSep ", " missingUid} needs a uid, or androidApp (an Android app's own uid: \"dev.seraph.manager\", Seraph's, may use su as Seraph may), or isSystemUser or isNormalUser (the phone gives it one).";
+        message = "users.users: ${lib.concatStringsSep ", " missingUid} needs a uid, or androidApp (an Android app's own uid: \"dev.nixup.manager\", Nixup's, may use su as Nixup may), or isSystemUser or isNormalUser (the phone gives it one).";
       }
       {
         assertion = bothUids == [ ];

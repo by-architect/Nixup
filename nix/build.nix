@@ -6,7 +6,7 @@
 #                                 the assertions and shows the warnings, as nixos-rebuild does
 #   config.system.build.secrets   how each secret gets to the phone: { file = <its path where the
 #                                 config is built>; } or { text = true; } (secretTexts has it), or
-#                                 neither, which seraph-rebuild sends; never in the profile
+#                                 neither, which nixup-rebuild sends; never in the profile
 { config, options, lib, pkgs, ... }:
 let
   # What a shell has besides environment.systemPackages, as on NixOS.
@@ -137,7 +137,7 @@ in
             adb = config.system.build.adb;
             # The secrets' names: the phone checks each is there, and removes one that left.
             secrets = lib.attrNames config.android.secrets;
-            # The services (systemd.services, Seraph's own and NixOS's modules' among them) as the
+            # The services (systemd.services, Nixup's own and NixOS's modules' among them) as the
             # engine runs them, with the view's /etc files (environment.etc), hosts and DNS servers
             # (networking.hosts, networking.nameservers) and the folders systemd.tmpfiles makes; and
             # every store path the phone needs for them, environment.systemPackages and the
@@ -153,7 +153,7 @@ in
             storePaths = lib.unique (storePathsIn needed ++ config.system.build.backupStorePaths
               ++ config.system.build.terminalStorePaths);
             inherit derivations;
-            # seraph-shell's PATH (environment.systemPackages first) and its bash, as a shell on
+            # nixup-shell's PATH (environment.systemPackages first) and its bash, as a shell on
             # NixOS has them; none without Nix packages.
             shell = if config.environment.systemPackages == [ ] then null else {
               path = builtins.unsafeDiscardStringContext

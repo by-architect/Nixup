@@ -15,7 +15,7 @@ MODE=${2:-list}
 . "$MODDIR/common.sh"
 
 case "$MODE" in
-  list) CLASSPATH="$MODDIR/app.apk" exec /system/bin/app_process /system/bin dev.seraph.manager.engine.Main units "$@" ;;
+  list) CLASSPATH="$MODDIR/app.apk" exec /system/bin/app_process /system/bin dev.nixup.manager.engine.Main units "$@" ;;
   start | stop | restart | retry)
     [ -n "$1" ] || { log "units.sh $MODE: which service?"; exit 2; }
     engine unit "$MODE" "$1" ;;
