@@ -549,10 +549,15 @@ in
       environment.systemPackages = lib.mkIf packageSet [ cfg.package ];
 
       environment.sessionVariables = cfg.envVars // { NIX_PATH = cfg.nixPath; };
-      environment.extraInit = ''
+      environment.extraInit = (if config.system.build.nixosShells.enabled then ''
+        # Nix's commands (nix/nix.nix), after the profiles NixOS's shells' environment put on PATH (nix/shells.nix): the
+        # user's own (nix profile, nix-env), then root's, as on NixOS.
+        export PATH="$PATH:/etc/nixup/bin"
+      '' else ''
         # Nix (nix/nix.nix): the user's own profiles first (nix profile, nix-env), then root's, as on NixOS; Nix's
         # commands after the config's packages and Android's own.
         export PATH="$HOME/.nix-profile/bin:''${XDG_STATE_HOME:-$HOME/.local/state}/nix/profile/bin:/nix/var/nix/profiles/default/bin:$PATH:/etc/nixup/bin"
+      '') + ''
         export NIX_PROFILES="/nix/var/nix/profiles/default ''${XDG_STATE_HOME:-$HOME/.local/state}/nix/profile $HOME/.nix-profile"
       '' + lib.optionalString (!packageSet) ''
         # Where Nix finds its other commands (nix-channel runs nix-env): the module's, by these names.
