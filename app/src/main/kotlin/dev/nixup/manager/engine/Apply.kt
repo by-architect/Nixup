@@ -8,8 +8,8 @@ import java.io.File
  * Makes the phone match the profile: its apps (android.packages: a list for each repository, the apps from releases,
  * and those from Google Play), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
  * phone's own settings (android.system), the secrets (android.secrets) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
- * nothing changes; then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
- * the system settings (see SystemSettings), the services (see Units), and the apps that left the config removed, their data kept.
+ * nothing changes (the config's own system.preSwitchChecks among them); then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
+ * the system settings (see SystemSettings), the activation scripts (see Activation), the services (see Units), and the apps that left the config removed, their data kept.
  */
 class Apply(private val repos: Map<String, FDroid>, private val data: File, private val incoming: File? = null) {
     private val installer = Installer(data)
@@ -152,6 +152,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         // The data of the apps it installs, and the apps backed up with their APK that are not here, from backups.
         val backup = Backup.of(data, android)
         backup?.planRestore(toInstall.associate { it.id to it.code }, ids.toSet() + debloated)
+        // The config's own checks (system.preSwitchChecks), before anything changes: one that fails stops the build.
+        val activation = Activation(data)
+        activation.check(android, profile, dryRun, problems)
         if (problems.isNotEmpty()) {
             Out.line("✘ Cannot build:")
             problems.forEach { Out.line("  - $it") }
@@ -166,15 +169,23 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         writeSummary(dryRun, toInstall.size, toUpdate.size, removals.size, parts)
         if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes && backup?.changes != true) {
             Out.line("Nothing to change")
-            if (!dryRun) {
-                // Root's shell follows environment.systemPackages, which changes no unit.
-                units.prepare(android)
-                finish(profile, ids, fromReleases)
+            if (dryRun) {
+                activation.apply(android, dryRun = true)
+                return 0
             }
-            return 0
+            // Root's shell follows environment.systemPackages, which changes no unit.
+            units.prepare(android)
+            // The activation scripts run with every build, as on NixOS.
+            val scriptsFailed = activation.apply(android, dryRun = false)
+            finish(profile, ids, fromReleases)
+            return if (scriptsFailed > 0) 1 else 0
         }
         if (!installer.roomFor(steps)) return 2
-        if (dryRun) return 0
+        if (dryRun) {
+            // (A dry run's activation scripts may fail: it tells, and changes nothing either way.)
+            activation.apply(android, dryRun = true)
+            return 0
+        }
 
         // The secrets first: what reads them (a service) may start below.
         if (secrets.apply() != 0) return 1
@@ -189,6 +200,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         failed += system.apply()
         failed += adb.apply()
         units.prepare(android)
+        // The activation scripts (and the undo of those that left), with the users, /etc and tmpfiles' folders in place,
+        // before the services start or start again, as on NixOS.
+        val scriptsFailed = activation.apply(android, dryRun = false)
         failed += units.apply(android)
         for (id in removals) {
             if (Device.uninstallKeepingData(id)) {
@@ -206,7 +220,8 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
             Out.line("$failed settings did not take (see above); building again tries them again.")
             return 1
         }
-        return 0
+        // (The rest is done: an activation script that failed is told above, as NixOS's switch tells it.)
+        return if (scriptsFailed > 0) 1 else 0
     }
 
     /** The summary of a build's changes, in $DATA/tmp/summary: "2 apps installed, 1 updated, system settings". */
@@ -250,6 +265,8 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         var failed = Debloat(data).restoreAll()
         failed += AppSettings(data).restoreAll()
         failed += SystemSettings(data).restoreAll()
+        // The activation scripts' undos, in Nixup's view, before the services and the view go.
+        failed += Activation(data).undoAll()
         failed += Units(data).removeAll()
         failed += Adb(data).restore()
         releases.tellObtainium(emptyList())

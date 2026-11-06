@@ -363,6 +363,31 @@ syntax.
   notification when they stop by themselves.
 - Start, stop, restart and logs: the app's **Services** tab.
 
+Scripts, as NixOS's `system.activationScripts`, `system.preSwitchChecks` and `system.userActivationScripts`:
+
+```nix
+{
+  # Runs as root with each build and each start of the phone, before the services start
+  system.activationScripts.stay-awake = {
+    text = "settings put global stay_on_while_plugged_in 3";
+    undo = "settings put global stay_on_while_plugged_in 0";   # Nixup's own: when it leaves the config
+  };
+
+  # Runs before a build changes anything: when it fails, nothing changes
+  system.preSwitchChecks.battery = ''[ "$(cat /sys/class/power_supply/battery/capacity)" -ge 20 ]'';
+
+  # Runs as each normal user, when it changes and at each start of the phone
+  system.userActivationScripts.notes = "mkdir -p ~/notes";
+}
+```
+
+- They run in Nixup's view of the phone (Nix packages and Android's commands both there), with bash, in the
+  order their `deps` say; NixOS's own names (`users`, `etc`, ...) can be in `deps`.
+- A dry run runs only the scripts with `supportsDryActivation = true` (with `NIXOS_ACTION=dry-activate`),
+  and the pre-switch checks. A script that fails is told, and the others still run, as on NixOS.
+- `undo` is Nixup's own: it runs once when the script leaves the config, and when Nixup is removed, so the
+  phone gets back what the script changed.
+
 </details>
 
 <details>

@@ -725,7 +725,20 @@
   system.autoUpgrade.enable = false;              # true: builds again by itself at dates ("04:40"), on Wi-Fi, as NixOS's
   nix.distributedBuilds = false;                  # true: nix.buildMachines build what cache.nixos.org has not got, over ssh
 
-  system.activationScripts = { };                 # scripts at each build: not on the phone yet
+  # Scripts, as NixOS's: each build and each start of the phone runs system.activationScripts as root (in Nixup's view,
+  # before the services start); system.preSwitchChecks run before a build changes anything (one that fails stops it);
+  # each normal user runs system.userActivationScripts. Examples (each would run on the phone, so they are comments):
+  #   system.activationScripts.stay-awake = {
+  #     text = "settings put global stay_on_while_plugged_in 3";   # what it does (bash): idempotent and fast
+  #     deps = [ "users" ];                                        # the scripts it runs after (NixOS's names too)
+  #     supportsDryActivation = false;                             # true: a dry run runs it too (NIXOS_ACTION=dry-activate)
+  #     undo = "settings put global stay_on_while_plugged_in 0";   # Nixup's own: puts it back when it leaves the config, or Nixup goes
+  #   };
+  #   system.preSwitchChecks.battery = ''[ "$(cat /sys/class/power_supply/battery/capacity)" -ge 20 ]'';   # $1: the profile, $2: switch or dry-activate
+  #   system.userActivationScripts.notes = "mkdir -p ~/notes";   # as each normal user, when it changes and at each start
+  system.activationScripts = { };                 # scripts at each build and start, as root
+  system.preSwitchChecks = { };                   # checks before a build changes anything
+  system.userActivationScripts = { };             # scripts each normal user runs
 
   # Other versions of this config, built with it: switch with ⋮ → Specialisations (no new build),
   # or build.sh / nixup-rebuild --specialisation work. The phone keeps the one picked, also after
