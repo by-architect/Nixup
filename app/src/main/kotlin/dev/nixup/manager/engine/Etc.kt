@@ -71,9 +71,19 @@ object Etc {
         val deviceName = profile?.optJSONObject("system")?.optJSONObject("settings")?.optJSONObject("global")?.string("device_name")
         val names = listOfNotNull(runCatching { Os.uname().nodename }.getOrNull(), deviceName?.replace(Regex("[^A-Za-z0-9._-]"), "-"))
             .filter { it.isNotBlank() && it != "localhost" }.distinct()
-        File(etc, "hosts").writeText("127.0.0.1 localhost\n::1 localhost ip6-localhost\n" +
-            (if (names.isNotEmpty()) "127.0.0.2 ${names.joinToString(" ")}\n" else "") + (network?.string("hosts") ?: ""))
+        writeHosts(data, etc, "127.0.0.1 localhost\n::1 localhost ip6-localhost\n" +
+            (if (names.isNotEmpty()) "127.0.0.2 ${names.joinToString(" ")}\n" else "") + (network?.string("hosts") ?: ""),
+            network?.strings("hostFiles").orEmpty())
         writeDns(etc, network)
+        // The proxy's variables (networking.proxy), for the phone's own Nix (module/common.sh's nix_env reads them).
+        val proxy = File(etc, "nixup/proxy")
+        val proxyVars = network?.optJSONObject("proxy")
+        if (proxyVars == null || proxyVars.length() == 0) proxy.delete()
+        else {
+            proxy.parentFile?.mkdirs()
+            proxy.writeText(proxyVars.keys().asSequence().filter { it.matches(Regex("[a-z_]+")) }
+                .joinToString("") { "export $it=${quote(proxyVars.getString(it))}\n" })
+        }
         // The config's own files (environment.etc), and the phone's time zone unless they have one.
         writeFiles(data, etc, profile?.optJSONArray("etc"))
         writeTimeZone(etc, profile?.optJSONArray("etc"))
@@ -152,6 +162,27 @@ object Etc {
             if (!next.renameTo(link)) next.delete()
         }
         dir.listFiles().orEmpty().filter { it.name !in commands && it.name != "nix" }.forEach { it.delete() }
+    }
+
+    /**
+     * /etc/hosts: [head] (localhost, the phone's names, networking.hosts and extraHosts), then the lines of each file of
+     * networking.hostFiles ([files]: Nix store paths the build fetched; stevenblack's blocklist is some 4 MB, so it is
+     * copied, not read whole). Whole or not at all, for a program that reads it now; a file not there is told and left.
+     */
+    private fun writeHosts(data: File, etc: File, head: String, files: List<String>) {
+        val file = File(etc, "hosts")
+        val next = File(etc, ".hosts.new")
+        next.outputStream().buffered().use { out ->
+            out.write(head.toByteArray())
+            for (path in files) {
+                val source = outside(data, path)
+                if (!source.isFile) { Out.line("✘ /etc/hosts: $path (networking.hostFiles) is not there"); continue }
+                out.write("\n# $path (networking.hostFiles)\n".toByteArray())
+                source.inputStream().use { it.copyTo(out) }
+                out.write("\n".toByteArray())
+            }
+        }
+        if (!next.renameTo(file)) { next.delete(); file.writeText(head) }
     }
 
     /**

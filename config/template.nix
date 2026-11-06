@@ -700,6 +700,14 @@
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
   networking.hosts = { };                         # names in Nixup's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
   networking.nameservers = [ ];                   # DNS servers of Nixup's services ([ ]: the network's), like [ "9.9.9.9" ]
+  networking.hostFiles = [ ];                     # more files of names in Nixup's /etc/hosts, like [ "${pkgs.stevenblack-blocklist}/hosts" ]
+  networking.stevenblack = {
+    enable = false;                               # StevenBlack's blocklist of ad and tracker names in Nixup's /etc/hosts (its services and shells; not Android's apps)
+    block = [ ];                                  # more lists: "fakenews" "gambling" "porn" "social"
+    whitelist = [ ];                              # names left unblocked, like [ "s.click.aliexpress.com" ]
+  };
+  networking.proxy.default = null;                # the proxy of shells and Nix's downloads, like "http://127.0.0.1:3128"
+  networking.proxy.noProxy = null;                # names that go without it, like "127.0.0.1,localhost,.home.arpa"
 
   environment.systemPackages = with pkgs; [ ];    # Nix packages for root's shell (the app's terminal, ssh, su -c nixup-shell), like htop rsync
 

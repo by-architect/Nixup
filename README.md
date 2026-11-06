@@ -359,6 +359,9 @@ syntax.
 - `environment.etc` (files in Nixup's `/etc`), `systemd.tmpfiles`, `networking.hosts` and
   `networking.nameservers` work as on NixOS, in Nixup's view of the phone, where `/etc/localtime` is the
   phone's time zone (cron's jobs and every program keep the phone's time).
+- So do `networking.hostFiles`, `networking.stevenblack` (an ad and tracker blocklist in that `/etc/hosts`,
+  for Nixup's services and shells; Android's apps keep Android's hosts file) and `networking.proxy` (the
+  shells' `http_proxy`, ..., and Nix's downloads, from the build after the one that sets it).
 - Services start again at boot, run below the app on the screen (so the phone does not stutter), and send a
   notification when they stop by themselves.
 - Start, stop, restart and logs: the app's **Services** tab.

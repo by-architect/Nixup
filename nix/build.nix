@@ -64,6 +64,8 @@ let
   needed = builtins.toJSON {
     inherit (config.system.build) units etc;
     packages = map (package: "${package}") (config.environment.systemPackages ++ shellPackages);
+    # The files of networking.hostFiles (stevenblack's blocklist), which go into the view's /etc/hosts.
+    hostFiles = config.system.build.network.hostFiles or [ ];
   };
   storePathsIn = text: map builtins.head (lib.filter builtins.isList
     (builtins.split "(/nix/store/[a-z0-9]{32}-[A-Za-z0-9+._?=-]+)" (builtins.unsafeDiscardStringContext text)));

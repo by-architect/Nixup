@@ -92,27 +92,37 @@ let
     webdav = "services/network-filesystems/webdav.nix";
   };
 
+  # NixOS's modules of other options (networking.<name>): stevenblack's hosts blocklist, in networking.hostFiles
+  # (nix/nixos-compat.nix), so it is in the view's /etc/hosts.
+  networking = {
+    stevenblack = "config/stevenblack.nix";
+  };
+
   # What NixOS's modules take for granted: NixOS's fixed uids and gids (ids), the modules' maintainers and docs
   # (meta), and the `utils` argument.
   support = [ "misc/ids.nix" "misc/meta.nix" "misc/extra-arguments.nix" "security/dhparams.nix" ];
 
-  placeholder = name: mkOption {
+  placeholder = prefix: name: mkOption {
     type = types.lazyAttrsOf types.anything;
     default = { };
     internal = true;
-    description = "services.${name}, from NixOS's module, once nixpkgs is there.";
+    description = "${prefix}.${name}, from NixOS's module, once nixpkgs is there.";
   };
+  set = option: option.highestPrio < (lib.mkOptionDefault null).priority;
 in
 {
-  imports = lib.optionals (source != null) (map (file: source + "/nixos/modules/${file}") (support ++ lib.attrValues services));
+  imports = lib.optionals (source != null)
+    (map (file: source + "/nixos/modules/${file}") (support ++ lib.attrValues services ++ lib.attrValues networking));
 
   options = lib.optionalAttrs (source == null) {
-    services = lib.mapAttrs (name: _: placeholder name) services;
+    services = lib.mapAttrs (name: _: placeholder "services" name) services;
+    networking = lib.mapAttrs (name: _: placeholder "networking" name) networking;
   };
 
   config.system.build.nixosServices = {
     # For a configuration.nix's first look: whether it sets one of them (so it needs nixpkgs).
-    used = source == null && lib.any (name: options.services.${name}.highestPrio < (lib.mkOptionDefault null).priority) (lib.attrNames services);
+    used = source == null && (lib.any (name: set options.services.${name}) (lib.attrNames services)
+      || lib.any (name: set options.networking.${name}) (lib.attrNames networking));
     files = services;
   };
 }

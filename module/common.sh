@@ -272,6 +272,9 @@ nix_conf() {
 # Nix's environment: its caches and settings in the module's data, and the tokens.
 nix_env() {
   export HOME=$DATA/home TMPDIR=$DATA/tmp USER=root NIX_CONF_DIR=$DATA/home XDG_CACHE_HOME=$DATA/home/.cache
+  # The proxy of the profile in place (networking.proxy), as NixOS's Nix daemon has it: a build that first sets one
+  # fetches without it.
+  [ -r "$DATA/etc/nixup/proxy" ] && . "$DATA/etc/nixup/proxy"
   nix_conf
   nix_tokens
 }

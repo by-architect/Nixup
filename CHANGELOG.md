@@ -6,6 +6,12 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- NixOS's `networking.hostFiles`, `networking.stevenblack` (nixpkgs' own module: StevenBlack's ad and tracker
+  blocklist, with `block` and `whitelist`) and `networking.proxy` (`default`, `httpProxy`, `httpsProxy`,
+  `ftpProxy`, `rsyncProxy`, `allProxy`, `noProxy`): the files' lines go into the `/etc/hosts` of Nixup's
+  services and shells (Android's apps keep Android's), and the proxy into every shell session, Nix's daemon and
+  the phone's own builds' downloads.
+
 - Seraph is now called Nixup: the app (`dev.nixup.manager`), the Magisk module (`nixup`), its data
   (`/data/adb/nixup`), `nixup-rebuild`, `nixup-play-login`, `nixup-shell`, `nixup-backup`, and the flake
   (`github:by-architect/Nixup`, `nixup.lib.nixupSystem`, `nixupConfigurations`). Installing Nixup takes a
