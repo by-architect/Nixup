@@ -675,5 +675,5 @@
   nixpkgs.overlays = [ ];                         # changed packages (only what cache.nixos.org has)
   nixpkgs.hostPlatform = "aarch64-linux";         # the phone's processor: 64-bit ARM
 
-  system.activationScripts = { };                 # scripts at each build: not on the phone yet
+  system.activationScripts = { };                 # scripts at each build and start, as root (as on NixOS; undo puts one back)
 }

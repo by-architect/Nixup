@@ -66,6 +66,8 @@ let
     packages = map (package: "${package}") (config.environment.systemPackages ++ shellPackages);
     # The ssh Nix reaches nix.buildMachines with (nix/nix-builds.nix).
     builders = if config.system.build.nixBuilders == null then null else config.system.build.nixBuilders.sshPath;
+    # The scripts (system.activationScripts, preSwitchChecks: nix/activation.nix), with the bash they run with.
+    inherit (config.system.build) activation;
   };
   storePathsIn = text: map builtins.head (lib.filter builtins.isList
     (builtins.split "(/nix/store/[a-z0-9]{32}-[A-Za-z0-9+._?=-]+)" (builtins.unsafeDiscardStringContext text)));
@@ -106,7 +108,8 @@ in
         || lib.filterAttrs (_: unit: unit.enable) config.systemd.services != { }
         || config.android.backup.repository != null
         || (config.nix.distributedBuilds && config.nix.buildMachines != [ ])
-        || config.system.build.nixosServices.used;
+        || config.system.build.nixosServices.used
+        || config.system.build.activationUsed;
     };
 
     # toString: a path stays where it is, where interpolating it would copy it into the store. With the
@@ -176,6 +179,9 @@ in
         version = config.system.build.version;
         # adb's port and the computers it trusts (nix/adb.nix).
         adb = config.system.build.adb;
+        # The scripts (nix/activation.nix): the activation script (and a dry run's), each script's
+        # undo, and the pre-switch checks, with their bash; null without any.
+        activation = config.system.build.activation;
         # The secrets' names: the phone checks each is there, and removes one that left.
         secrets = lib.attrNames config.android.secrets;
         # The services (systemd.services, Nixup's own and NixOS's modules' among them) as the

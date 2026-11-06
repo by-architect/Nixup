@@ -152,13 +152,15 @@ class Units(private val data: File) {
         }
     }
 
-    /** Carries the plan out, with the shell of [android] (the profile's android part) as root's; the number of units that did not start. */
+    /**
+     * Carries the plan out, after [prepare] wrote the view, /etc and tmpfiles' folders for [android] (the profile's
+     * android part), and the activation scripts ran (see Activation: written again here, /etc would lose what they
+     * wrote in it); the number of units that did not start.
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun apply(android: JSONObject? = null): Int {
         moveLegacy()
         if (toStart.isEmpty() && toStop.isEmpty() && leaving.isEmpty() && toRefresh.isEmpty() && toWrite.isEmpty() && !timers.changes) return 0
-        writeView()
-        Etc.write(data, android)
-        Tmpfiles.apply(data, android?.optJSONArray("tmpfiles"))
         toStop.forEach { stop(it) }
         for (name in leaving) {
             stop(name)
@@ -185,11 +187,16 @@ class Units(private val data: File) {
         return failed + timers.apply() + paths.apply()
     }
 
-    /** At boot: the units the last build left, started again in order. */
+    /**
+     * At boot: the activation scripts of the profile in place (system.activationScripts, as NixOS runs them at each
+     * start: see Activation), then the units the last build left, started again in order.
+     */
     fun start(): Int {
         if (legacy.exists()) Out.line("✘ The services of the earlier Nixup start again with the next build, as units")
         val had = applied()
-        if (had.isEmpty()) {
+        val android = current()
+        val activation = Activation(data)
+        if (had.isEmpty() && !activation.hasScript(android)) {
             // The jobs' timers (system.autoUpgrade, ...) start again without services too.
             timers.start(emptySet())
             return 0
@@ -198,7 +205,13 @@ class Units(private val data: File) {
         runDir.deleteRecursively()
         writeView()
         Etc.write(data)
-        Tmpfiles.apply(data, current()?.optJSONArray("tmpfiles"))
+        Tmpfiles.apply(data, android?.optJSONArray("tmpfiles"))
+        // With /run fresh and /etc in place, before any service starts, as on NixOS.
+        activation.boot(android)
+        if (had.isEmpty()) {
+            timers.start(emptySet())
+            return 0
+        }
         val names = order(active(had), had)
         quietFailures = true
         val count = startAll(names, had)
@@ -645,21 +658,7 @@ class Units(private val data: File) {
      * services.snapclient's sound) and its notify.sh (NIXUP_NOTIFY: `sh "$NIXUP_NOTIFY" <kind> <level> <title>
      * [text]` tells the app something, as a notification). Not the run that started it: its own events are its own.
      */
-    private fun unitEnvironment(env: MutableMap<String, String>) {
-        // A clean start, as systemd gives its services: Android's own variables (init's, which its commands need) and
-        // PATH, nothing of whoever started the engine (its HOSTNAME, TMPDIR, TERM, CLASSPATH, an adb session's ...).
-        val keep = env.filterKeys { key ->
-            key == "PATH" || key in ANDROID_ENVIRONMENT || (key.startsWith("ANDROID_") && !key.startsWith("ANDROID_SOCKET_"))
-        }
-        env.clear()
-        env.putAll(keep)
-        // Where the names of time zones are, as NixOS's units have it (see Etc).
-        env["TZDIR"] = "/etc/zoneinfo"
-        Notify.module?.let {
-            env["NIXUP_MODULE"] = it.path
-            env["NIXUP_NOTIFY"] = File(it, "notify.sh").path
-        }
-    }
+    private fun unitEnvironment(env: MutableMap<String, String>) = cleanEnvironment(env)
 
     private fun notifies(unit: JSONObject) = unit.optBoolean("notifications", true)
 
@@ -1575,6 +1574,25 @@ class Units(private val data: File) {
         /** The root solution's busybox, which runs the services (and the timers' loops). */
         fun busybox() = BUSYBOXES.firstOrNull { File(it).canExecute() }
             ?: throw Stop("there is no busybox (Magisk's or KernelSU's) to run the services with", 1)
+
+        /**
+         * A clean start, as systemd gives its services (and the activation scripts, see Activation): Android's own
+         * variables (init's, which its commands need) and PATH, nothing of whoever started the engine (its HOSTNAME,
+         * TMPDIR, TERM, CLASSPATH, an adb session's ...).
+         */
+        fun cleanEnvironment(env: MutableMap<String, String>) {
+            val keep = env.filterKeys { key ->
+                key == "PATH" || key in ANDROID_ENVIRONMENT || (key.startsWith("ANDROID_") && !key.startsWith("ANDROID_SOCKET_"))
+            }
+            env.clear()
+            env.putAll(keep)
+            // Where the names of time zones are, as NixOS's units have it (see Etc).
+            env["TZDIR"] = "/etc/zoneinfo"
+            Notify.module?.let {
+                env["NIXUP_MODULE"] = it.path
+                env["NIXUP_NOTIFY"] = File(it, "notify.sh").path
+            }
+        }
 
         /**
          * The shared storage in a unit's view, for a user of Android's storage groups (media_rw, sdcard_rw,

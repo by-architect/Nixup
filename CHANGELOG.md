@@ -11,6 +11,13 @@ section after the version, and its text is what the Magisk app shows as the upda
   the app's Generations shows; `system.copySystemConfiguration = true;` keeps a copy of the configuration.nix
   with each generation. `nixos-version` tells them (`--revision`, `--configuration-revision`, `--json`),
   `/etc/os-release` and `/etc/lsb-release` are in Nixup's view, and `system.build.toplevel` is the profile.
+- Scripts, as on NixOS: `system.activationScripts` run as root with each build and each start of the phone, in
+  Nixup's view, before the services start (in the order their `deps` say; a dry run runs those with
+  `supportsDryActivation`, with `NIXOS_ACTION=dry-activate`); `system.preSwitchChecks` run before a build changes
+  anything, and one that fails stops it (`NIXOS_NO_CHECK=1` leaves them out); `system.userActivationScripts` run
+  as each normal user when they change and at each start of the phone, through NixOS's `nixos-activation` unit. A script's `undo` (Nixup's own) runs once when it
+  leaves the config and when Nixup is removed, so the phone gets back what it changed. NixOS's modules that have
+  activation scripts build now.
 - The phone builds its config by itself, as NixOS's `system.autoUpgrade`: at `dates` (with `randomizedDelaySec`,
   `fixedRandomDelay` and `persistent`) it builds again with everything at its newest (`upgrade = false`: as locked),
   the picked config (a git clone gets its new commits first) or `flake`, with `channel` for a configuration.nix
