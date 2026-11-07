@@ -1,0 +1,2512 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Documentation — Nixup</title>
+  <meta name="description" content="Everything about Nixup in one page: what it is, how it works inside, and every part of a phone's configuration.nix (apps, settings, services, backups, generations), with examples to copy.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="index.html" aria-label="Nixup home">
+        <svg viewBox="24 19.6 60 60" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M59.84,47.95C65.64,45.64 70.21,36.18 69.77,29.43Q66.94,30.15 65.39,32.62Q62.71,33.64 61.48,36.23Q59.01,37.69 58.23,40.45Q55.66,42.45 55.17,45.67Z M48.16,47.95C42.36,45.64 37.79,36.18 38.23,29.43Q41.06,30.15 42.61,32.62Q45.29,33.64 46.52,36.23Q48.99,37.69 49.77,40.45Q52.34,42.45 52.83,45.67Z M61.08,49.35C64.88,43.66 75.92,40.41 83.06,42.43Q81.97,44.77 79.57,45.71Q78.32,47.93 75.89,48.68Q74.39,50.69 71.92,51.11Q70.13,52.94 67.57,53.03Q65.36,54.93 62.44,54.78Z M46.92,49.35C43.12,43.66 32.08,40.41 24.94,42.43Q26.03,44.77 28.43,45.71Q29.68,47.93 32.11,48.68Q33.61,50.69 36.08,51.11Q37.87,52.94 40.43,53.03Q42.64,54.93 45.56,54.78Z M61.42,57.83C66.47,57.98 72.26,64.23 73.79,69.50Q70.65,69.78 68.18,67.83Q65.11,67.54 63.08,65.22Q59.80,64.25 58.09,61.28Z M46.58,57.83C41.53,57.98 35.74,64.23 34.21,69.50Q37.35,69.78 39.82,67.83Q42.89,67.54 44.92,65.22Q48.20,64.25 49.91,61.28Z M54,41.5C56.6,45.2 61.2,49.4 61.2,55.4C61.2,60.2 58,63.6 54,63.6C50,63.6 46.8,60.2 46.8,55.4C46.8,52.6 48,50.4 49.6,48.6C49.8,51 50.8,52.6 52.2,53.4C51.6,49 52.4,45 54,41.5ZM54,50.5C55.6,53 57.6,55 57.6,58C57.6,60.4 56,62 54,62C52,62 50.4,60.4 50.4,58C50.4,55.6 52.4,53.4 54,50.5Z"/></svg>
+        Nixup
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a class="optional" href="index.html#features">Features</a>
+        <a class="optional" href="index.html#install">Install</a>
+        <a href="docs.html" aria-current="page">Documentation</a>
+        <a href="https://github.com/by-architect/Nixup">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="wrap docs">
+    <nav class="toc" aria-label="Documentation">
+      <details open>
+        <summary>On this page</summary>
+        <p class="group">Getting started</p>
+        <ul>
+          <li><a href="#what-is-nixup">What Nixup is</a></li>
+          <li><a href="#words">Words used on this page</a></li>
+          <li><a href="#requirements">Requirements</a></li>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#first-build">Your first build</a></li>
+          <li><a href="#nix-basics">Nix in ten minutes</a></li>
+        </ul>
+        <p class="group">How it works</p>
+        <ul>
+          <li><a href="#big-picture">The big picture</a></li>
+          <li><a href="#build-steps">What a build does</a></li>
+          <li><a href="#view">Nixup's view of the phone</a></li>
+          <li><a href="#background">At boot and in the background</a></li>
+          <li><a href="#undo">How changes are undone</a></li>
+          <li><a href="#files">Where things are kept</a></li>
+        </ul>
+        <p class="group">Your config</p>
+        <ul>
+          <li><a href="#config-source">Where the config lives</a></li>
+          <li><a href="#modules">Splitting and sharing it</a></li>
+        </ul>
+        <p class="group">Apps</p>
+        <ul>
+          <li><a href="#apps">Apps from repositories</a></li>
+          <li><a href="#releases">Apps from developers' releases</a></li>
+          <li><a href="#google-play">Google Play</a></li>
+          <li><a href="#app-updates">Keeping apps up to date</a></li>
+          <li><a href="#app-settings">App settings</a></li>
+        </ul>
+        <p class="group">Android</p>
+        <ul>
+          <li><a href="#system-settings">System settings</a></li>
+          <li><a href="#raw-settings">Any other setting</a></li>
+          <li><a href="#lineage">LineageOS settings</a></li>
+        </ul>
+        <p class="group">Shell and Nix</p>
+        <ul>
+          <li><a href="#packages">Packages and the terminal</a></li>
+          <li><a href="#shells">Shells and programs</a></li>
+          <li><a href="#users">Users</a></li>
+          <li><a href="#home-manager">Home Manager</a></li>
+          <li><a href="#nix-on-phone">Nix on the phone</a></li>
+        </ul>
+        <p class="group">Services</p>
+        <ul>
+          <li><a href="#services">Your own services</a></li>
+          <li><a href="#timers">Timers</a></li>
+          <li><a href="#more-units">Sockets, templates, path units</a></li>
+          <li><a href="#service-users">Users, storage and logs</a></li>
+          <li><a href="#unit-options">Supported unit options</a></li>
+          <li><a href="#scripts">Activation scripts</a></li>
+          <li><a href="#nixos-modules">NixOS service modules</a></li>
+          <li><a href="#tailscale">Tailscale</a></li>
+          <li><a href="#syncthing">Syncthing</a></li>
+          <li><a href="#ssh">SSH</a></li>
+          <li><a href="#snapcast">Snapcast</a></li>
+          <li><a href="#adb">adb</a></li>
+          <li><a href="#networking">Networking</a></li>
+          <li><a href="#etc">Files in /etc and folders</a></li>
+        </ul>
+        <p class="group">Keeping things safe</p>
+        <ul>
+          <li><a href="#secrets">Secrets</a></li>
+          <li><a href="#backups">Backups</a></li>
+        </ul>
+        <p class="group">The system</p>
+        <ul>
+          <li><a href="#specialisations">Specialisations</a></li>
+          <li><a href="#auto-upgrade">Automatic upgrades</a></li>
+          <li><a href="#version">Version and labels</a></li>
+        </ul>
+        <p class="group">Using Nixup</p>
+        <ul>
+          <li><a href="#building">Build, dry run, roll back</a></li>
+          <li><a href="#from-a-pc">Building from a PC</a></li>
+          <li><a href="#config-create">A config from your phone</a></li>
+          <li><a href="#app-tour">The app, screen by screen</a></li>
+          <li><a href="#commands">Commands</a></li>
+          <li><a href="#logs">Logs and notifications</a></li>
+          <li><a href="#updating">Updating Nixup</a></li>
+          <li><a href="#uninstall">Uninstall</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+          <li><a href="#limits">Limits</a></li>
+          <li><a href="#license">License</a></li>
+        </ul>
+      </details>
+    </nav>
+
+    <main id="main" class="prose">
+      <header>
+        <h1>Documentation</h1>
+        <p class="lead">
+          Everything about Nixup on one page: what it is, how it works inside, and every part of a phone's config,
+          with examples you can copy. New to Nix? Read <a href="#first-build">Your first build</a> and
+          <a href="#nix-basics">Nix in ten minutes</a> first.
+        </p>
+      </header>
+
+      <div class="notice" role="note">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 6v5M10 13.5v.5" stroke-linecap="round"/></svg>
+        <p><strong>Nixup is in active development.</strong> Back up everything before you start. The project comes with no warranty and is not responsible for data loss.</p>
+      </div>
+
+      <!-- ============================================================ Getting started -->
+
+      <section id="what-is-nixup">
+        <h2>What Nixup is</h2>
+        <p>
+          Nixup lets you describe a rooted Android phone in one text file, <code>configuration.nix</code>, and then
+          makes the phone match it. The file lists the apps you want, how each app is set up, Android's own
+          settings, programs for the terminal, background services and backups. You press <strong>Build</strong>;
+          Nixup checks the whole file first, then changes only what is different. Every build is kept, so you can
+          always go back.
+        </p>
+        <p>Here is the idea. Without Nixup, on every new phone you tap through:</p>
+        <ul>
+          <li>Settings &rarr; Display &rarr; Dark theme &rarr; on</li>
+          <li>F-Droid &rarr; search &ldquo;Termux&rdquo; &rarr; Install</li>
+          <li>Settings &rarr; Apps &rarr; Signal &rarr; Permissions &rarr; Camera &rarr; Allow</li>
+        </ul>
+        <p>With Nixup you write it down once, and every build makes it so:</p>
+<pre><code>{ pkgs, ... }: {
+  android.settings.display.darkMode = true;                            # dark theme on
+  android.packages.fdroid = with pkgs.fdroid; [ com.termux ];          # Termux, from F-Droid
+  android.apps."org.thoughtcrime.securesms".permissions.camera = true; # Signal may use the camera
+}</code></pre>
+        <p>
+          If you know NixOS, you already know the way it works: a <code>configuration.nix</code>, a
+          <code>nixos-rebuild switch</code>, generations you can roll back to, and NixOS's own option names wherever
+          they make sense (<code>networking.hostName</code>, <code>systemd.services</code>,
+          <code>services.openssh</code>, <code>users.users</code>, <code>environment.systemPackages</code>, &hellip;).
+          One module file can often set up a NixOS machine and the phone alike.
+        </p>
+
+        <h3>Why it exists</h3>
+        <p>
+          NixOS itself runs on only a few phones. Nix-on-Droid gives you a Nix terminal on any phone, but without
+          root it cannot manage Android itself. What was missing: installing apps from F-Droid-like repositories
+          from a config, real app backups driven by the config, stable background services and scripts, and app
+          settings. Nixup keeps Android, your ROM and your data, and gives Nix the rights to manage them.
+        </p>
+
+        <h3>What it is not</h3>
+        <ul>
+          <li><strong>Not a new ROM.</strong> Android stays as it is. Nixup is a root module plus an app.</li>
+          <li><strong>Not a PC tool.</strong> The phone builds its own config. A PC is optional.</li>
+          <li><strong>Not a compiler.</strong> Programs come ready-made from cache.nixos.org; the phone never compiles a package.</li>
+          <li><strong>Not a Play Store.</strong> Apps come from F-Droid-style repositories, developers' releases, or Google Play downloaded directly; no store app is needed.</li>
+        </ul>
+      </section>
+
+      <section id="words">
+        <h2>Words used on this page</h2>
+        <p>A few words come up again and again. Each one is simple:</p>
+        <dl class="terms">
+          <div><dt>Root</dt><dd>Full control of the phone. Magisk, KernelSU or APatch give it. Nixup needs it to install apps and change settings without asking each time.</dd></div>
+          <div><dt>Module</dt><dd>How Nixup is installed: a zip that Magisk installs. It brings the Nixup app, Nix, and the scripts that run at each start of the phone. (In Nix, a &ldquo;module&rdquo; is also one file of a config: see <a href="#modules">Splitting and sharing</a>.)</dd></div>
+          <div><dt>Nix</dt><dd>The language the config is written in, and the tool that reads it. Nix also downloads Linux programs (&ldquo;Nix packages&rdquo;) ready-made from cache.nixos.org.</dd></div>
+          <div><dt>nixpkgs</dt><dd>The big collection of Nix packages and NixOS modules. <code>pkgs.htop</code> is the htop package from it.</dd></div>
+          <div><dt>Config</dt><dd>Your <code>configuration.nix</code> (or a <code>flake.nix</code> that points to it): the one file that describes the phone.</dd></div>
+          <div><dt>Flake</dt><dd>A folder with a <code>flake.nix</code> and a <code>flake.lock</code>. The lock file pins the exact version of everything the config uses. Optional.</dd></div>
+          <div><dt>Build</dt><dd>Reading the config, checking it, and making the phone match it. NixOS calls this a &ldquo;switch&rdquo;.</dd></div>
+          <div><dt>Dry run</dt><dd>A build that only says what it would change, and changes nothing.</dd></div>
+          <div><dt>Profile</dt><dd>What a build turns your config into: one JSON file (<code>profile.json</code>) that lists exactly what the phone should have.</dd></div>
+          <div><dt>Engine</dt><dd>The part of Nixup that changes the phone to match the profile. Its code is inside the Nixup app, but it runs as root, apart from the app.</dd></div>
+          <div><dt>Generation</dt><dd>A saved build. Each build that changes something becomes generation 1, 2, 3&hellip; You can switch back to any of them.</dd></div>
+          <div><dt>Service</dt><dd>A program that keeps running in the background, like an SSH server or Syncthing. You write them as NixOS's <code>systemd.services</code>.</dd></div>
+          <div><dt>Nixup's view</dt><dd>A private version of the phone's folders where Linux folders such as <code>/nix</code>, <code>/etc</code> and <code>/home</code> exist. Services and the terminal run in it; Android's apps never see it.</dd></div>
+          <div><dt>Specialisation</dt><dd>Another version of the config (a &ldquo;work&rdquo; or &ldquo;travel&rdquo; one), built with it, that you can switch to without building again.</dd></div>
+          <div><dt>Not managed</dt><dd>An option left out, or set to <code>null</code>, is not touched: the phone keeps whatever you set by hand.</dd></div>
+        </dl>
+      </section>
+
+      <section id="requirements">
+        <h2>Requirements</h2>
+        <ul>
+          <li><strong>A rooted phone:</strong> Magisk (tested), KernelSU or APatch.</li>
+          <li><strong>Android 11 or newer</strong>, on a 64-bit ARM processor (arm64). The installer stops on anything else.</li>
+          <li><strong>A network connection</strong> for builds: app lists, apps and Nix packages are downloaded.</li>
+          <li><strong>Free storage</strong> for the Nix packages your config uses. They are kept in <code>/data/adb/nixup/nix</code>.</li>
+          <li><strong>Nix on a PC</strong>, only if you want to build there. It is optional.</li>
+        </ul>
+      </section>
+
+      <section id="install">
+        <h2>Install</h2>
+        <ol>
+          <li>Root the phone (see <a href="#requirements">Requirements</a>).</li>
+          <li>Download <code>nixup-v&lt;version&gt;.zip</code> from the <a href="https://github.com/by-architect/Nixup/releases">releases page</a>.</li>
+          <li>In Magisk, open <strong>Modules</strong> &rarr; <strong>Install from storage</strong> and pick the zip. (KernelSU and APatch have the same in their module screen.)</li>
+          <li>Restart the phone.</li>
+          <li>Open the <strong>Nixup</strong> app. Allow root when your root manager asks, and allow notifications.</li>
+        </ol>
+        <p>
+          Nothing on the phone changes yet. Until your first build, Nixup has an empty profile that manages nothing.
+        </p>
+        <details class="more">
+          <summary>What the installer does, step by step</summary>
+          <div class="body">
+            <ul>
+              <li>Stops if the phone is older than Android 11 (API 30) or is not arm64.</li>
+              <li>Installs the Nixup app for the phone's owner only (not in a work profile or app clone, which would not get root), and allows its notifications.</li>
+              <li>Makes Nix's commands runnable (<code>nix</code>, <code>nix-instantiate</code>, <code>nix-store</code>, <code>nix-env</code>, <code>nix-shell</code>, &hellip; are all the same <code>nix</code> program).</li>
+              <li>Adds <code>nixup-shell</code>, <code>nixup-rebuild</code>, <code>nixup-backup</code>, <code>nixup-version</code> and <code>nixos-version</code> to <code>/system/bin</code> (they work from the next restart).</li>
+              <li>Puts the empty starting profile in <code>/data/adb/nixup/profile.json</code>, unless a profile is already there.</li>
+              <li>Takes over an older install under Nixup's old names (Seraph, Andronix), so its records, generations and secrets carry on.</li>
+              <li>If the app on the phone was signed with another key, it is replaced; your root manager then asks to allow root again.</li>
+            </ul>
+          </div>
+        </details>
+      </section>
+
+      <section id="first-build">
+        <h2>Your first build</h2>
+        <p>Five minutes, start to finish. Start small: one app and one setting.</p>
+        <ol>
+          <li>
+            Open Nixup and go to the <strong>Build</strong> screen. Press <strong>New</strong> and choose a folder
+            (a folder of its own, like <code>Documents/phone</code>). Nixup saves a starter
+            <code>configuration.nix</code> there and picks it as your config. (Or press <strong>Pick file</strong>
+            for a file you already have, <strong>Git</strong> to clone your repository, or <strong>Type it</strong>
+            for a flake address like <code>github:you/phone</code>.)
+          </li>
+          <li>
+            Open the file in any text editor, on the phone or on a PC. The starter file lists every option, each
+            with a comment. To begin, you can replace it with just this:
+<pre><code>{ pkgs, ... }: {
+  # One app from F-Droid
+  android.packages.fdroid = with pkgs.fdroid; [ com.termux ];
+
+  # One setting
+  android.settings.display.darkMode = true;
+}</code></pre>
+          </li>
+          <li>Press <strong>Dry run</strong>. Nixup reads and checks the whole file and lists what a build would change. Nothing changes yet.</li>
+          <li>Press <strong>Build</strong>. Termux is installed and dark mode turns on. A notification says the build made <strong>generation 1</strong>.</li>
+          <li>Now delete the <code>darkMode</code> line and build again. Dark mode goes back to how it was <em>before Nixup</em>, and the build is generation 2.</li>
+          <li>Changed your mind? Open <strong>Generations</strong>, pick generation 1 and switch to it.</li>
+        </ol>
+        <div class="callout">
+          <span class="label">Good to know</span>
+          <p>
+            If anything in the config is wrong (a typo in an app's name, a wrong value, a missing file), the build
+            stops <strong>before</strong> it changes anything, and the log says what and where.
+          </p>
+        </div>
+      </section>
+
+      <section id="nix-basics">
+        <h2>Nix in ten minutes</h2>
+        <p>
+          You do not need to learn all of Nix to write a config. A config is mostly names and values. This is all
+          the Nix you need for this page.
+        </p>
+
+        <h3>The shape of a config</h3>
+<pre><code>{ config, lib, pkgs, ... }:   # the first line: Nixup hands the file these things
+{                             # everything you set goes between these braces
+  networking.hostName = "phone";
+}</code></pre>
+        <ul>
+          <li><code>pkgs</code> is where apps and Nix packages come from (<code>pkgs.htop</code>, <code>pkgs.fdroid.com.termux</code>).</li>
+          <li><code>lib</code> holds helpers like <code>lib.mkForce</code>. <code>config</code> is the finished config, to read other options.</li>
+          <li><code>...</code> means &ldquo;and anything else&rdquo;. Ask only for what you use: <code>{ pkgs, ... }:</code> is fine.</li>
+        </ul>
+
+        <h3>Values</h3>
+<pre><code>{
+  networking.hostName = "phone";                # text goes in double quotes
+  android.settings.display.fontScale = 1.1;     # a number
+  android.settings.display.darkMode = true;     # true or false
+  time.timeZone = null;                         # null: not managed, leave it as it is
+  android.backup.passwordFile = ./backup-password;   # a path: a file next to this one (no quotes)
+}</code></pre>
+        <p>Each setting ends with a semicolon <code>;</code>. A <code>#</code> starts a comment, which Nix ignores.</p>
+
+        <h3>Groups and dots</h3>
+        <p>Braces group names. Dots are a shortcut for braces, so these two mean exactly the same:</p>
+<pre><code>android.settings.sound.touchSounds = false;
+
+android.settings.sound = {
+  touchSounds = false;
+};</code></pre>
+
+        <h3>Lists</h3>
+        <p>Square brackets, with spaces between the items (no commas):</p>
+<pre><code>android.packages.playstore = [ "com.whatsapp" "org.telegram.messenger" ];</code></pre>
+
+        <h3><code>with</code></h3>
+        <p><code>with pkgs;</code> lets you write <code>htop</code> instead of <code>pkgs.htop</code> in the list after it:</p>
+<pre><code>environment.systemPackages = with pkgs; [ htop git rsync ];
+# is the same as
+environment.systemPackages = [ pkgs.htop pkgs.git pkgs.rsync ];</code></pre>
+
+        <h3>Text with values in it, and long text</h3>
+<pre><code># ${ } puts a value into text: here, the folder where a package is
+terminal.font = "${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf";
+
+# Two single quotes start and end text over many lines (handy for scripts)
+systemd.services.hello.script = ''
+  echo "hello from the phone"
+  date
+'';</code></pre>
+
+        <h3>Names with dots in them</h3>
+        <p>An app's package name has dots, so where it is a <em>name</em>, put it in quotes:</p>
+<pre><code>android.apps."org.thoughtcrime.securesms".battery = "unrestricted";</code></pre>
+        <p>
+          In an app list, <code>with pkgs.fdroid; [ com.termux ]</code> works without quotes because
+          <code>com.termux</code> is looked up inside <code>pkgs.fdroid</code>. A name that starts with a Nix word
+          (<code>in</code>, <code>let</code>, <code>with</code>, <code>if</code>, &hellip;) cannot be written that way:
+          put it in quotes instead, like <code>"in.sunilpaulmathew.izzyondroid"</code>.
+        </p>
+
+        <h3>When two places set the same option</h3>
+        <p>Nixup uses NixOS's rules. These helpers from <code>lib</code> decide who wins, or whether a line counts at all:</p>
+<pre><code>{ config, lib, ... }: {
+  # Wins over a value set anywhere else (here: a NixOS module's own user)
+  systemd.services.navidrome.serviceConfig.User = lib.mkForce "root";
+
+  # Loses to a value set anywhere else: a default that other files can change
+  android.settings.display.fontScale = lib.mkDefault 1.0;
+
+  # Only when the condition is true
+  services.syncthing.enable = lib.mkIf (config.networking.hostName == "phone") true;
+}</code></pre>
+
+        <h3>More than one file</h3>
+<pre><code>{
+  imports = [ ./apps.nix ./services.nix ];   # these files are read as part of this config
+}</code></pre>
+
+        <div class="callout">
+          <span class="label">Common mistakes</span>
+          <ul>
+            <li>A missing <code>;</code> at the end of a line.</li>
+            <li>Commas between list items: write <code>[ "a" "b" ]</code>, not <code>[ "a", "b" ]</code>.</li>
+            <li>An app name with dots as a name without quotes: write <code>android.apps."com.termux"</code>.</li>
+            <li>Quotes around a path: <code>./key</code> is the file next to the config; <code>"./key"</code> is only text, and Nix does not look for the file.</li>
+          </ul>
+          <p>The build stops at all of these, before changing anything, and says the file and line.</p>
+        </div>
+      </section>
+
+      <!-- ============================================================ How it works -->
+
+      <section id="big-picture">
+        <h2>The big picture</h2>
+        <p>A build moves through four parts, from your file to the phone:</p>
+        <div class="parts" role="list">
+          <div role="listitem"><strong>1. Your config</strong><span><code>configuration.nix</code> or a flake, wherever you keep it.</span></div>
+          <div role="listitem"><strong>2. Nix</strong><span>Comes with Nixup. Reads the config with Nixup's options, and checks it.</span></div>
+          <div role="listitem"><strong>3. The profile</strong><span>One JSON file: everything the phone should have.</span></div>
+          <div role="listitem"><strong>4. The engine</strong><span>Runs as root. Changes the phone to match, then saves a generation.</span></div>
+        </div>
+        <p>
+          Nix reads your config the same way NixOS reads its own: every file is a module, every option has a type,
+          and Nixup's options are modules too. But instead of a whole operating system, the result is a
+          <strong>profile</strong>: a plain description of the apps, settings, services and files the phone should
+          have. For this config:
+        </p>
+<pre><code>{ pkgs, ... }: {
+  android.packages.fdroid = with pkgs.fdroid; [ com.termux ];
+  android.settings.display.darkMode = true;
+}</code></pre>
+        <p>the profile has, among other things (shortened):</p>
+<pre><code>{
+  "schemaVersion": 1,
+  "android": {
+    "darkMode": true,
+    "repos": { "fdroid": { "url": "https://f-droid.org/repo", "fingerprint": "43238d51…" } },
+    "packages": { "fdroid": [ "com.termux" ] },
+    "units": { },
+    "storePaths": [ ]
+  }
+}</code></pre>
+        <p>
+          The engine then compares the profile with the phone, changes only what differs, and reads each change
+          back to be sure it took. Nix packages appear in the profile only as names
+          (<code>/nix/store/&hellip;-htop-3.4.1</code>); the phone downloads them ready-made.
+        </p>
+
+        <h3>What is inside Nixup</h3>
+        <p>One zip brings three things:</p>
+        <ul>
+          <li><strong>The module:</strong> shell scripts that run builds, start everything again at each start of the phone, and undo everything when Nixup is removed. They live in <code>/data/adb/modules/nixup</code>.</li>
+          <li><strong>The app:</strong> the screens you use (Build, Updates, Backups, Services, Logs, a terminal). The <strong>engine</strong>'s code is inside the app's APK too, but it never runs as the app: the module starts it as root with Android's <code>app_process</code>.</li>
+          <li><strong>Nix:</strong> a ready-made Nix for ARM64, Nixup's option files (<code>nix/*.nix</code>) and the library part of nixpkgs, so a first build needs nothing else.</li>
+        </ul>
+      </section>
+
+      <section id="build-steps">
+        <h2>What a build does</h2>
+        <p>
+          Every build, from the app, a shell or a PC, goes through the same steps. The first seven only read and
+          check. If any of them finds a problem, the build stops and <strong>nothing on the phone has changed</strong>.
+        </p>
+        <ol class="flow">
+          <li><strong>Find the config.</strong> The one the app's Config picked, or one given for this build only (<code>nixup-rebuild switch --file &hellip;</code>).</li>
+          <li><strong>Bring app lists up to date.</strong> Nix reads just the repositories from your config, and the engine refreshes their app lists (at most once a day; <strong>Upgrade</strong> always). Each list is checked against its repository's signing key.</li>
+          <li><strong>Get nixpkgs when needed.</strong> A flake gets its inputs as <code>flake.lock</code> pins them; a <code>configuration.nix</code> uses the phone's copy of nixos-unstable.</li>
+          <li><strong>Evaluate the config.</strong> Nix checks every option's name, type and value, runs the config's checks (assertions), prints its warnings, and writes the profile.</li>
+          <li><strong>Collect secrets.</strong> Files your options point to (like <code>./tailscale.key</code>) are read and set aside where only root can read them. They never go into the profile.</li>
+          <li><strong>Fetch Nix packages</strong> from cache.nixos.org into Nixup's store. Small files made from the config (a service's settings file) are built on the phone. A package that would need compiling stops the build, unless you have <a href="#nix-on-phone">build machines</a>.</li>
+          <li><strong>Plan and check.</strong> The engine plans every app (is it in its repository? signed with the right key? is Google Play signed in?), every setting, secret, service and user, runs your <a href="#scripts"><code>system.preSwitchChecks</code></a>, and checks free space. All problems are listed together. <strong>A dry run ends here</strong>, with the list of what would change.</li>
+          <li class="gate"><span>Nothing has changed up to this line</span></li>
+          <li class="changes"><strong>Install and update apps.</strong> Each download is checked (size, SHA-256 and signing key) before it is installed.</li>
+          <li class="changes"><strong>Apply settings:</strong> app settings, apps that came with the phone, system settings and adb. Each is read back after it is changed.</li>
+          <li class="changes"><strong>Prepare Nixup's view:</strong> users, <code>/etc</code>, hosts, DNS, folders (<code>systemd.tmpfiles</code>).</li>
+          <li class="changes"><strong>Run activation scripts, then services:</strong> what left the config or changed is stopped, the rest started in order, then timers and path units.</li>
+          <li class="changes"><strong>Remove apps</strong> that left the config. Their data is kept.</li>
+          <li class="changes"><strong>Save a generation.</strong> The profile becomes the phone's, the packages it uses are kept safe from clean-ups, and if anything changed a new generation is saved.</li>
+        </ol>
+        <p>The build ends with a notification that sums it up in one line, like:</p>
+<pre><code>Built generation 12
+Changed: 2 apps installed, 1 updated, system settings, services</code></pre>
+        <ul>
+          <li><strong>A step after the line fails?</strong> (a setting the phone refuses, a service that does not start.) The rest still runs, and the build is the phone's anyway: its services start at boot and its generation is kept. The run is marked failed and says why, as NixOS does when a unit fails. Building again tries again.</li>
+          <li><strong>The phone restarts in the middle?</strong> The build starts again by itself after the next unlock.</li>
+          <li><strong>One at a time.</strong> A second build, or an update, waits for the first or is refused with a message.</li>
+          <li><strong>After a restart, unlock first.</strong> Android keeps apps' data locked until the first unlock, so a build waits for it.</li>
+          <li><strong>Nothing changed?</strong> Then no new generation is made; the notification says &ldquo;nothing changed&rdquo;.</li>
+        </ul>
+      </section>
+
+      <section id="view">
+        <h2>Nixup's view of the phone</h2>
+        <p>
+          Linux programs from Nix expect Linux folders: <code>/nix</code> for packages, <code>/etc</code> for users,
+          DNS servers and certificates, <code>/home</code>, <code>/var</code>, <code>/tmp</code>. Android has none of
+          them, and changing Android's own folders would be risky. So Nixup gives its programs a private view of the
+          phone (a Linux &ldquo;mount namespace&rdquo;): the same phone, with these folders added.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">In the view</th><th scope="col">Is really</th><th scope="col">Holds</th></tr></thead>
+            <tbody>
+              <tr><td><code>/nix</code></td><td><code>/data/adb/nixup/nix/nix</code></td><td>Nixup's Nix store: every package</td></tr>
+              <tr><td><code>/etc</code></td><td><code>/data/adb/nixup/etc</code></td><td>users, hosts, DNS, certificates, time zone, your <code>environment.etc</code></td></tr>
+              <tr><td><code>/var</code></td><td><code>/data/adb/nixup/var</code></td><td>services' data (<code>/var/lib/&lt;service&gt;</code>), kept</td></tr>
+              <tr><td><code>/run</code></td><td><code>/data/adb/nixup/run</code></td><td>sockets and runtime files, emptied at each start</td></tr>
+              <tr><td><code>/home</code></td><td><code>/data/adb/nixup/users</code></td><td>normal users' homes, ready before the first unlock</td></tr>
+              <tr><td><code>/tmp</code></td><td>a new empty folder</td><td>made fresh for each program that runs</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Everything else (<code>/system</code>, <code>/data</code>, <code>/sdcard</code>, <code>/proc</code>,
+          <code>/dev</code>) is the real phone. Services, activation scripts, backups, the app's terminal,
+          <code>nixup-shell</code> and SSH logins all run in this view. Android's apps never see it, and nothing in
+          it leaks out.
+        </p>
+<pre><code>adb shell ls /nix                       # Android itself: no such folder
+adb shell su -c 'nixup-shell ls /nix'   # Nixup's view: the Nix store is there</code></pre>
+        <p>Nixup writes its <code>/etc</code> from the profile at each build and each start:</p>
+        <ul>
+          <li><code>passwd</code>, <code>group</code>, <code>shadow</code>, <code>subuid</code>, <code>subgid</code>: the users and groups of your config.</li>
+          <li><code>hosts</code> and <code>resolv.conf</code>: your <code>networking.*</code> options, or the DNS servers of the network in use (updated when you change networks).</li>
+          <li><code>ssl/certs/ca-certificates.crt</code>: built from Android's trusted certificates. <code>localtime</code> and <code>zoneinfo</code>: from Android's time zone data, so programs keep the phone's time.</li>
+          <li>The shells' files (<code>profile</code>, <code>bashrc</code>, &hellip;), your <code>environment.etc</code> files, and Nixup's own folder <code>/etc/nixup</code>.</li>
+        </ul>
+      </section>
+
+      <section id="background">
+        <h2>At boot and in the background</h2>
+        <h3>At each start of the phone</h3>
+        <ol>
+          <li>Nixup waits until Android has finished starting.</li>
+          <li>It sets again what Android forgets at a restart: adb's network port, and the settings some ROMs reset at start.</li>
+          <li>It writes Nixup's <code>/etc</code>, empties <code>/run</code>, runs your activation scripts, and starts the services the last build left running. A service that fails at boot is tried again after 30 seconds, 1.5 minutes and 4 minutes; you are told only if the last try fails.</li>
+          <li>It picks up a build, update, backup or restore that the restart broke off, once the phone is unlocked (and online, for a build or update).</li>
+        </ol>
+        <p>Nothing is evaluated or downloaded at a start: the phone uses the profile it has.</p>
+
+        <h3>In the background</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">When</th><th scope="col">What</th></tr></thead>
+            <tbody>
+              <tr><td>every 6 hours</td><td>On Wi-Fi, with the battery not low: looks for app updates, installs those of sources set to update by themselves, tells you about the rest, and looks for a newer Nixup.</td></tr>
+              <tr><td>every 15 minutes</td><td>With the battery not low: picks up runs a restart broke off, then backs up what is due.</td></tr>
+              <tr><td>at your times</td><td>Your timers (<code>systemd.timers</code>, <code>startAt</code>), automatic upgrades, <code>nix.gc</code> and <code>nix.optimise</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>So the phone stays smooth</h3>
+        <ul>
+          <li>What the phone runs by itself (at boot, from a job or timer) runs on Android's background cores at the lowest priority. What you wait for (from the app, adb or ssh) runs a little lower than the app on screen.</li>
+          <li>Services run at a lower priority than the app on screen, on the background cores; <code>serviceConfig.Nice</code> changes their priority.</li>
+          <li>The phone stays awake while a build, update or backup runs (at most an hour), so a download is not cut off when the screen goes off.</li>
+          <li>A run keeps going if the adb or ssh session that started it is cut off (as when a build restarts Tailscale, which that session came through).</li>
+        </ul>
+        <details class="more">
+          <summary>Runs that a restart broke off</summary>
+          <div class="body">
+            <ul>
+              <li>Each build, update, backup and restore leaves a note in <code>/data/adb/nixup/pending/</code> while it runs.</li>
+              <li>After a restart, the note starts the run again from its start (what was done goes fast: installed apps are up to date, restic skips what it has).</li>
+              <li>A build is picked up once, the others up to three times. A run broken off more than three days ago is let go.</li>
+              <li>Nixup also marks its own folder so Android's file-label check at each start skips it; otherwise every start would walk through every file of Nixup's store.</li>
+            </ul>
+          </div>
+        </details>
+      </section>
+
+      <section id="undo">
+        <h2>How changes are undone</h2>
+        <p>
+          Before Nixup changes something for the first time, it writes down how it was (in
+          <code>/data/adb/nixup/original/</code>). That is what makes every change reversible:
+        </p>
+<pre><code># Build 1: Nixup notes the phone's font size (say 1.0), then sets 1.3
+android.settings.display.fontScale = 1.3;
+
+# Build 2: the line is gone, so the font size goes back to 1.0, and the note is dropped</code></pre>
+        <ul>
+          <li><strong>Settings</strong> (system, app, adb) go back to their earlier value when their line leaves the config.</li>
+          <li><strong>Apps</strong> Nixup installed are on its list (<code>/data/adb/nixup/owned</code>). An app taken out of the config is uninstalled, and its data kept, so installing it again brings it back. Apps that were never on that list are never removed.</li>
+          <li><strong>Apps that came with the phone</strong> and were removed with <code>debloat</code> come back when the line goes.</li>
+          <li><strong>Scripts</strong> can carry an <code>undo</code>, run once when the script leaves the config (see <a href="#scripts">Activation scripts</a>).</li>
+          <li><strong>Services</strong> that leave the config are stopped and their files removed (their data in <code>/var/lib</code> stays).</li>
+          <li><strong>Removing Nixup</strong> undoes all of it at once (see <a href="#uninstall">Uninstall</a>).</li>
+        </ul>
+        <p>
+          <strong>Generations</strong> are the other way back: switching to an older generation applies its profile
+          again (its settings, apps and services). Apps come back at their newest versions; Nixup does not
+          downgrade apps.
+        </p>
+      </section>
+
+      <section id="files">
+        <h2>Where things are kept</h2>
+<pre><code>/data/adb/modules/nixup/       # the module: scripts, the app's APK, Nix, Nixup's options
+/data/adb/nixup/               # Nixup's data, root only
+├── source                     # the config the app picked
+├── profile.json               # the profile in use
+├── system.json                # the last build whole, with its specialisations
+├── generations/&lt;n&gt;/           # each generation: profile, app versions, source, flake.lock, …
+├── original/                  # how settings were before Nixup changed them
+├── owned                      # the apps Nixup installed
+├── repos/                     # app lists: repositories, releases, Google Play
+├── secrets/                   # secret files, root only
+├── nix/                       # Nixup's Nix store (/nix in its view)
+├── etc/ var/ run/ users/      # /etc, /var, /run and /home in its view
+├── home/                      # root's home in its view (~/.ssh, Nix's settings)
+├── git/                       # a config cloned by the app's Git
+├── units/&lt;service&gt;/log        # each service's files and log
+├── events                     # what happened: the Logs screen reads it
+├── logs/&lt;run&gt;.log             # each run's whole log (the newest 60)
+├── apply.log                  # every run's output in one file
+├── pending/                   # runs a restart broke off
+└── incoming/                  # what a PC sent for a build (removed after)</code></pre>
+        <p>
+          Your config is not in this list: it stays wherever you keep it, and Nixup only reads it (a flake's build
+          writes its <code>flake.lock</code> next to it).
+        </p>
+      </section>
+
+      <!-- ============================================================ Your config -->
+
+      <section id="config-source">
+        <h2>Where the config lives</h2>
+        <p>
+          Nixup has no config folder of its own. You keep your config wherever you like, and the app's
+          <strong>Config</strong> picks it. It can be any of these four:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">What you pick</th><th scope="col">How it is built</th></tr></thead>
+            <tbody>
+              <tr><td>a <code>configuration.nix</code></td><td>On its own, with the phone's copy of nixpkgs (nixos-unstable), fetched the first time the config uses a Nix package.</td></tr>
+              <tr><td>a <code>flake.nix</code></td><td>Its folder is the flake, as <code>/etc/nixos</code> is for <code>nixos-rebuild --flake</code>. Nix writes <code>flake.lock</code> next to it.</td></tr>
+              <tr><td>a git repository</td><td>The app's <strong>Git</strong> clones it into <code>/data/adb/nixup/git/</code> and builds the <code>flake.nix</code> (or <code>configuration.nix</code>) in it.</td></tr>
+              <tr><td>a flake address</td><td>Like <code>github:you/phone</code>: fetched again for each build, so the phone has no copy to edit.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The file can be in internal storage, in Download, or on an SD card. Any of them can end in
+          <code>#name</code> to pick one configuration of a flake, like <code>github:you/phone#work-phone</code>.
+        </p>
+
+        <h3>A config as a flake</h3>
+        <p>
+          A flake pins the exact version of Nixup and nixpkgs in <code>flake.lock</code>, so a build today and a
+          build next month use the same versions, until you upgrade. <code>nix flake init -t github:by-architect/Nixup</code>
+          writes this for you:
+        </p>
+<pre><code>{
+  description = "My phone, configured by Nixup";
+
+  inputs.nixup.url = "github:by-architect/Nixup";
+
+  outputs = { nixup, ... }: {
+    # Named after the phone (its device name)
+    nixupConfigurations.phone = nixup.lib.nixupSystem {
+      modules = [ ./configuration.nix ];
+    };
+  };
+}</code></pre>
+        <ul>
+          <li><code>nixup.lib.nixupSystem</code> is Nixup's <code>nixpkgs.lib.nixosSystem</code>. It takes <code>modules</code> and, like NixOS, <code>specialArgs</code>.</li>
+          <li>Which configuration is built: the one named after <code>#</code>; else the flake's only one; else the one named after the phone's device name, as NixOS picks by host name.</li>
+          <li>A flake's folder is copied whole into Nix's store, so give <code>flake.nix</code> a folder of its own (not Download). A folder over 50 MB is refused.</li>
+          <li>To use your own nixpkgs for both: <code>inputs.nixup.inputs.nixpkgs.follows = "nixpkgs";</code></li>
+          <li>The app names in <code>pkgs.fdroid</code> and the other repositories always come from the phone's newest app lists; <code>flake.lock</code> does not pin them.</li>
+          <li>A flake made when Nixup was called Seraph (<code>seraphConfigurations</code>, <code>lib.seraphSystem</code>) still builds as it is.</li>
+        </ul>
+
+        <h3>A config in a git repository</h3>
+        <p>
+          Press <strong>Git</strong> on the Build screen and give the address: <code>https://github.com/you/phone</code>,
+          <code>github:you/phone</code>, <code>you/phone</code> (GitHub), <code>gitlab:you/phone</code>, or any git address,
+          with a branch, a folder in it, a configuration name and its submodules if you want them. Then:
+        </p>
+        <ul>
+          <li><strong>Pull</strong> brings the repository's new commits (changes you made on the phone are put aside, then put back).</li>
+          <li><strong>Pull and build</strong> does both in one go.</li>
+          <li><strong>Reclone</strong> starts again from scratch (changes made on the phone are lost).</li>
+        </ul>
+        <p>
+          Git itself comes from nixpkgs (<code>gitMinimal</code>), downloaded once into Nixup's store. As with any flake
+          in a git repository, only files git knows about are used: a brand-new file must be added to git first.
+        </p>
+        <p>For a private repository, put a token in <code>/data/adb/nixup/secrets/nix-access-tokens</code>, one line per site:</p>
+<pre><code>github.com=ghp_your_token_here</code></pre>
+        <p>Git and Nix get it for each command; it is never written anywhere else.</p>
+        <div class="callout warn">
+          <span class="label">Careful</span>
+          <p>
+            A clone made by the app lives in <code>/data/adb/nixup/git/</code>, which is deleted when Nixup is
+            uninstalled. Push changes you made on the phone before you uninstall.
+          </p>
+        </div>
+
+        <h3>Which nixpkgs a <code>configuration.nix</code> gets</h3>
+        <p>
+          A <code>configuration.nix</code> on its own has no <code>flake.lock</code>, so the phone keeps its own copy of
+          nixpkgs, like a NixOS channel: nixos-unstable, fetched the first time a config needs it, and fetched again
+          with <strong>Upgrade</strong>. A config that imports Home Manager (<code>&lt;home-manager/nixos&gt;</code>)
+          gets Home Manager the same way.
+        </p>
+        <details class="more">
+          <summary>Using another nixpkgs release</summary>
+          <div class="body">
+            <p>
+              Write the channel's address into <code>/data/adb/nixup/channel</code> (as root), then press
+              <strong>Upgrade</strong>. For an automatic upgrade, <code>system.autoUpgrade.channel</code> does the same
+              (see <a href="#auto-upgrade">Automatic upgrades</a>).
+            </p>
+<pre><code>su -c 'echo https://channels.nixos.org/nixos-26.05/nixexprs.tar.xz &gt; /data/adb/nixup/channel'</code></pre>
+            <p>Home Manager then follows it (its <code>release-26.05</code> branch instead of <code>master</code>).</p>
+          </div>
+        </details>
+      </section>
+
+      <section id="modules">
+        <h2>Splitting and sharing the config</h2>
+        <p>
+          A config can be split into several files with <code>imports</code>, as on NixOS. Each file is a
+          <em>module</em>: the same <code>{ ... }: { ... }</code> shape as the config itself.
+        </p>
+<pre><code># configuration.nix
+{
+  imports = [ ./apps.nix ./settings.nix ./services.nix ];
+}
+
+# apps.nix
+{ pkgs, ... }: {
+  android.packages.fdroid = with pkgs.fdroid; [ com.termux ];
+}</code></pre>
+
+        <h3>One file for the phone and a NixOS machine</h3>
+        <p>
+          Wherever NixOS has an option for something, Nixup uses the same name and meaning. So a module that only
+          uses those options works on both:
+        </p>
+<pre><code># common.nix: read by the laptop (NixOS) and the phone (Nixup)
+{
+  time.timeZone = "Europe/Istanbul";
+  services.tailscale.enable = true;
+  services.syncthing.enable = true;
+  users.users.root.openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAA… you@laptop" ];
+}</code></pre>
+        <p>And one flake can build both machines:</p>
+<pre><code>{
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+  inputs.nixup.url = "github:by-architect/Nixup";
+  inputs.nixup.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { nixpkgs, nixup, ... }: {
+    nixosConfigurations.laptop = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [ ./common.nix ./laptop.nix ];
+    };
+    nixupConfigurations.phone = nixup.lib.nixupSystem {
+      modules = [ ./common.nix ./phone.nix ];
+    };
+  };
+}</code></pre>
+        <ul>
+          <li>Nixup's modules are of their own kind (<code>_class = "nixup"</code>). A module marked <code>_class = "nixos";</code> is refused by name, before its options are read.</li>
+          <li>Options only a phone has live under <code>android.*</code> (apps, settings, backups, adb). Put them in the phone's own file.</li>
+          <li>An option that moved still works under its old name, and the build says the new name (like <code>android.services.tailscale</code>, now <code>services.tailscale</code>).</li>
+        </ul>
+      </section>
+
+      <!-- ============================================================ Apps -->
+
+      <section id="apps">
+        <h2>Apps from repositories</h2>
+        <p>
+          F-Droid and every F-Droid-style repository (IzzyOnDroid, Guardian Project, a developer's own) work the
+          same way: name the repository, then list its apps by package name.
+        </p>
+<pre><code>{ pkgs, ... }: {
+  # f-droid.org is always there, under the name "fdroid"
+  android.packages.fdroid = with pkgs.fdroid; [
+    com.termux
+  ];
+
+  # Another repository: a name you choose, and its address with its key (fingerprint)
+  android.repos.izzyondroid.url =
+    "https://apt.izzysoft.de/fdroid/repo?fingerprint=3BF0D6ABFEAE2F401707B6D966BE743BF0EEE49C2561B9BA39073711F628937A";
+
+  android.packages.izzyondroid = with pkgs.izzyondroid; [
+    at.bitfire.davdroid                 # DAVx5
+    "in.sunilpaulmathew.izzyondroid"    # starts with "in", a Nix word, so it is in quotes
+  ];
+}</code></pre>
+        <p>The key can also be given apart from the address:</p>
+<pre><code>android.repos.guardianproject = {
+  url = "https://guardianproject.info/fdroid/repo";
+  fingerprint = "B7C2EEFD8DAC7806AF67DFCD92EB18126BC08312A7F2D6F3862E46013C7A6135";
+};</code></pre>
+
+        <h3>How it works</h3>
+        <ul>
+          <li>Each repository's app list is downloaded and checked: it must be signed with the key you gave, and it may not be older than the list the phone already has, so nobody can slip in a fake list or roll it back to old versions.</li>
+          <li>The list becomes Nix names: <code>pkgs.izzyondroid.at.bitfire.davdroid</code>. A typo is not a name, so the build stops before anything changes, and says so.</li>
+          <li>Nixup installs the newest stable version that fits the phone's Android version and processor (no betas). The download is checked against the checksum and signing key in the signed list.</li>
+          <li>An app already on the phone must be signed with the key of the repository's builds. If it is not (say, it came from Google Play), the build stops and says so: uninstall it first, or keep it from its own source.</li>
+          <li>App lists are refreshed at most once a day by a build, and always by <strong>Upgrade</strong> and the update check. Offline, the last list is used.</li>
+          <li>An app you take out of the config is uninstalled, its data kept. Only apps that Nixup itself installed are ever removed: an app that was on the phone before (even if you list it for a while) stays.</li>
+          <li>App stores on your lists (the F-Droid app, Obtainium, Aurora Store) are installed before the other apps. When the F-Droid app is on the phone, apps from repositories are recorded as installed by it.</li>
+        </ul>
+        <div class="callout">
+          <span class="label">Rules for names</span>
+          <ul>
+            <li>A repository's name starts with a small letter and has only letters and digits (<code>izzyondroid</code>, <code>myRepo</code>). It may not be a nixpkgs package's name, nor <code>obtainium</code>, <code>playstore</code> or <code>pkgs</code>.</li>
+            <li>Addresses must use <code>https</code>; the fingerprint is the repository key's SHA-256 (64 hex digits).</li>
+            <li><code>android.packages</code> is for Android apps. Linux programs from nixpkgs go in <a href="#packages"><code>environment.systemPackages</code></a>.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="releases">
+        <h2>Apps from developers' releases</h2>
+        <p>
+          Many apps are published only as releases on GitHub, GitLab, Codeberg or another Forgejo or Gitea server.
+          Nixup installs and updates them the way Obtainium does:
+        </p>
+<pre><code>{
+  android.packages.obtainium = [
+    {
+      id = "dev.imranr.obtainium";                    # the app's package name
+      url = "https://github.com/ImranR98/Obtainium";   # where its releases are
+      apkFilter = "^(?!.*fdroid)";                    # optional: which APK (a pattern on its file name)
+      signer = "B3:53:60:1F:6A:1D:5F:D6:60:3A:E2:F5:0B:E8:0C:F3:01:36:7B:86:B6:AB:8B:1F:66:24:3D:A9:6C:D5:73:62";
+      prerelease = false;                             # true: pre-releases too
+    }
+  ];
+}</code></pre>
+        <ul>
+          <li>Nixup reads the newest 15 releases (at most once a day, unless you upgrade), takes the newest one with a matching APK, and among its APKs picks the one for the phone's processor, then a universal one. If several still fit, the build asks you to set <code>apkFilter</code>.</li>
+          <li>Nothing signs a release list, so <strong>pin the app's key with <code>signer</code></strong> (the SHA-256 of its signing certificate, with or without colons). Without it, Nixup accepts the installed app's key, or for a first install the key the APK brings, and prints that key in the log so you can pin it.</li>
+          <li>The APK's package name must be <code>id</code>, and GitHub's SHA-256 is checked when GitHub lists one.</li>
+          <li>If Obtainium itself is installed and was opened once, Nixup adds these apps to Obtainium's list (for github.com, gitlab.com and codeberg.org), and later removes only the entries it added.</li>
+        </ul>
+        <p>To read an APK's key yourself, on a PC with the Android build tools:</p>
+<pre><code>apksigner verify --print-certs app.apk    # the line "certificate SHA-256 digest" is the signer</code></pre>
+      </section>
+
+      <section id="google-play">
+        <h2>Google Play</h2>
+        <p>
+          Apps from Google Play are downloaded by the phone itself, the way Aurora Store does, then installed and
+          updated like the other apps. No Play Store, Google Play services or GApps are needed on the phone; a
+          Google account is.
+        </p>
+<pre><code>{
+  android.packages.playstore = [ "com.whatsapp" "org.telegram.messenger" ];   # package names, in quotes
+
+  android.playstore.account = "you@gmail.com";       # optional: a build stops if another account is signed in
+  android.playstore.tokenFile = ./google-play.token; # optional: the account's token, so the phone needs no sign-in
+
+  android.settings.repo.playstore.autoupdatePackages = true;
+}</code></pre>
+
+        <h3>Signing in</h3>
+        <p>
+          <strong>On the phone:</strong> Nixup app &rarr; <strong>&#8942;</strong> &rarr; <strong>Google Play
+          account</strong> &rarr; <strong>Sign in</strong>. Google's own sign-in page opens in a private window
+          (its cookies are wiped before and after). Then <strong>Show token</strong> shows the account's token, with
+          <strong>Copy</strong> and <strong>Save to Downloads</strong>, and the two config lines to use it.
+        </p>
+        <p><strong>On a PC:</strong></p>
+<pre><code>nix run github:by-architect/Nixup#nixup-play-login            # a sign-in window opens; saves ./google-play.token
+nix run github:by-architect/Nixup#nixup-play-login -- --paste # no window: sign in in your browser, paste the token</code></pre>
+        <p>
+          With <code>--paste</code> (or when no window can open), the sign-in page opens in your browser, and you
+          copy the <code>oauth_token</code> cookie (it starts with <code>oauth2_4/</code>) from the browser's
+          developer tools. Either way, the file is readable only by you, and the command prints the two lines for
+          your config.
+        </p>
+
+        <h3>How it works</h3>
+        <ul>
+          <li>A build that lists Google Play apps checks the account first. With no account, or a token Google refuses, it stops before changing anything and sends a &ldquo;Sign in to Google Play&rdquo; notification.</li>
+          <li>The phone tells Google Play what it is (Android version, processor, screen, languages), so it gets the split APKs made for it. Each file is checked against the SHA-256 Google Play lists, and its signing key against Google Play's.</li>
+          <li>Libraries an app needs from Google Play (like Trichrome) are installed first, by themselves.</li>
+          <li>Apps are recorded as installed by the Play Store if it is on the phone, else by Aurora Store.</li>
+          <li>The token stays on the phone, readable by root only (<code>/data/adb/nixup/secrets/google-play</code>); signing out removes it.</li>
+        </ul>
+        <div class="callout warn">
+          <span class="label">Before you use it</span>
+          <ul>
+            <li>Use a Google account made for this, not your main one: Google may block accounts that download with unofficial clients (Aurora Store's FAQ warns about the same).</li>
+            <li>Anyone with the token can use the account. Keep copies out of any repository others can read.</li>
+            <li>Not supported yet: apps that need expansion files (OBB, mostly large games). Also refused: paid apps the account has not bought, and apps Google Play does not offer in your country or for your device. Such an app stops the build with a message.</li>
+            <li>An app installed from F-Droid (signed with another key) cannot be updated from Google Play; the build says so.</li>
+            <li>If the sign-in page says there is no internet while the phone is online, the Nixup app's network access is off (some ROMs switch it per app): turn it on in its App info.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="app-updates">
+        <h2>Keeping apps up to date</h2>
+        <p>A build always installs the newest version of every listed app. Between builds, each source can update by itself, or only tell you:</p>
+<pre><code>{
+  android.settings.repo = {
+    fdroid.autoupdatePackages = true;        # install updates by themselves
+    izzyondroid.autoupdatePackages = false;  # only tell me (the default)
+    obtainium.autoupdatePackages = true;     # apps from releases
+    playstore.autoupdatePackages = false;    # apps from Google Play
+  };
+}</code></pre>
+        <ul>
+          <li>Every 6 hours, on Wi-Fi, the phone refreshes the app lists, installs the updates of sources set to <code>true</code>, and sends a notification about the others.</li>
+          <li>The <strong>Updates</strong> screen lists what is newer (<strong>Check for updates</strong>), with <strong>Update</strong> per app and <strong>Update all</strong>.</li>
+          <li>An update between builds saves a new generation, which keeps the versions the apps are at.</li>
+          <li>Nixup checks for a newer Nixup at the same time (see <a href="#updating">Updating Nixup</a>).</li>
+        </ul>
+<pre><code>adb shell su -c "sh /data/adb/modules/nixup/update.sh adb check"          # list updates
+adb shell su -c "sh /data/adb/modules/nixup/update.sh adb now"            # install all of them
+adb shell su -c "sh /data/adb/modules/nixup/update.sh adb now com.termux" # or only these</code></pre>
+      </section>
+
+      <section id="app-settings">
+        <h2>App settings</h2>
+        <p>
+          Settings for single apps, by package name. You can still change them by hand, but the next build sets
+          them back to the config.
+        </p>
+<pre><code>{
+  android.apps."org.thoughtcrime.securesms" = {
+    permissions = {
+      camera = true;              # true: allowed, false: denied, "ask": asks each time
+      microphone = "ask";
+      location = false;           # "always", "whileUsing", false, "ask"
+    };
+    battery = "unrestricted";     # "unrestricted", "optimized", "restricted"
+    network.backgroundData = true;
+  };
+
+  # A default app: "browser", "dialer", "sms", "home", "assistant", "callScreening"
+  android.apps."org.mozilla.fennec_fdroid".defaultFor = [ "browser" ];
+
+  # Special access, and the app's own language
+  android.apps."com.termux" = {
+    access.displayOverOtherApps = true;
+    language = "en-US";           # "system": the phone's language
+  };
+
+  # Remove an app the phone came with (its data is kept; it comes back when the line goes)
+  android.apps."org.lineageos.etar".debloat = true;
+
+  # Disable one (hidden, cannot run)
+  android.apps."com.android.contacts".enabled = false;
+}</code></pre>
+
+        <h3>Permissions</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Value</th><th scope="col">Means</th></tr></thead>
+            <tbody>
+              <tr><td><code>true</code></td><td>Allowed.</td></tr>
+              <tr><td><code>false</code></td><td>Denied, and the app may not ask again.</td></tr>
+              <tr><td><code>"ask"</code></td><td>The app asks the next time it needs it.</td></tr>
+              <tr><td><code>null</code></td><td>Not managed (the default).</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The groups: <code>camera</code>, <code>microphone</code>, <code>location</code>, <code>preciseLocation</code>,
+          <code>contacts</code>, <code>calendar</code>, <code>phone</code>, <code>callLogs</code>, <code>sms</code>,
+          <code>nearbyDevices</code>, <code>physicalActivity</code>, <code>bodySensors</code>,
+          <code>notifications</code>, <code>photosAndVideos</code>, <code>musicAndAudio</code>, <code>files</code>
+          and <code>mediaLocation</code>. <code>location</code> also takes <code>"always"</code> (in the background
+          too) and <code>"whileUsing"</code> (the same as <code>true</code>); <code>preciseLocation = false</code>
+          leaves the app only your approximate place. Only permissions the app asks for are changed.
+        </p>
+
+        <details class="more">
+          <summary>Every app setting, on one app</summary>
+          <div class="body">
+<pre><code>{
+  android.apps."com.example.app" = {
+    permissions = {
+      camera = false;                             # true: allowed, false: denied, "ask"
+      microphone = "ask";
+      location = "whileUsing";                    # "always", "whileUsing", false, "ask"
+      preciseLocation = false;                    # false: approximate only
+      contacts = true;
+      calendar = false;
+      phone = "ask";                              # calls, phone state
+      callLogs = false;
+      sms = false;
+      nearbyDevices = true;                       # Bluetooth, Wi-Fi devices nearby
+      physicalActivity = false;
+      bodySensors = false;                        # heart rate, health sensors
+      notifications = true;
+      photosAndVideos = false;
+      musicAndAudio = null;
+      files = false;                              # shared storage (apps for Android 12 and older)
+      mediaLocation = false;                      # places saved in photos
+    };
+    battery = "unrestricted";                     # "unrestricted", "optimized", "restricted"
+    network = {
+      backgroundData = false;                     # mobile data in the background
+      unrestrictedData = true;                    # mobile data even with Data Saver on
+      wifi = true;                                # network over Wi-Fi (LineageOS)
+      mobile = false;                             # network over mobile data (LineageOS)
+      vpn = false;                                # network over a VPN (LineageOS)
+    };
+    access = {
+      displayOverOtherApps = true;                # draw over other apps
+      modifySystemSettings = false;
+      installUnknownApps = false;                 # install APKs
+      allFilesAccess = false;
+      usageAccess = false;                        # see which apps are used
+      alarmsAndReminders = null;                  # exact alarms
+      pictureInPicture = false;
+      mediaManagement = false;                    # change media files without asking
+      fullScreenNotifications = false;
+      turnScreenOn = false;
+      wifiControl = false;
+      restrictedSettings = true;                  # restricted settings allowed (sideloaded apps)
+      notificationAccess = true;                  # read all notifications
+      accessibility = true;                       # control the screen
+    };
+    pauseIfUnused = false;                        # pause it when unused for months
+    enabled = true;                               # false: disabled and hidden
+    paused = false;                               # true: paused, cannot be opened
+    debloat = false;                              # true: remove an app the phone came with (data kept)
+    openLinks = null;                             # open its web links in it
+    language = "tr-TR";                           # its own language (Android 13+); "system": the phone's
+    defaultFor = [ ];                             # "browser", "dialer", "sms", "home", "assistant", "callScreening"
+    backup = null;                                # see Backups
+  };
+}</code></pre>
+          </div>
+        </details>
+
+        <h3>Good to know</h3>
+        <ul>
+          <li>An app that is not installed is skipped and told; its settings are applied right after a build installs it.</li>
+          <li>The value before Nixup's first change is kept, and comes back when the setting leaves the config, or the app leaves <code>android.apps</code>.</li>
+          <li>A setting the app does not ask for (say, overlay access) is skipped with a warning. One this Android does not have stops the build with a message.</li>
+          <li>Each role (<code>defaultFor</code>) can have only one app. <code>language</code> needs Android 13 or newer.</li>
+          <li><code>enabled = false</code> disables an app (hidden, cannot run); <code>paused = true</code> pauses it (it stays, grayed out, and cannot be opened).</li>
+          <li><code>debloat</code> is refused for parts of Android (System UI, Settings, the phone app, the package installer, WebView, &hellip;), for the launcher and keyboard in use (unless the config gives <code>defaultFor = [ "home" ]</code> to another app), and for Nixup. An app cannot be debloated and listed in <code>android.packages</code> at once.</li>
+        </ul>
+      </section>
+
+      <!-- ============================================================ Android -->
+
+      <section id="system-settings">
+        <h2>System settings</h2>
+        <p>
+          Almost every important Android setting has an option, grouped under <code>android.settings</code>.
+          Three of them also have NixOS's names, so a module shared with a NixOS machine sets them on both.
+        </p>
+<pre><code>{
+  # With NixOS's names
+  networking.hostName = "phone";                 # device name (also its Bluetooth and tailnet name)
+  time.timeZone = "Europe/Istanbul";             # null: from the network
+  i18n.defaultLocale = "en_US.UTF-8";            # the phone's language: "en-US"
+
+  # Android's own groups
+  android.settings.display = {
+    darkMode = true;
+    fontScale = 1.1;                             # 1.0 is normal
+    screenTimeout = 60;                          # seconds
+  };
+  android.settings.navigation.mode = "gestures"; # "threeButton", "twoButton"
+  android.settings.sound.touchSounds = false;
+  android.settings.time.format24h = true;
+}</code></pre>
+        <h3>How settings are applied</h3>
+        <ul>
+          <li>Each setting is read first and changed only if it differs. A moment later it is read again; one the phone put back counts as failed.</li>
+          <li>A setting the phone cannot have (it needs a newer Android, LineageOS, a sensor, a screen with more than one refresh rate, &hellip;) is skipped with a warning, so one config works on several phones. <strong>&#8942; &rarr; What this phone supports</strong> lists them.</li>
+          <li>The value from before Nixup's first change is kept, and comes back when the line goes, along with the values that change with it (the Bluetooth name with the device name, for example).</li>
+          <li>Settings that some ROMs reset at each start are set again at boot.</li>
+          <li>Most settings are Android's settings tables; a few use Android's own commands: dark mode (<code>cmd uimode</code>), display size (<code>wm density</code>), navigation mode, language, time zone, keyboard, Data Saver and location.</li>
+        </ul>
+        <h3>NixOS's names and Android's names</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">NixOS option</th><th scope="col">Becomes</th><th scope="col">Example</th></tr></thead>
+            <tbody>
+              <tr><td><code>networking.hostName</code></td><td><code>android.settings.deviceName</code></td><td><code>"phone"</code></td></tr>
+              <tr><td><code>time.timeZone</code></td><td><code>android.settings.time.timeZone</code> (and automatic time zone off)</td><td><code>"Europe/Istanbul"</code></td></tr>
+              <tr><td><code>i18n.defaultLocale</code></td><td><code>android.settings.language</code></td><td><code>"tr_TR.UTF-8"</code> &rarr; <code>"tr-TR"</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          When both are set, Android's name wins. Android's names can also do more:
+          <code>android.settings.deviceName</code> takes any text (like <code>"Neo's phone"</code>), and
+          <code>android.settings.language = [ "en-US" "tr-TR" ];</code> sets several languages in order.
+        </p>
+
+        <details class="more">
+          <summary>Every system setting, with its values</summary>
+          <div class="body">
+<pre><code>{
+  android.settings.display = {
+    darkMode = true;                              # dark theme
+    fontScale = 1.15;                             # font size: 1.0 normal
+    boldText = true;                              # bold text everywhere
+    density = 320;                                # display size in dpi: smaller fits more
+    screenTimeout = 30;                           # seconds until the screen goes off
+    autoRotate = false;                           # turn with the phone
+    autoBrightness = true;                        # brightness from the light around
+    peakRefreshRate = null;                       # highest Hz (unset: the screen's highest)
+    minRefreshRate = 120;                         # lowest Hz: 120 always smooth
+    colorMode = "natural";                        # "natural", "boosted", "saturated", "adaptive"
+    alwaysOn = null;                              # always-on display
+    wakeForNotifications = false;                 # screen on for new notifications
+    doubleTapToWake = false;                      # double-tap the screen to wake
+    liftToWake = null;                            # wake when picked up
+    nightLight = {                                # warmer screen at night
+      schedule = null;                            # "none", "sunsetToSunrise", "custom"
+      from = null;                                # "22:00", with schedule = "custom"
+      to = null;                                  # "06:30"
+      temperature = null;                         # kelvin: lower is warmer
+    };
+    screenSaver = { enable = false; whileCharging = true; whileDocked = false; };
+  };
+
+  android.settings.navigation.mode = "gestures";  # "gestures", "threeButton", "twoButton"
+
+  android.settings.sound = {
+    touchSounds = false;                          # tap sounds
+    touchVibration = true;                        # vibrate on taps
+    dialpadTones = true;
+    screenLockSound = true;                       # sound on lock and unlock
+    chargingSound = true;
+    chargingVibration = true;
+    vibrateForCalls = true;
+    rampingRinger = false;                        # vibrate first, then ring louder
+    keyboardVibration = true;
+  };
+
+  android.settings.time = {
+    automatic = true;                             # time from the network
+    automaticTimeZone = true;                     # time zone from the network
+    format24h = true;                             # 24-hour clock
+    # timeZone = "Europe/Istanbul";               # turns automaticTimeZone off
+  };
+
+  android.settings.keyboard = {
+    default = "com.android.inputmethod.latin/.LatinIME";   # keyboard in use (`ime list -a -s` lists them)
+    showWithPhysicalKeyboard = false;             # on-screen keyboard with a real one
+    spellChecker = null;
+  };
+
+  android.settings.network = {
+    privateDns = null;                            # "off", "automatic", or a host like "dns.quad9.net"
+    dataSaver = false;                            # less background data (cuts VPN apps too)
+    wifiScanning = false;                         # Wi-Fi scans for location, even when off
+    bluetoothScanning = null;                     # the same for Bluetooth
+    captivePortalCheck = null;                    # look for sign-in pages (asks a server)
+    openWifiNotification = true;                  # tell about open networks
+    wifiWakeup = true;                            # Wi-Fi on near saved networks
+  };
+
+  android.settings.location = {
+    enable = false;                               # location on or off
+    assistedGps = true;                           # faster GPS with network help
+  };
+
+  android.settings.lockScreen = {
+    notifications = false;                        # notifications on the lock screen
+    sensitiveNotifications = true;                # what they say, too
+    silentNotifications = false;
+    lockAfter = null;                             # seconds after the screen goes off
+    wallet = true;
+    deviceControls = false;                       # smart home controls
+    qrCodeScanner = false;
+  };
+
+  android.settings.notifications = {
+    dots = true;                                  # dots on app icons
+    bubbles = true;                               # floating chat bubbles
+    snooze = null;
+    history = true;                               # keep a history
+    popUp = false;                                # pop up on the screen (heads-up)
+    light = false;                                # notification light
+    flash.camera = false;                         # flash the camera light
+    flash.screen = false;                         # flash the screen
+    mediaResume = null;                           # keep the media player after the app closes
+    mediaOnLockScreen = null;                     # media player on the lock screen
+  };
+
+  android.settings.gestures = {
+    oneHandedMode = false;                        # bring the top of the screen down
+    swipeDownForNotifications = false;            # swipe down at the bottom for notifications
+    holdPower = "assistant";                      # "assistant" or "powerMenu"
+    powerAndVolumeUp = "powerMenu";               # "nothing", "mute", "powerMenu"
+    preventRinging = "vibrate";                   # "off", "vibrate", "mute"
+  };
+
+  android.settings.power = {
+    batterySaverAt = null;                        # battery saver at this percent (0: never)
+    adaptiveBattery = null;                       # limit apps not used often
+  };
+
+  android.settings.developer = {
+    enable = true;                                # Developer options shown
+    usbDebugging = true;                          # adb (false cuts it, also for nixup-rebuild)
+    stayAwake = false;                            # screen on while charging
+    animationScale = 1;                           # 0.5: twice as fast, 0: off
+    showTaps = false;
+    pointerLocation = null;                       # touch position over the screen
+    windowBlurs = false;                          # blur behind panels
+    mobileDataAlwaysOn = true;                    # mobile data ready while on Wi-Fi
+    verifyAdbApps = false;                        # check apps installed over adb
+    freeformWindows = null;                       # floating windows
+    forceResizable = null;                        # every app resizable
+  };
+
+  android.settings.accessibility = {
+    colorInversion = null;
+    highContrastText = false;
+    colorCorrection = null;                       # "off", "deuteranomaly", "protanomaly", "tritanomaly", "grayscale"
+    magnification = false;                        # triple-tap to zoom
+    touchAndHoldDelay = 400;                      # long press in ms: 400 short, 1000 medium, 1500 long
+    monoAudio = null;
+    audioBalance = null;                          # -1 left, 0 middle, 1 right
+  };
+
+  android.settings.privacy.showPasswords = null;  # show a password's last letter while typing
+  android.settings.autofill.service = "com.x8bit.bitwarden/com.x8bit.bitwarden.Autofill.AutofillService";
+
+  android.settings.quickSettings.tiles = [        # Quick Settings tiles, in order
+    "internet" "bt" "flashlight" "dnd" "dark" "rotation"
+    "custom(dev.theolm.wwc/.quicktile.ChatTile)"  # an app's own tile
+  ];
+
+  android.settings.statusBar.hiddenIcons = [ "rotate" ];   # status bar icons hidden
+}</code></pre>
+          </div>
+        </details>
+      </section>
+
+      <section id="raw-settings">
+        <h2>Any other setting</h2>
+        <p>
+          A setting without its own option can still be set by Android's own name: the name
+          <code>adb shell settings put</code> takes. Android keeps settings in three tables
+          (<code>system</code>, <code>secure</code>, <code>global</code>); LineageOS adds three of its own.
+        </p>
+<pre><code>{
+  android.settings.raw = {
+    global.stay_on_while_plugged_in = 0;
+    system.screen_off_timeout = 60000;           # milliseconds
+    secure.ui_night_mode = 2;
+    lineage.system.status_bar_clock = 2;         # LineageOS's own tables
+  };
+}</code></pre>
+        <ul>
+          <li><code>true</code> and <code>false</code> are written as <code>1</code> and <code>0</code>.</li>
+          <li>To find a name, change the setting by hand and compare <code>adb shell settings list global</code> (or <code>system</code>, <code>secure</code>) before and after.</li>
+          <li>Like every other setting, it is put back as it was when its line goes.</li>
+        </ul>
+      </section>
+
+      <section id="lineage">
+        <h2>LineageOS settings</h2>
+        <p>
+          ROMs based on LineageOS (crDroid, &hellip;) have settings of their own, under
+          <code>android.settings.lineage</code>. On another ROM they are skipped, so the same config still builds.
+        </p>
+<pre><code>{
+  android.settings.lineage.statusBar = {
+    clockPosition = "left";                       # "right", "center", "left"
+    batteryStyle = "icon";                        # "icon", "circle", "dottedCircle", "text"
+    batteryPercent = "inside";                    # "hidden", "inside", "nextTo"
+    doubleTapToSleep = true;                      # double-tap the status bar: screen off
+  };
+  android.settings.lineage.chargingControl = {
+    enable = true;                                # charge less, or later, to spare the battery
+    mode = "limit";                               # "auto" (full by the alarm), "custom", "limit"
+    limit = 80;                                   # stop at 80%
+  };
+}</code></pre>
+        <details class="more">
+          <summary>Every LineageOS setting</summary>
+          <div class="body">
+<pre><code>{
+  android.settings.lineage.statusBar = {
+    clockPosition = "left";                       # "right", "center", "left"
+    clockAutoHide = false;                        # hide the clock on the home screen
+    amPm = "hidden";                              # "normal", "small", "hidden"
+    batteryStyle = "icon";                        # "icon", "circle", "dottedCircle", "text"
+    batteryPercent = "inside";                    # "hidden", "inside", "nextTo"
+    doubleTapToSleep = true;                      # double-tap the status bar: screen off
+  };
+
+  android.settings.lineage.quickSettings = {
+    quickPulldown = "off";                        # one-swipe Quick Settings at an edge: "off", "right", "left"
+    autoBrightnessButton = true;                  # auto-brightness button by the slider
+  };
+
+  android.settings.lineage.buttons = {
+    volumeWake = false;                           # volume buttons wake the phone
+    volumeAnswerCall = false;                     # volume buttons answer calls
+    volumeMusicControls = true;                   # hold volume: next or last track
+    swapVolumeOnRotation = false;                 # volume up stays up when turned
+    torchLongPressPower = false;                  # hold power: flashlight
+    torchTimeout = null;                          # flashlight off after seconds (0: never)
+    partialScreenshot = true;                     # power + volume down: part of the screen
+  };
+
+  android.settings.lineage.sound = {
+    increasingRing = false;                       # ringtone starts quiet
+    volumePanelOnLeft = true;                     # volume panel on the left
+  };
+
+  android.settings.lineage.navigation.gestureHint = true;   # the gesture bar at the bottom
+
+  android.settings.lineage.display = {
+    proximityOnWake = null;                       # no waking in a pocket
+    pureBlackDarkTheme = false;                   # black instead of dark gray
+  };
+
+  android.settings.lineage.lockScreen = {
+    rotation = false;                             # lock screen turns with the phone
+    scramblePin = null;                           # PIN digits in a new order each time
+    mediaVisualizer = false;                      # music visualizer
+  };
+
+  android.settings.lineage.powerMenu = {
+    actions = [ "emergency" "lockdown" "power" "restart" "screenshot" "bugreport" "logout" ];
+    advancedRestart = true;                       # restart into recovery or bootloader
+  };
+
+  android.settings.lineage.chargingControl = {
+    enable = false;                               # charge less, or later, to spare the battery
+    mode = "auto";                                # "auto" (full by the alarm), "custom", "limit"
+    limit = 80;                                   # stop at percent, with mode = "limit"
+    start = "22:00";                              # with mode = "custom": from
+    target = "06:00";                             # full by
+  };
+
+  android.settings.lineage.wakeOnPlug = false;     # screen on when the charger goes in or out
+  android.settings.lineage.statsCollection = false;   # anonymous statistics to LineageOS
+}</code></pre>
+          </div>
+        </details>
+      </section>
+
+      <!-- ============================================================ Shell and Nix -->
+
+      <section id="packages">
+        <h2>Packages and the terminal</h2>
+        <p>Linux programs from nixpkgs, for the phone's shell and services, as NixOS's <code>environment.systemPackages</code>:</p>
+<pre><code>{ pkgs, ... }: {
+  environment.systemPackages = with pkgs; [ htop rsync git vim python3 ];
+
+  # The terminal's look (Nix-on-Droid's options)
+  terminal.font = "${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf";
+  terminal.colors = { background = "#000000"; foreground = "#FFFFFF"; cursor = "#FFFFFF"; };
+}</code></pre>
+        <p>Three ways in, all to the same root shell, with these programs first on its <code>PATH</code>:</p>
+        <ul>
+          <li><strong>The app's terminal:</strong> the icon in Nixup's top bar. It is built into the app; no Termux needed.</li>
+          <li><strong>From adb or any root shell:</strong> <code>su -c nixup-shell</code>, or <code>su -c 'nixup-shell htop'</code> for one command.</li>
+          <li><strong>Over SSH</strong>, with <a href="#ssh"><code>services.openssh</code></a>.</li>
+        </ul>
+<pre><code>adb shell su -c nixup-shell     # a root shell in Nixup's view
+htop                            # a program from environment.systemPackages
+ls /sdcard/Download             # Android's folders are there as they are
+pm list packages                # and so are Android's own commands</code></pre>
+        <ul>
+          <li>Packages come ready-made from cache.nixos.org; nothing is compiled on the phone.</li>
+          <li>They are for the shell and services, not phone apps (apps come from <a href="#apps">repositories</a>).</li>
+          <li>The shell runs in <a href="#view">Nixup's view</a>. Root's home there is <code>/data/adb/nixup/home</code>. Android's commands (<code>/system/bin</code>) come after your packages on <code>PATH</code>.</li>
+          <li>With no Nix packages at all in the config, the shell is Android's own <code>sh</code>. Before the first build, <code>nixup-shell</code> opens Android's shell and says so.</li>
+        </ul>
+
+        <h3>The terminal</h3>
+        <ul>
+          <li>Each session is a tab; <strong>+</strong> opens another. Sessions keep running when you close the terminal, with a notification that has an <strong>Exit</strong> button.</li>
+          <li>A row of extra keys: ESC, TAB, CTRL, ALT, the arrows, HOME, END, PGUP, PGDN, and <code>- / | ~ : * &amp;</code>.</li>
+          <li>Tap for the keyboard, long-press to select, copy and paste, pinch to change the text size.</li>
+          <li><code>terminal.font</code> must be a file from a Nix package (a file of your own is refused). <code>terminal.colors</code> takes <code>background</code>, <code>foreground</code>, <code>cursor</code> and <code>color0</code> to <code>color15</code>.</li>
+        </ul>
+      </section>
+
+      <section id="shells">
+        <h2>Shells and programs</h2>
+        <p>The shells are set up exactly as on NixOS, with nixpkgs' own modules:</p>
+<pre><code>{ pkgs, ... }: {
+  environment.shellAliases = { ll = "ls -l"; gs = "git status"; };
+  environment.variables = { EDITOR = "vim"; };
+  environment.interactiveShellInit = "set -o vi";
+
+  programs.zsh.enable = true;
+  users.defaultUserShell = pkgs.zsh;     # the shell of root and the normal users (not set: bash)
+
+  programs.git = { enable = true; config.init.defaultBranch = "main"; };
+  programs.tmux.enable = true;
+  programs.starship.enable = true;
+  programs.direnv.enable = true;
+}</code></pre>
+        <ul>
+          <li>The shells' files are NixOS's own (<code>/etc/profile</code>, <code>/etc/bashrc</code>, <code>/etc/zshrc</code>, <code>/etc/fish</code>, &hellip;), in Nixup's <code>/etc</code>.</li>
+          <li>All of this needs Nix packages in the config. Without any, the shell is Android's <code>sh</code>, which still gets <code>environment.variables</code> and <code>environment.extraInit</code>.</li>
+          <li>Also there: <code>environment.sessionVariables</code>, <code>shellInit</code>, <code>loginShellInit</code>, <code>extraInit</code>, <code>localBinInPath</code> and <code>homeBinInPath</code>.</li>
+          <li>A user whose shell is zsh, fish or xonsh needs <code>programs.&lt;shell&gt;.enable</code>.</li>
+        </ul>
+        <h3>Programs</h3>
+        <p>
+          These <code>programs.*</code> are nixpkgs' own modules, with all their options: <code>bash</code>,
+          <code>zsh</code>, <code>fish</code>, <code>xonsh</code>, <code>less</code>, <code>autoenv</code>,
+          <code>autojump</code>, <code>bandwhich</code>, <code>bat</code>, <code>command-not-found</code>,
+          <code>direnv</code>, <code>fzf</code>, <code>git</code>, <code>htop</code>, <code>iftop</code>,
+          <code>lazygit</code>, <code>mosh</code>, <code>mtr</code>, <code>nano</code>, <code>neovim</code>,
+          <code>nix-index</code>, <code>nushell</code>, <code>pay-respects</code>, <code>proxychains</code>,
+          <code>screen</code>, <code>skim</code>, <code>ssh</code>, <code>starship</code>, <code>tcpdump</code>,
+          <code>television</code>, <code>tmux</code>, <code>traceroute</code>, <code>trippy</code>, <code>vim</code>,
+          <code>vivid</code>, <code>whois</code>, <code>yazi</code> and <code>zoxide</code>.
+        </p>
+        <ul>
+          <li>What NixOS turns on for every machine (nano, command-not-found) is off on a phone, to save downloads. Turn it on if you want it.</li>
+          <li>Programs NixOS gives special rights to (mtr, tcpdump, iftop) work for root only: the phone makes no setuid wrappers.</li>
+          <li>Every Nix shell has <code>environment.corePackages</code>: bash, coreutils, findutils, grep, sed and less. <code>environment.defaultPackages</code> is empty on a phone (NixOS's has perl, rsync and strace).</li>
+          <li>Another of nixpkgs' program modules can be added by hand: <code>imports = [ "${modulesPath}/programs/foo.nix" ];</code>.</li>
+        </ul>
+      </section>
+
+      <section id="users">
+        <h2>Users</h2>
+        <p>
+          On Android, Linux user numbers (uids) belong to apps: each app has its own, and there is no list of people
+          who log in. Nixup's users live in its view only (its <code>/etc/passwd</code>). Root is the main one: the terminal, adb and
+          SSH all log in as root. You can add normal users, mostly to log in over SSH:
+        </p>
+<pre><code>{ pkgs, ... }: {
+  users.users.niobe = {
+    isNormalUser = true;
+    androidApp = "dev.nixup.manager";   # take this Android app's uid (see below)
+    description = "Niobe";
+    extraGroups = [ "inet" "everybody" "external_storage" ];   # network and shared storage
+    packages = with pkgs; [ ripgrep ];  # the user's own packages, first on its PATH
+    openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAA… niobe@laptop" ];
+    hashedPassword = "$6$…";            # from mkpasswd, for SSH logins with a password
+  };
+}</code></pre>
+
+        <h3>Which uid a user gets</h3>
+        <ul>
+          <li><strong><code>androidApp = "&lt;package&gt;";</code></strong> the user takes that app's uid (looked up at each build), and with it that app's files, storage access, network and root grant. With <code>"dev.nixup.manager"</code> (Nixup itself) the user can use <code>su</code> as Nixup does, with no other app needed.</li>
+          <li><strong><code>uid = 10355;</code></strong> a number of your choosing (not both).</li>
+          <li><strong>Neither:</strong> a uid from 400 to 999, which the phone keeps for that user. Android lets these uids on the network. (NixOS would give 1000 and up.)</li>
+        </ul>
+        <div class="callout">
+          <span class="label">Note</span>
+          <p>
+            A user with <code>androidApp</code> has that app's network, which Android cuts while the app is in the
+            background: <code>nix-shell -p</code> and <code>nix-env -iA nixpkgs.&hellip;</code> work anyway (the Nix
+            daemon downloads), but <code>nix shell nixpkgs#&hellip;</code> then fails, as it first fetches Nix's
+            registry itself.
+          </p>
+        </div>
+
+        <h3>Homes, groups and passwords</h3>
+        <ul>
+          <li>A normal user's home is <code>/home/&lt;name&gt;</code> (<code>users.defaultUserHome</code>), ready right after the phone starts, before the first unlock.</li>
+          <li>Groups have Android's numbers: <code>inet</code> (network), <code>everybody</code>, <code>external_storage</code>, <code>sdcard_rw</code> and <code>media_rw</code> (shared storage), <code>audio</code>, <code>video</code>, <code>input</code>, <code>shell</code>, <code>net_raw</code>, <code>net_admin</code>, <code>readproc</code>, <code>wakelock</code>. NixOS's <code>wheel</code> and <code>users</code> exist but give nothing on a phone.</li>
+          <li>Passwords as on NixOS: <code>hashedPassword</code>, <code>password</code> (hashed on the phone, in the profile that only root reads), <code>hashedPasswordFile</code> (a <a href="#secrets">secret</a> file), <code>initialPassword</code> and <code>initialHashedPassword</code>. <code>expires = "2027-01-31";</code> ends logins from that day.</li>
+          <li>Also: <code>enable = false</code> (left out), <code>shell</code>, <code>linger = false</code> with <code>users.manageLingering = true</code> (the user's own services do not run), <code>subUidRanges</code>, <code>subGidRanges</code> and <code>autoSubUidGidRange</code> (<code>/etc/subuid</code>, <code>/etc/subgid</code>).</li>
+          <li>Root's SSH keys: <code>users.users.root.openssh.authorizedKeys.keys</code>.</li>
+          <li>Not on the phone: <code>cryptHomeLuks</code> and <code>openssh.authorizedPrincipals</code> (both stop the build).</li>
+        </ul>
+      </section>
+
+      <section id="home-manager">
+        <h2>Home Manager</h2>
+        <p>
+          <a href="https://github.com/nix-community/home-manager">Home Manager</a> works as on NixOS, through its
+          own NixOS module, with all of its options: <code>programs.*</code>, <code>services.*</code>,
+          <code>home.file</code>, <code>xdg.*</code>, <code>home.packages</code>, <code>home.activation</code>. One
+          module file can set up a user on a NixOS machine and on the phone.
+        </p>
+<pre><code>{ pkgs, ... }: {
+  # In a flake:  inputs.home-manager.url = "github:nix-community/home-manager";
+  #              modules = [ home-manager.nixosModules.home-manager ./configuration.nix ];
+  # A configuration.nix alone: the phone fetches Home Manager, as it fetches nixpkgs
+  imports = [ &lt;home-manager/nixos&gt; ];
+
+  users.users.niobe = { isNormalUser = true; androidApp = "dev.nixup.manager"; };
+
+  home-manager.useGlobalPkgs = true;            # the phone's pkgs (one nixpkgs, not two)
+  home-manager.backupFileExtension = "backup";  # a file of yours in the way is moved aside, not refused
+  home-manager.users.niobe = { pkgs, ... }: {
+    home.stateVersion = "26.05";
+    home.packages = [ pkgs.ripgrep ];
+    programs.git = { enable = true; settings.user.name = "Niobe"; };
+    programs.bash.enable = true;
+    services.gpg-agent = { enable = true; enableSshSupport = true; };
+  };
+}</code></pre>
+        <ul>
+          <li>Each user's Home Manager runs as that user at each build that changes it and at each start of the phone. It links the user's files into the home and runs each module's steps (<code>onChange</code>, <code>home.activation</code>). The Services screen shows it as <code>home-manager-&lt;name&gt;</code>, with its log.</li>
+          <li>The services Home Manager makes (every <code>services.*</code> module's, and your own <code>systemd.user.services</code>) run as the user's own, named <code>user-&lt;name&gt;-&lt;service&gt;</code>, after its files are linked.</li>
+          <li>Its packages go into the user's profile (<code>/etc/profiles/per-user/&lt;name&gt;</code>), whatever <code>useUserPackages</code> says.</li>
+          <li>Each <code>home-manager.users.&lt;name&gt;</code> needs a <code>users.users.&lt;name&gt;</code>. Taking a user out of <code>home-manager.users</code> takes Home Manager's links out of its home again.</li>
+          <li>To save downloads, some defaults differ on a phone: no manual pages, no desktop file types (<code>xdg.mime</code>), and only the UTF-8 locales. Each can be turned on again.</li>
+          <li>Not on the phone: a desktop session (what only <code>graphical-session.target</code> starts is not started, and the build says so), a D-Bus session bus (services that need one fail), and <code>startAsUserService</code>.</li>
+          <li>Home Manager's files are links into <code>/nix/store</code>, so they exist in Nixup's view (SSH, the terminal, services), not for Android's apps.</li>
+        </ul>
+      </section>
+
+      <section id="nix-on-phone">
+        <h2>Nix on the phone</h2>
+        <p>Nix itself is in the shells, as on NixOS, for programs you want without changing the config:</p>
+<pre><code>nix shell nixpkgs#htop          # a shell with htop (nix run nixpkgs#cowsay -- hi runs one program)
+nix profile add nixpkgs#htop    # installed for you, on PATH from then on (or: nix-env -iA nixpkgs.htop)
+nix-shell -p htop               # a shell with nixpkgs' build tools too (a big download the first time)
+nix-collect-garbage -d          # frees up space; the config's own packages stay</code></pre>
+        <ul>
+          <li><code>nixpkgs</code> there is your config's own nixpkgs (in Nix's registry and as <code>&lt;nixpkgs&gt;</code>, as on a NixOS built from a flake), so nothing fetches nixpkgs again. The phone keeps it; a build from a PC sends it once.</li>
+          <li>The commands are the module's own Nix, so nothing is downloaded for them, unless you set <code>nix.package</code>.</li>
+          <li>Builds run as the <code>nixbld</code> users (uids 400 to 999), without Nix's sandbox, which Android's kernels cannot provide. Other users (<code>isNormalUser</code>) use Nix through its daemon, which runs only when there are such users.</li>
+        </ul>
+
+        <h3>Nix's settings</h3>
+<pre><code>{
+  nix.settings = {                                # /etc/nix/nix.conf (flakes are on)
+    substituters = [ "https://nix-community.cachix.org" ];   # more binary caches (cache.nixos.org is always there)
+    trusted-public-keys = [ "nix-community.cachix.org-1:mB9F…" ];
+  };
+  nix.gc = { automatic = true; dates = "weekly"; options = "--delete-older-than 30d"; };
+  nix.optimise.automatic = true;                  # store files kept twice become one, at night
+  nix.registry = { };                             # flakes by name; nixpkgs is the config's
+  # nix.enable = false;                           # no Nix in the shells at all
+}</code></pre>
+
+        <h3>Freeing up space</h3>
+        <p>
+          <strong>&#8942; &rarr; Free up space</strong> removes the Nix packages the last build does not use (older
+          generations' packages, a service you turned off). Going back to an older generation fetches its packages
+          again. The packages in use, the phone's nixpkgs, git, and what users installed with
+          <code>nix profile</code> or <code>nix-env</code> stay.
+        </p>
+
+        <h3>Packages that cache.nixos.org does not have</h3>
+        <p>
+          The phone never compiles a package. One that cache.nixos.org does not have (changed by an overlay, or
+          unfree, which the cache does not build) stops the build, unless you give machines that build it:
+        </p>
+<pre><code>{
+  nixpkgs.config.allowUnfree = true;
+  nix.distributedBuilds = true;
+  nix.buildMachines = [
+    {
+      hostName = "builder.example.org";           # its address (a tailnet name works)
+      sshUser = "builder";                        # one of its nix.settings.trusted-users
+      sshKey = "/data/adb/nixup/secrets/builder_ed25519";   # a key on the phone, readable by root
+      systems = [ "aarch64-linux" ];              # a PC builds it with binfmt emulation
+      publicHostKey = "c3NoLWVkMjU1MTkg…";        # base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub on it
+      maxJobs = 4;
+    }
+  ];
+}</code></pre>
+        <p>
+          The small files a config makes (a service's settings file, a script) are not packages: the phone builds
+          those itself, from what the cache has.
+        </p>
+      </section>
+
+      <!-- ============================================================ Services -->
+
+      <section id="services">
+        <h2>Your own services</h2>
+        <p>
+          Android has no systemd. Nixup runs NixOS-style <code>systemd.services</code> itself, with the same syntax:
+          each service gets a small supervisor of its own that starts it, watches it, and starts it again when it
+          should.
+        </p>
+<pre><code>{ pkgs, ... }: {
+  # A service that keeps running
+  systemd.services.web-share = {
+    description = "Download folder as a web page";
+    wantedBy = [ "multi-user.target" ];          # start at boot and with each build
+    after = [ "tailscaled.service" ];            # start after these
+    path = [ pkgs.darkhttpd ];                   # programs on its PATH
+    serviceConfig = {
+      ExecStart = "${pkgs.darkhttpd}/bin/darkhttpd /storage/emulated/0/Download --addr 127.0.0.1 --port 8080";
+      Restart = "on-failure";                    # "no", "on-failure", "always"
+      RestartSec = 5;
+    };
+  };
+
+  # A one-time job (a script): runs to its end at each build and boot
+  systemd.services.say-hello = {
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      echo "built at $(date)" &gt; /var/lib/hello.txt
+    '';
+  };
+}</code></pre>
+
+        <h3>How services run</h3>
+        <ul>
+          <li><strong>When:</strong> a service <code>wantedBy</code> <code>multi-user.target</code> (or <code>default.target</code>, <code>network.target</code> and the other usual targets) starts at each boot and with each build.</li>
+          <li><strong>Order:</strong> <code>after</code> and <code>before</code> set the order; <code>wants</code> and <code>requires</code> bring other services along. A service whose required service failed is not started.</li>
+          <li><strong>On a build,</strong> a service is restarted only if it changed: its settings, its scripts, a secret it uses, or a value in <code>restartTriggers</code>. A one-time job runs again only if it changed or did not succeed last time.</li>
+          <li><strong>Restarts:</strong> <code>Restart</code> says when (<code>RestartSec</code> waits first). There is no limit on how often: a failing service keeps being started again.</li>
+          <li><strong>Stopping:</strong> <code>ExecStop</code> runs, then every process of the service gets a stop signal (<code>KillMode</code>, <code>KillSignal</code>), and after <code>TimeoutStopSec</code> (10 seconds) a kill.</li>
+          <li><strong>Where:</strong> each service runs in its own copy of <a href="#view">Nixup's view</a>, with its own <code>/tmp</code>. Its processes are known by that view (there are no cgroups on the phone).</li>
+          <li><strong>Environment:</strong> a clean one. <code>PATH</code> is the service's <code>path</code>, then coreutils, findutils, grep and sed, then Android's <code>/system/bin</code>. Scripts run with bash. The time zone is the phone's.</li>
+          <li><strong>Control:</strong> the app's <strong>Services</strong> screen starts, stops and restarts them and shows their logs. That lasts until the next build or restart.</li>
+        </ul>
+      </section>
+
+      <section id="timers">
+        <h2>Timers</h2>
+        <p>Jobs at set times, as on NixOS. The short way is <code>startAt</code> on a service:</p>
+<pre><code>{
+  systemd.services.photos-copy = {
+    startAt = "*-*-* 03:00:00";                  # also "daily", "Mon..Fri 07:30", "*:0/15"
+    serviceConfig.Type = "oneshot";
+    script = "cp -ru /storage/emulated/0/DCIM /storage/1234-5678/Photos";
+  };
+}</code></pre>
+        <p>The long way is a timer of its own, for times counted from the start or from the last run:</p>
+<pre><code>{
+  systemd.timers.cleanup = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "5min";                        # 5 minutes after each start of the phone
+      OnUnitActiveSec = "1h";                    # then every hour
+      Persistent = true;                         # a time missed while the phone was off comes when it is on
+      RandomizedDelaySec = "10min";              # a random wait, up to 10 minutes
+    };
+  };
+  systemd.services.cleanup = {
+    serviceConfig.Type = "oneshot";
+    script = "find /var/tmp -type f -mtime +7 -delete";
+  };
+}</code></pre>
+        <ul>
+          <li><code>timerConfig</code> takes <code>OnCalendar</code> (systemd's calendar events, in the phone's time zone), <code>OnBootSec</code>, <code>OnStartupSec</code>, <code>OnActiveSec</code>, <code>OnUnitActiveSec</code>, <code>OnUnitInactiveSec</code>, <code>Persistent</code>, <code>RandomizedDelaySec</code>, <code>FixedRandomDelay</code> and <code>Unit</code>.</li>
+          <li><strong>A sleeping phone runs nothing.</strong> Nixup does not wake the phone for a timer: a time that passed while it slept comes within about 30 seconds of waking.</li>
+          <li>The Services screen shows when each timer runs next.</li>
+          <li><code>AccuracySec</code>, <code>WakeSystem</code> and the like are accepted and do nothing. Calendar events cannot count back from a month's end (<code>~</code>).</li>
+        </ul>
+      </section>
+
+      <section id="more-units">
+        <h2>Sockets, templates and path units</h2>
+<pre><code>{ pkgs, ... }: {
+  # A socket the phone opens and hands to its service, as systemd does
+  systemd.sockets.echo = {
+    wantedBy = [ "sockets.target" ];
+    listenStreams = [ "127.0.0.1:7777" ];
+    socketConfig.Accept = true;                  # each connection goes to its own run of echo@
+  };
+  systemd.services."echo@" = {
+    serviceConfig.ExecStart = "${pkgs.coreutils}/bin/cat";
+    serviceConfig.StandardInput = "socket";      # the connection is its input and output
+  };
+
+  # A template, and one of its instances (%i is the part after @)
+  systemd.services."hello@" = {
+    serviceConfig.Type = "oneshot";
+    serviceConfig.ExecStart = "${pkgs.coreutils}/bin/echo hello %i";
+  };
+  systemd.services."hello@world".wantedBy = [ "multi-user.target" ];
+
+  # A path unit: runs a service when a folder changes
+  systemd.paths.inbox = {
+    wantedBy = [ "paths.target" ];
+    pathConfig.PathChanged = "/var/lib/inbox";
+  };
+  systemd.services.inbox = {
+    serviceConfig.Type = "oneshot";
+    script = "ls -l /var/lib/inbox";
+  };
+}</code></pre>
+        <ul>
+          <li><strong>Sockets</strong> (TCP, UDP and unix): the phone opens them as root and hands them over as systemd does (<code>LISTEN_FDS</code>, <code>LISTEN_FDNAMES</code>), so nixpkgs' modules that use them run as they are, and a port below 1024 can belong to a service user. A service nothing else wants starts at its first connection (the phone looks for waiting connections every half second). Not supported: abstract (<code>@name</code>) and unix datagram sockets.</li>
+          <li><strong>Templates</strong> (<code>"foo@"</code>) run as their instances (<code>foo@bar</code>): those another unit names, and those you define as <code>systemd.services."foo@bar"</code>. Systemd's specifiers are filled in: <code>%i %I %n %N %p %P %j %J %t %S %C %L %E %T %V %d %u %g %h %U %G %a %v %%</code>.</li>
+          <li><strong>Path units</strong> take <code>PathExists</code>, <code>PathExistsGlob</code>, <code>PathChanged</code>, <code>PathModified</code>, <code>DirectoryNotEmpty</code> and <code>MakeDirectory</code>. The phone looks every 2 seconds.</li>
+          <li><strong>Units in packages</strong> (<code>systemd.packages</code>): a package's own unit files are read, as on NixOS, with your config's settings over them.</li>
+          <li><strong>Users' own units</strong> (<code>systemd.user.services</code>, <code>timers</code>, <code>sockets</code>, <code>paths</code>) run as each normal user, named <code>user-&lt;user&gt;-&lt;unit&gt;</code>; <code>%t</code> is <code>/run/user/&lt;uid&gt;</code>.</li>
+          <li><strong>Notify and watchdog:</strong> <code>Type = "notify"</code> services count as started once they send <code>READY=1</code> (within <code>TimeoutStartSec</code>, 90 seconds). With <code>WatchdogSec</code>, one that stops sending <code>WATCHDOG=1</code> is stopped and started again (<code>Restart = "on-watchdog"</code>).</li>
+          <li><strong>Encrypted credentials:</strong> <code>LoadCredentialEncrypted</code> takes what <code>systemd-creds encrypt</code> made on the phone, with the phone's own key (add <code>pkgs.systemd</code> to <code>environment.systemPackages</code> and run it in the terminal). There is no TPM.</li>
+        </ul>
+      </section>
+
+      <section id="service-users">
+        <h2>Service users, storage and logs</h2>
+<pre><code>{ pkgs, lib, ... }: {
+  systemd.services.notes = {
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      DynamicUser = true;                        # a user of its own (uid 400 to 999)
+      StateDirectory = "notes";                  # /var/lib/notes, that user's, kept
+      SupplementaryGroups = [ "media_rw" ];      # and the shared storage (/storage, /sdcard)
+      LoadCredential = "token:/data/adb/nixup/secrets/notes-token";   # $CREDENTIALS_DIRECTORY/token
+      ExecStart = "${pkgs.python3}/bin/python3 -m http.server 8081 --bind 127.0.0.1 --directory /storage/emulated/0/Notes";
+    };
+    unitConfig.RequiresMountsFor = [ "/storage/emulated/0/Notes" ];  # wait until that storage is there
+  };
+
+  # Or let a NixOS module's service run as root
+  systemd.services.navidrome.serviceConfig.User = lib.mkForce "root";
+}</code></pre>
+        <ul>
+          <li><strong>Users:</strong> a service with <code>User</code> or <code>DynamicUser</code> (as NixOS's modules give them) runs as that user, with a uid from 400 to 999 that the phone keeps for it. A module's own fixed uid works too. Android lets these users on the network.</li>
+          <li><strong>Shared storage</strong> (<code>/storage</code>, <code>/sdcard</code>, SD cards) is open only to apps and root on Android. A service gets it when its user is in <code>media_rw</code> (or <code>sdcard_rw</code>, <code>external_storage</code>): Nixup then mounts the storage into that service's own view. Or the service runs as root.</li>
+          <li><strong>Waiting for storage:</strong> services start at boot, before the first unlock and before an SD card may be mounted. With <code>RequiresMountsFor</code> a service waits for that storage, starts again in a fresh view when it appears, and stops if it goes.</li>
+          <li><strong>Folders:</strong> <code>StateDirectory</code> (<code>/var/lib</code>), <code>CacheDirectory</code> (<code>/var/cache</code>), <code>LogsDirectory</code> (<code>/var/log</code>), <code>RuntimeDirectory</code> (<code>/run</code>, removed when it stops) and <code>ConfigurationDirectory</code> (<code>/etc</code>), with their <code>&hellip;Mode</code>; <code>BindPaths</code> and <code>BindReadOnlyPaths</code>.</li>
+          <li><strong>Secrets:</strong> <code>LoadCredential</code> and <code>SetCredential</code> put files in a private folder only the service sees (<code>$CREDENTIALS_DIRECTORY</code>).</li>
+          <li><strong>Logs:</strong> what a service prints goes to <code>/data/adb/nixup/units/&lt;name&gt;/log</code> (set aside as <code>log.old</code> past 1 MB). The Services screen shows it.</li>
+          <li><strong>Notifications:</strong> when a service stops by itself or fails, and again when it has run for a minute after that. At boot, only if the last of its retries fails. <code>notifications = false;</code> on a service turns them off. The SSH server and adb never send any.</li>
+          <li><strong>Priority:</strong> services run below the app on screen (nice 10, on the background cores). <code>serviceConfig.Nice</code> changes it.</li>
+        </ul>
+      </section>
+
+      <section id="unit-options">
+        <h2>Supported unit options</h2>
+        <p>Most of what NixOS's services use works. <a href="https://github.com/by-architect/Nixup/blob/main/nix/units.nix">nix/units.nix</a> lists every key.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Kind</th><th scope="col">Keys</th></tr></thead>
+            <tbody>
+              <tr><td>NixOS unit options</td><td><code>description</code>, <code>enable</code>, <code>script</code>, <code>preStart</code>, <code>postStart</code>, <code>preStop</code>, <code>postStop</code>, <code>environment</code>, <code>path</code>, <code>wantedBy</code>, <code>requiredBy</code>, <code>after</code>, <code>before</code>, <code>wants</code>, <code>requires</code>, <code>bindsTo</code>, <code>restartTriggers</code>, <code>reloadTriggers</code>, <code>startAt</code>; <code>systemd.targets</code>, <code>systemd.globalEnvironment</code></td></tr>
+              <tr><td>Commands</td><td><code>ExecStart</code>, <code>ExecStartPre</code>, <code>ExecStartPost</code>, <code>ExecCondition</code>, <code>ExecStop</code>, <code>ExecStopPost</code>, <code>RemainAfterExit</code>, <code>PIDFile</code></td></tr>
+              <tr><td><code>Type</code></td><td><code>simple</code>, <code>exec</code>, <code>oneshot</code>, <code>forking</code>, <code>notify</code>, <code>notify-reload</code> (<code>idle</code> and <code>dbus</code> run as <code>simple</code>)</td></tr>
+              <tr><td>Restarting and stopping</td><td><code>Restart</code> (<code>no</code>, <code>always</code>, <code>on-success</code>, <code>on-failure</code>, <code>on-abnormal</code>, <code>on-abort</code>, <code>on-watchdog</code>), <code>RestartSec</code>, the <code>&hellip;ExitStatus</code> keys, <code>KillMode</code>, <code>KillSignal</code>, <code>SendSIGKILL</code>, <code>Timeout&hellip;</code>, <code>WatchdogSec</code></td></tr>
+              <tr><td>Environment</td><td><code>Environment</code>, <code>EnvironmentFile</code>, <code>UnsetEnvironment</code>, <code>WorkingDirectory</code></td></tr>
+              <tr><td>User and limits</td><td><code>User</code>, <code>Group</code>, <code>SupplementaryGroups</code>, <code>DynamicUser</code>, <code>PermissionsStartOnly</code>, <code>AmbientCapabilities</code>, <code>NoNewPrivileges</code>, <code>UMask</code>, <code>Nice</code>, <code>OOMScoreAdjust</code>, <code>Limit&hellip;</code></td></tr>
+              <tr><td>Folders</td><td><code>StateDirectory</code>, <code>CacheDirectory</code>, <code>LogsDirectory</code>, <code>RuntimeDirectory</code>, <code>ConfigurationDirectory</code> (and their <code>&hellip;Mode</code>), <code>RuntimeDirectoryPreserve</code>, <code>BindPaths</code>, <code>BindReadOnlyPaths</code></td></tr>
+              <tr><td>Secrets</td><td><code>LoadCredential</code>, <code>SetCredential</code>, <code>LoadCredentialEncrypted</code>, <code>SetCredentialEncrypted</code></td></tr>
+              <tr><td><code>unitConfig</code></td><td><code>RequiresMountsFor</code>, the path <code>Condition&hellip;</code> and <code>Assert&hellip;</code> tests, <code>ConditionUser</code>, <code>ConditionVirtualization</code>, <code>ConditionArchitecture</code>, <code>ConditionKernelCommandLine</code>, and the order keys</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li><strong>Accepted, and nothing done:</strong> what only hardens or limits a service on NixOS (<code>ProtectSystem</code>, <code>PrivateTmp</code>, <code>PrivateDevices</code>, <code>SystemCallFilter</code>, <code>CPUQuota</code>, <code>MemoryMax</code>, &hellip;), logging keys (<code>StandardOutput</code>, &hellip;; the output goes to the service's log), <code>StartLimit&hellip;</code>, and the unit options <code>partOf</code>, <code>conflicts</code>, <code>onFailure</code>, <code>onSuccess</code> and <code>aliases</code>. <code>ExecReload</code> and <code>reloadIfChanged</code> are accepted, but a changed service is restarted.</li>
+          <li><strong>Unknown keys</strong> in <code>serviceConfig</code> or <code>unitConfig</code> are left out with a warning, as systemd itself does. An unknown key in a timer, socket or path unit stops the build.</li>
+          <li><strong>Refused</strong> (the build stops and says why): both <code>script</code> and <code>ExecStart</code>; an unknown <code>Type</code> or <code>Restart</code>; a service that is not a one-time job without exactly one <code>ExecStart</code>; <code>Nice</code> outside -20 to 19; relative paths in <code>BindPaths</code> or <code>RequiresMountsFor</code>; <code>confinement.enable</code>; <code>Accept = true</code> without a template.</li>
+        </ul>
+      </section>
+
+      <section id="scripts">
+        <h2>Activation scripts</h2>
+        <p>Scripts, as NixOS's <code>system.activationScripts</code>, <code>system.preSwitchChecks</code> and <code>system.userActivationScripts</code>:</p>
+<pre><code>{
+  # Runs as root with each build and each start of the phone, before the services start
+  system.activationScripts.stay-awake = {
+    text = "settings put global stay_on_while_plugged_in 3";
+    undo = "settings put global stay_on_while_plugged_in 0";   # Nixup's own: when it leaves the config
+  };
+
+  # Runs before a build changes anything: when it fails, nothing changes
+  system.preSwitchChecks.battery = ''[ "$(cat /sys/class/power_supply/battery/capacity)" -ge 20 ]'';
+
+  # Runs as each normal user, when it changes and at each start of the phone
+  system.userActivationScripts.notes = "mkdir -p ~/notes";
+}</code></pre>
+        <ul>
+          <li>They run in Nixup's view (Nix packages and Android's commands both there), with bash, as root, in the order their <code>deps</code> say. NixOS's own names (<code>users</code>, <code>etc</code>, &hellip;) can be in <code>deps</code>. Their <code>PATH</code> has coreutils, findutils, grep, sed and <code>/system/bin</code>.</li>
+          <li>Keep them quick and safe to run again: they run at every build and every start.</li>
+          <li>A script that fails is told, and the others still run, as on NixOS. The build then ends as failed (its changes stay).</li>
+          <li>A dry run runs only scripts with <code>supportsDryActivation = true</code> (with <code>NIXOS_ACTION=dry-activate</code>), and the pre-switch checks.</li>
+          <li>A pre-switch check gets the profile as <code>$1</code> and <code>switch</code> or <code>dry-activate</code> as <code>$2</code>. <code>NIXOS_NO_CHECK=1</code> skips the checks.</li>
+          <li><code>undo</code> is Nixup's own: it runs once when the script leaves the config, and when Nixup is removed, so the phone gets back what the script changed. An undo that fails is tried again at the next build.</li>
+        </ul>
+      </section>
+
+      <section id="nixos-modules">
+        <h2>NixOS service modules</h2>
+        <p>
+          NixOS's own service modules run on the phone from your nixpkgs, as they are: with their options, their
+          users and their settings files. This is all it takes:
+        </p>
+<pre><code>{
+  services.ntfy-sh = {
+    enable = true;
+    settings.base-url = "http://phone:2586";
+    settings.listen-http = "127.0.0.1:2586";    # the tailnet only, through Tailscale
+  };
+}</code></pre>
+        <p>
+          These modules are on Nixup's list, which means they build with Nixup's options (a test checks each one):
+          AdGuard Home, aria2, at, Audiobookshelf, Bazarr, Blocky, Caddy, calibre-web, code-server, Conduit (Matrix),
+          CoreDNS, CouchDB, cron, Deluge, dnscrypt-proxy, dnsmasq, endlessh, File Browser, Forgejo, FreshRSS, Gitea,
+          gonic, GoToSocial, Gotify, Grafana, harmonia, Headscale, Homepage, i2pd, InfluxDB, Jellyfin, Kavita, Komga,
+          Lidarr, lighttpd, linkding, llama.cpp, Loki, MariaDB/MySQL, Mealie, MiniDLNA, Mosquitto, Navidrome, nginx,
+          Node-RED, ntfy, Ollama, Apache httpd, Privoxy, Prometheus, Prowlarr, qBittorrent, Radarr, Radicale, Readarr,
+          Redis, Soft Serve, Sonarr, Stirling-PDF, Tor, Transmission, ttyd, Unbound, Uptime Kuma, Vaultwarden, vnStat
+          and WebDAV.
+        </p>
+        <details class="more">
+          <summary>Their option names</summary>
+          <div class="body">
+            <p>
+              <code>services.</code> + <code>adguardhome</code>, <code>aria2</code>, <code>atd</code>, <code>audiobookshelf</code>,
+              <code>bazarr</code>, <code>blocky</code>, <code>caddy</code>, <code>calibre-web</code>, <code>code-server</code>,
+              <code>coredns</code>, <code>couchdb</code>, <code>cron</code>, <code>deluge</code>, <code>dnscrypt-proxy</code>,
+              <code>dnsmasq</code>, <code>endlessh</code>, <code>filebrowser</code>, <code>forgejo</code>, <code>freshrss</code>,
+              <code>gitea</code>, <code>gonic</code>, <code>gotify</code>, <code>gotosocial</code>, <code>grafana</code>,
+              <code>harmonia</code>, <code>headscale</code>, <code>homepage-dashboard</code>, <code>httpd</code>, <code>i2pd</code>,
+              <code>influxdb2</code>, <code>jellyfin</code>, <code>kavita</code>, <code>komga</code>, <code>lidarr</code>,
+              <code>lighttpd</code>, <code>linkding</code>, <code>llama-cpp</code>, <code>loki</code>, <code>matrix-conduit</code>,
+              <code>mealie</code>, <code>minidlna</code>, <code>mosquitto</code>, <code>mysql</code>, <code>navidrome</code>,
+              <code>nginx</code>, <code>node-red</code>, <code>ntfy-sh</code>, <code>ollama</code>,
+              <code>privoxy</code>, <code>prometheus</code>, <code>prowlarr</code>, <code>qbittorrent</code>, <code>radarr</code>,
+              <code>radicale</code>, <code>readarr</code>, <code>redis</code>, <code>soft-serve</code>, <code>sonarr</code>,
+              <code>stirling-pdf</code>, <code>tor</code>, <code>transmission</code>, <code>ttyd</code>, <code>unbound</code>,
+              <code>uptime-kuma</code>, <code>vaultwarden</code>, <code>vnstat</code> and <code>webdav</code>.
+            </p>
+            <p>The list is in <a href="https://github.com/by-architect/Nixup/blob/main/nix/nixos.nix">nix/nixos.nix</a>.</p>
+          </div>
+        </details>
+        <ul>
+          <li><strong>Each runs as its own user.</strong> One that needs the phone's shared storage (a music folder) gets it with <code>systemd.services.&lt;name&gt;.serviceConfig.SupplementaryGroups = [ "media_rw" ];</code>, or runs as root with <code>serviceConfig.User = lib.mkForce "root";</code>.</li>
+          <li><strong>Another module</strong> of nixpkgs can be added by hand, as on NixOS: <code>imports = [ "${modulesPath}/services/web-apps/foo.nix" ];</code> (with <code>{ modulesPath, ... }:</code> at the top). Anything it needs that the phone lacks stops the build with a message. <code>disabledModules = [ "services/misc/ntfy-sh.nix" ];</code> leaves one of the list out, for a module of your own.</li>
+          <li><strong>PostgreSQL is not supported:</strong> it needs System V shared memory, which Android's kernel does not have. Use a module's SQLite database instead.</li>
+          <li><strong>Settings files</strong> a module makes are built on the phone, from what cache.nixos.org has; packages themselves are never built.</li>
+        </ul>
+        <details class="more">
+          <summary>NixOS options a phone cannot have</summary>
+          <div class="body">
+            <p>Modules often set or read options for things a phone does not have. Nixup handles them three ways:</p>
+            <ul>
+              <li><strong>Accepted and ignored</strong> (so modules build): the firewall's port lists, <code>networking.useDHCP</code> and other network setup, <code>security.pam.services</code>, <code>security.wrappers</code> (with a warning: no setuid wrappers), <code>boot.*</code> kernel and file system lists, <code>services.dbus</code>, <code>services.udev</code>, <code>services.logrotate</code> (each service's log is set aside past 1 MB anyway), <code>documentation.*</code>.</li>
+              <li><strong>Warned about:</strong> <code>boot.kernelModules</code> and <code>boot.kernel.sysctl</code>.</li>
+              <li><strong>Refused when turned on</strong> (the build stops and says why): <code>networking.firewall.enable</code> (off by default on a phone), nftables, NetworkManager, <code>networking.wireless</code>, <code>networking.interfaces</code>, <code>security.acme.certs</code>, extra certificates, polkit, <code>sudo</code> and <code>doas</code> (root is <code>su</code> on a phone), rtkit, AppArmor (Android has SELinux), extra kernel module packages and kernel parameters, <code>systemd.mounts</code>, <code>systemd.network</code>, <code>services.resolved</code>, X11, PulseAudio, PipeWire, Home Assistant, Avahi (Android has its own mDNS), <code>hardware.graphics</code> and PostgreSQL.</li>
+            </ul>
+          </div>
+        </details>
+      </section>
+
+      <section id="tailscale">
+        <h2>Tailscale</h2>
+        <p>Tailscale with NixOS's options, run by root in userspace mode: it takes no VPN slot and changes no routes, so the Tailscale app can stay.</p>
+<pre><code>{
+  services.tailscale = {
+    enable = true;
+    authKeyFile = ./tailscale.key;               # logs in by itself; without it, the log shows a login link
+    extraUpFlags = [ "--ssh" ];                  # more `tailscale up` flags, like "--advertise-exit-node"
+  };
+  networking.hostName = "phone";                 # its name on the tailnet
+}</code></pre>
+        <ul>
+          <li>Your other tailnet devices reach the phone's services, even those that listen only on <code>127.0.0.1</code>, which Wi-Fi cannot reach. That is how the examples on this page keep services private: <code>http://phone:8080</code> from your laptop.</li>
+          <li>Each build runs <code>tailscale up --reset</code> with your flags, so a flag you take out goes back to Tailscale's default. The auth key is used only when the phone is logged out.</li>
+          <li><code>authKeyFile</code> takes a file next to your config (<code>./tailscale.key</code>), the key itself (<code>"tskey-&hellip;"</code>), a <code>pkgs.writeText</code> file, or the full path of a file already on the phone. Each becomes a root-only <a href="#secrets">secret</a>.</li>
+          <li>The tailnet name is <code>networking.hostName</code>, or the phone's device name (in small letters).</li>
+          <li>You get a notification when Tailscale connects, drops, or needs a login (checked every 20 seconds).</li>
+          <li>Also: <code>package</code>, <code>port</code> (41641), <code>extraSetFlags</code>, <code>extraDaemonFlags</code>, <code>authKeyParameters</code>, <code>permitCertUid</code>, <code>disableTaildrop</code>, <code>disableUpstreamLogging</code>, and Nixup's own <code>relayServerPort</code> (a peer relay's UDP port). <code>interfaceName</code> must stay <code>"userspace-networking"</code>; <code>useRoutingFeatures</code> and <code>openFirewall</code> do nothing (use flags).</li>
+        </ul>
+      </section>
+
+      <section id="syncthing">
+        <h2>Syncthing</h2>
+        <p>Syncthing, set up from the config as on NixOS, run by root:</p>
+<pre><code>{
+  services.syncthing = {
+    enable = true;
+    settings.devices.laptop.id = "7CFNTQM-IMTJBHJ-3UWRDIU-ZGQJFR6-VCXZ3NB-XUH3KZO-N52ITXR-LAIYUAU";
+    settings.folders.documents = {
+      path = "/storage/emulated/0/Documents";
+      devices = [ "laptop" ];
+      type = "sendreceive";                      # "sendonly", "receiveonly", "receiveencrypted"
+      versioning = { type = "trashcan"; params.cleanoutDays = "30"; };
+    };
+    cert = ./syncthing/cert.pem;                 # optional: a fixed device ID (secret files)
+    key = ./syncthing/key.pem;
+  };
+}</code></pre>
+        <ul>
+          <li>Devices, folders and settings are pushed into Syncthing at each build. Devices and folders not in the config are removed (<code>overrideDevices</code>, <code>overrideFolders</code>).</li>
+          <li>Its web interface listens on a socket only root can use (<code>unix:///run/syncthing/gui.sock</code>). For a browser, set <code>guiAddress = "127.0.0.1:8384";</code> and a <code>guiPasswordFile</code>; the build warns without one.</li>
+          <li>Each folder's path is waited for (SD cards, the storage after the first unlock). Folders under <code>/storage</code> ignore file permissions, which the phone's storage does not have.</li>
+          <li>Its data is in <code>/var/lib/syncthing</code>. Not on the phone: another <code>user</code>, <code>group</code> or data folder, <code>relay.enable</code>, and <code>encryptionPasswordFile</code>.</li>
+        </ul>
+      </section>
+
+      <section id="ssh">
+        <h2>SSH</h2>
+        <p>An SSH server, as NixOS's <code>services.openssh</code>. Logins get the same shell as the app's terminal, with your packages.</p>
+<pre><code>{
+  services.openssh = {
+    enable = true;
+    listenAddresses = [ { addr = "127.0.0.1"; port = 22; } ];   # the tailnet only (leave out: every network)
+  };
+  users.users.root.openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAA… you@laptop" ];
+}</code></pre>
+<pre><code>ssh root@phone                  # from a computer on your tailnet
+sftp root@phone                 # file transfers work too (file managers, sshfs)</code></pre>
+        <ul>
+          <li>Root logs in with keys only (<code>PermitRootLogin = "prohibit-password"</code>). Password logins are off by default.</li>
+          <li><strong>Passwords:</strong> with <code>settings.PasswordAuthentication = true</code>, users with a password (<code>users.users.&lt;name&gt;.hashedPassword</code>, &hellip;) log in with it, checked through PAM as on NixOS.</li>
+          <li>Keys can come from <code>authorizedKeys.keys</code>, <code>authorizedKeys.keyFiles</code>, <code>~/.ssh/authorized_keys</code> (root's is <code>/data/adb/nixup/home/.ssh</code>) and <code>authorizedKeysFiles</code> (in folders only root can write to).</li>
+          <li>Host keys are made in <code>/etc/ssh</code> at the first start and kept. The settings are checked (<code>sshd -t</code>) before each start, and restarting the server does not end open sessions.</li>
+          <li>Its log: <code>/data/adb/nixup/units/sshd/log</code>. Not on the phone: <code>startWhenNeeded</code> and <code>authorizedKeysCommand</code>.</li>
+        </ul>
+      </section>
+
+      <section id="snapcast">
+        <h2>Snapcast</h2>
+        <p>Multi-room audio, in sync. <code>services.snapserver</code> is NixOS's; <code>services.snapclient</code> is Nixup's own (NixOS has none), and plays a server's stream through the phone's speaker, headphones or Bluetooth.</p>
+<pre><code>{
+  services.snapclient = {
+    enable = true;
+    host = "192.168.1.10";        # the server (a phone cannot look for one), or "ws://server:1780"
+    latency = 0;                  # ms to play earlier, on top of Android's own (measured)
+  };
+
+  services.snapserver = {
+    enable = true;
+    settings.stream.source = [ "pipe:///run/snapserver/snapfifo?name=default" ];
+    settings.http.enabled = true; # Snapweb, a player and control page, on 1780
+  };
+}</code></pre>
+        <ul>
+          <li>The client's sound goes through Android's audio as music. Its delay is measured at each start and added. 24- and 32-bit sound needs Android 12 or newer.</li>
+          <li>Client options: <code>host</code>, <code>port</code> (1704), <code>hostID</code> (default: the phone's name), <code>instance</code>, <code>latency</code>, <code>sampleFormat</code> (<code>"48000:16:2"</code>), <code>mixer</code> (<code>"software"</code>, or <code>"none"</code> for Android's volume alone), <code>extraFlags</code>.</li>
+          <li>nixpkgs' snapcast comes with PipeWire, PulseAudio and Avahi: about 780 MB on the phone.</li>
+        </ul>
+      </section>
+
+      <section id="adb">
+        <h2>adb</h2>
+        <p>Android's debugging bridge. NixOS has nothing like it, so the option is Android's own:</p>
+<pre><code>{
+  android.adb = {
+    enable = true;                               # USB debugging on (false: off; null: not managed)
+    port = 5555;                                 # adb over the network too, from every start: adb connect phone:5555
+    trustedKeys = [ "QAAAA…= you@laptop" ];      # computers let in without asking (their ~/.android/adbkey.pub)
+    trustedKeyFiles = [ ./laptop-adbkey.pub ];   # the same, from files
+    forgetUnused = false;                        # keep every computer (Android forgets one unused for 7 days)
+  };
+}</code></pre>
+        <ul>
+          <li>Keys are added to Android's own list (<code>/data/misc/adb/adb_keys</code>). Only the keys Nixup added are taken out again; a computer the phone trusted before stays.</li>
+          <li>A new port takes effect 3 seconds after the build ends, so a build that came in over adb finishes first. The port is set again at each start.</li>
+          <li><code>enable = false</code> turns USB debugging off, which also cuts off <code>nixup-rebuild</code> over adb.</li>
+          <li>adb never sends notifications: it is about the phone's security.</li>
+        </ul>
+      </section>
+
+      <section id="networking">
+        <h2>Networking</h2>
+        <p>
+          These work as on NixOS, inside Nixup's view: for its services, shells and Nix. Android's apps keep
+          Android's own DNS, hosts file and proxy.
+        </p>
+<pre><code>{
+  networking.hosts = { "192.168.1.10" = [ "nas" "nas.home" ]; };   # names in Nixup's /etc/hosts
+  networking.nameservers = [ "9.9.9.9" ];          # DNS servers ([ ]: the network's own, the default)
+
+  # StevenBlack's list of ad and tracker names, blocked in Nixup's /etc/hosts
+  networking.stevenblack = {
+    enable = true;
+    block = [ "gambling" ];                        # more lists: "fakenews", "gambling", "porn", "social"
+    whitelist = [ "s.click.aliexpress.com" ];      # names left alone
+  };
+
+  networking.proxy.default = "http://127.0.0.1:3128";   # the shells' http_proxy, … and Nix's downloads
+  networking.proxy.noProxy = "127.0.0.1,localhost,.home.arpa";
+}</code></pre>
+        <ul>
+          <li><code>networking.hostFiles</code> adds more files of names to <code>/etc/hosts</code> (StevenBlack's list is one); <code>networking.extraHosts</code> adds lines.</li>
+          <li>With no <code>nameservers</code>, <code>/etc/resolv.conf</code> follows the network in use, and is rewritten when you change networks.</li>
+          <li>The proxy reaches Nix's own downloads from the build after the one that sets it. <code>noProxy</code> defaults to <code>127.0.0.1,localhost</code> when a proxy is set.</li>
+          <li><code>networking.hostName</code> is the phone's name (see <a href="#system-settings">System settings</a>); <code>networking.domain</code> and <code>networking.fqdn</code> are there for modules that read them.</li>
+          <li>The firewall's options are accepted and do nothing; <code>networking.firewall.enable = true</code> is refused, as a phone has no such firewall.</li>
+        </ul>
+      </section>
+
+      <section id="etc">
+        <h2>Files in /etc and folders</h2>
+<pre><code>{
+  environment.etc."foo/foo.conf".text = ''
+    a = 1
+  '';
+  environment.etc."foo/secret.conf" = { text = "b = 2"; mode = "0600"; };   # a copy, not a link
+
+  systemd.tmpfiles.rules = [
+    "d /var/lib/foo 0750 root root -"                                # a folder
+    "L+ /home/niobe/Music - - - - /storage/emulated/0/Music"         # a link
+  ];
+}</code></pre>
+        <ul>
+          <li><code>environment.etc</code> files go into Nixup's <code>/etc</code> only; Android's <code>/system/etc</code> is never touched. A file that leaves the config is removed. Options: <code>text</code>, <code>source</code>, <code>target</code>, <code>mode</code> (<code>"symlink"</code>, or a mode for a copy), <code>user</code>, <code>group</code>, <code>uid</code>, <code>gid</code>, <code>enable</code>.</li>
+          <li>Nixup writes some files itself, so they cannot come from <code>environment.etc</code>: <code>passwd</code>, <code>group</code>, <code>shadow</code>, <code>subuid</code>, <code>subgid</code>, <code>hosts</code>, <code>resolv.conf</code>, the certificates, and anything under <code>nixup/</code>. Use the matching options instead.</li>
+          <li><code>systemd.tmpfiles.rules</code> (and <code>systemd.tmpfiles.settings</code>) run at each build and start, before the services: for paths under <code>/var</code>, <code>/run</code>, <code>/etc</code> and <code>/home</code>. Types <code>d D v q Q e f F w L z Z r R C p</code>; the age column is ignored.</li>
+        </ul>
+      </section>
+
+      <!-- ============================================================ Keeping things safe -->
+
+      <section id="secrets">
+        <h2>Secrets</h2>
+        <p>
+          Some options point to secret files: keys, passwords, tokens. Nixup never puts them in the Nix store or
+          in the profile. They are: <code>services.tailscale.authKeyFile</code>, <code>services.syncthing.cert</code>,
+          <code>key</code> and <code>guiPasswordFile</code>, <code>users.users.&lt;name&gt;.hashedPasswordFile</code>,
+          <code>android.backup.passwordFile</code> and <code>environmentFile</code>, and
+          <code>android.playstore.tokenFile</code>.
+        </p>
+<pre><code>{
+  # A file next to your config: the build copies it to the phone, readable by root only
+  services.tailscale.authKeyFile = ./tailscale.key;
+
+  # A file already on the phone: used where it is (the config itself then holds no secret)
+  android.backup.passwordFile = "/data/adb/nixup/secrets/backup-password";
+}</code></pre>
+        <ul>
+          <li>Files from the config go to <code>/data/adb/nixup/secrets/</code>: the folder is root's alone, each file readable by root only. A file that leaves the config is removed; files you put there yourself stay.</li>
+          <li>Keys can also be given as text, where Nixup knows them by how they start (<code>"tskey-&hellip;"</code>, <code>"-----BEGIN &hellip;"</code>, <code>"aas_et/&hellip;"</code>), or as a <code>pkgs.writeText</code> file, as a module shared with NixOS might make them. Either way they are written to such a root-only file.</li>
+          <li>A path made by Nix (<code>"${&hellip;}"</code>) is refused: it would have gone through the Nix store, which every user can read.</li>
+          <li>A secret that is missing stops the build before anything changes. A changed secret restarts the services that use it.</li>
+          <li>A build from a PC sends the secret files along, into a root-only folder that is removed once the build is applied.</li>
+        </ul>
+        <div class="callout">
+          <span class="label">Tip</span>
+          <p>
+            In a flake, every file it uses is part of the flake: a secret file must be in the flake's folder (and,
+            in a git repository, known to git). To keep secrets out of a repository altogether, put them on the
+            phone in <code>/data/adb/nixup/secrets/</code> and give their full path, as in the second example.
+          </p>
+        </div>
+      </section>
+
+      <section id="backups">
+        <h2>Backups</h2>
+        <p>
+          Apps (their APK and data) and folders are backed up by the phone itself with
+          <a href="https://restic.net">restic</a>: encrypted, and each file stored only once.
+        </p>
+<pre><code>{
+  android.backup = {
+    repository = "/storage/XXXX-XXXX/Backup";    # SD card, phone storage, or "sftp:me@pc:/backup/phone", …
+    passwordFile = ./backup-password;            # next to your config; keep a copy off the phone
+    apps = [ "org.thoughtcrime.securesms" "at.bitfire.davdroid" ];
+    folders = [ "/storage/emulated/0/DCIM" ];
+  };
+
+  # Optional: one app its own way
+  android.apps."com.termux".backup = { include = [ "data" ]; when = "manual"; };
+}</code></pre>
+        <div class="callout warn">
+          <span class="label">Important</span>
+          <p>Keep <code>passwordFile</code> somewhere besides the phone. Without it, the backups cannot be read.</p>
+        </div>
+
+        <details class="more">
+          <summary>Every backup option</summary>
+          <div class="body">
+<pre><code>{
+  android.backup = {
+    repository = null;                            # a full path on the phone, or sftp:, rest:, s3:, b2:, azure:, gs:, swift:, rclone:
+    passwordFile = null;                          # the repository's password (secret)
+    environmentFile = null;                       # a remote repository's keys, NAME=value lines (secret)
+    initialize = true;                            # make the repository at the first backup
+    apps = [ ];                                   # apps backed up with the defaults
+    folders = [ ];                                # folders, once a schedule
+    defaults = {
+      apk = true;                                 # its APK too: installable from the backup
+      data = true;                                # false: the APK alone
+      include = [ "data" "deviceData" "storage" ];   # also "media", "obb"
+      when = "auto";                              # "auto": after use; "schedule"; "manual"
+      autoRestore = false;                        # true on a new phone: see below
+    };
+    schedule = "daily";                           # "hourly", "daily", "weekly", "6h", …
+    quietTime = "10m";                            # "auto": this long in the background first
+    keep = { last = 3; hourly = 0; daily = 7; weekly = 4; monthly = 0; yearly = 0; };
+    onlyWhileCharging = false;                    # by itself only on the charger
+  };
+  # Per app: android.apps."&lt;app&gt;".backup = true, false, or its own { include, when, apk, data, … }
+}</code></pre>
+          </div>
+        </details>
+
+        <h3>What is backed up of an app</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Part</th><th scope="col">What</th></tr></thead>
+            <tbody>
+              <tr><td><code>apk</code></td><td>The app itself, so it can be installed from the backup (only apps you installed, not those that came with the phone)</td></tr>
+              <tr><td><code>data</code></td><td>Its private data</td></tr>
+              <tr><td><code>deviceData</code></td><td>What it reads before the first unlock</td></tr>
+              <tr><td><code>storage</code></td><td>Its files in <code>Android/data</code></td></tr>
+              <tr><td><code>media</code></td><td>Its files in <code>Android/media</code></td></tr>
+              <tr><td><code>obb</code></td><td>Its files in <code>Android/obb</code> (game data)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Caches and compiled code are left out; Android makes them again.</p>
+
+        <h3>When backups run</h3>
+        <ul>
+          <li>The phone checks every 15 minutes what is due, once it has been unlocked since it started.</li>
+          <li>An <code>"auto"</code> app is backed up after you used it, once it has been in the background for <code>quietTime</code> (10 minutes), at most once an hour; and at least once a <code>schedule</code>, after an update, and when it was never backed up. A <code>"schedule"</code> app: once a <code>schedule</code>. A <code>"manual"</code> app: only by hand. Folders: once a <code>schedule</code>.</li>
+          <li>Only what changed is stored again. An app not in use is paused while it is copied, so its files are copied as one moment.</li>
+          <li><strong>Before each backup</strong> the storage is checked: the SD card is there, and there is room. Automatic backups also wait while memory is short or the phone is hot. A backup that waits tries again later and says why on the Backups screen.</li>
+          <li>After each run, old backups beyond <code>keep</code> are dropped; their space is freed at most once a week.</li>
+        </ul>
+
+        <h3>Restoring</h3>
+        <ul>
+          <li><strong>Always by hand:</strong> the <strong>Backups</strong> screen (pick the backup, then the parts: APK, data, &hellip;), or <code>su -c "nixup-backup restore org.example.app"</code>.</li>
+          <li>An app that is not on the phone comes back whole: its APK first (from that backup, or another backup of the app), then its data. If no backup has its APK, the restore says &ldquo;app not found&rdquo;: install the app first, then restore its data.</li>
+          <li>Restoring stops the app, replaces its data, and sets the files' owner and security labels right. An older APK is not installed over a newer one, and data from a newer version than the installed app is refused.</li>
+          <li>A folder comes back into itself (the backup's files replace those there; others stay), or into a new folder.</li>
+        </ul>
+
+        <h3>A new phone</h3>
+<pre><code>{
+  networking.hostName = "phone";                   # the same name as the old phone
+  android.backup.defaults.autoRestore = true;
+}</code></pre>
+        <ul>
+          <li>With <code>autoRestore</code>, a build that installs an app brings back its data (from the newest backup that is not newer than the version installed), and backed-up apps that are on no list are installed from their backup with their data.</li>
+          <li>An app you removed on this phone is never brought back by itself.</li>
+          <li><strong>Backups are kept per phone name</strong> (<code>networking.hostName</code>, else the device name). Give the new phone the old one's name, or it will not see the old backups.</li>
+        </ul>
+
+        <h3>Commands</h3>
+<pre><code>su -c "nixup-backup status"                            # each app and folder: last backup, and whether it is due
+su -c "nixup-backup list org.example.app"              # its backups
+su -c "nixup-backup now"                               # back up everything now
+su -c "nixup-backup now --parts=apk,data com.termux"   # or one app, some of its parts
+su -c "nixup-backup restore org.example.app"           # from its newest backup
+su -c "nixup-backup restore /storage/emulated/0/DCIM --to=/storage/emulated/0/DCIM-restored"
+su -c "nixup-backup restic snapshots"                  # restic itself, with the repository and password</code></pre>
+      </section>
+
+      <!-- ============================================================ The system -->
+
+      <section id="specialisations">
+        <h2>Specialisations</h2>
+        <p>
+          Other versions of the config, built with it, as on NixOS: a &ldquo;work&rdquo; one, a &ldquo;travel&rdquo;
+          one. The phone switches between them without building again.
+        </p>
+<pre><code>{
+  specialisation.work.configuration = {
+    services.syncthing.enable = false;
+    android.settings.display.darkMode = false;
+  };
+
+  specialisation.bare = {
+    inheritParentConfig = false;                  # only its own lines, not this config's
+    configuration = { };
+  };
+}</code></pre>
+        <ul>
+          <li><strong>Switch:</strong> <strong>&#8942; &rarr; Specialisations</strong> and pick one (or &ldquo;The config itself&rdquo;), or <code>nixup-rebuild switch --specialisation work</code>.</li>
+          <li>The phone keeps the one picked, across restarts too, until another is picked. (NixOS goes back to its default at a restart.)</li>
+          <li>A normal <strong>Build</strong> applies the config itself, unless you ask for a specialisation. An automatic upgrade keeps the one in use.</li>
+          <li>Each build builds all of them; a check or warning of one is told with its name. Names use letters, digits, <code>_</code>, <code>.</code> and <code>-</code>.</li>
+        </ul>
+      </section>
+
+      <section id="auto-upgrade">
+        <h2>Automatic upgrades</h2>
+        <p>The phone can build its config again by itself, with everything at its newest, as NixOS's <code>system.autoUpgrade</code>:</p>
+<pre><code>{
+  system.autoUpgrade = {
+    enable = true;
+    dates = "04:40";                              # systemd's calendar events, like "daily", "Sun 03:00"
+    randomizedDelaySec = "45min";                 # a random wait before each
+    persistent = true;                            # a time missed while the phone was off comes once it is on
+    upgrade = true;                               # false: build the config as flake.lock pins it
+    # flake = "github:you/phone#phone";           # another config (null: the picked one; a git clone pulls first)
+    # channel = "https://channels.nixos.org/nixos-26.05";   # the nixpkgs of a configuration.nix alone
+    runGarbageCollection = false;                 # true: free up space afterwards
+  };
+  android.autoUpgrade = {
+    onlyOnUnmetered = true;                       # only on Wi-Fi, never on mobile data
+    onlyWhileCharging = false;                    # true: only while charging
+  };
+}</code></pre>
+        <ul>
+          <li>A time when the phone is not on Wi-Fi (or not charging, when asked), or its battery is under 15% and not charging, is skipped.</li>
+          <li>A config in the app's git clone gets the repository's new commits first. The specialisation in use stays.</li>
+          <li><code>flake</code> and <code>channel</code> cannot both be set. Only <code>operation = "switch"</code> exists; <code>flags</code>, <code>allowReboot</code> and <code>rebootWindow</code> are ignored (a build needs no restart).</li>
+        </ul>
+      </section>
+
+      <section id="version">
+        <h2>Version and labels</h2>
+        <p>Each generation has a version label and the config's commit, as NixOS's boot menu shows them:</p>
+<pre><code>{
+  system.stateVersion = "26.05";                  # the release of your first build: leave it there
+  system.nixos.tags = [ "travel" ];               # words before the version in each generation's label
+  system.copySystemConfiguration = true;          # each generation keeps a copy of configuration.nix (not with a flake)
+}</code></pre>
+        <p>In a flake, the commit it was built from can go into each generation:</p>
+<pre><code>{
+  inputs.nixup.url = "github:by-architect/Nixup";
+  outputs = { self, nixup, ... }: {
+    nixupConfigurations.phone = nixup.lib.nixupSystem {
+      modules = [
+        ./configuration.nix
+        { system.configurationRevision = self.rev or self.dirtyRev or null; }
+      ];
+    };
+  };
+}</code></pre>
+<pre><code>nixup-version                           # 26.05.20261013.a033e66 (Yarara)
+nixup-version --revision                # the git commit of the config's nixpkgs
+nixup-version --configuration-revision  # system.configurationRevision
+nixup-version --json                    # all of them, as NixOS's --json</code></pre>
+        <ul>
+          <li><code>nixos-version</code> is the same command, for tools written for NixOS.</li>
+          <li><code>/etc/os-release</code> in Nixup's view says <code>NAME=Nixup</code>, <code>ID=nixup</code>, <code>ID_LIKE=nixos</code>, so tools like fastfetch show it.</li>
+          <li>The Generations screen shows each one's label and commit.</li>
+        </ul>
+      </section>
+
+      <!-- ============================================================ Using Nixup -->
+
+      <section id="building">
+        <h2>Build, dry run, roll back</h2>
+        <p>It works like <code>nixos-rebuild</code>, from the app or from a root shell on the phone:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">NixOS</th><th scope="col">Nixup</th></tr></thead>
+            <tbody>
+              <tr><td><code>nixos-rebuild switch</code></td><td><strong>Build</strong>, or <code>nixup-rebuild switch</code></td></tr>
+              <tr><td><code>nixos-rebuild dry-activate</code></td><td><strong>Dry run</strong>, or <code>nixup-rebuild dry-activate</code></td></tr>
+              <tr><td><code>nixos-rebuild switch --upgrade</code></td><td><strong>Upgrade</strong>, or <code>nixup-rebuild switch --upgrade</code></td></tr>
+              <tr><td><code>nixos-rebuild switch --rollback</code></td><td><strong>Generations</strong> &rarr; pick one &rarr; <strong>Switch to it</strong>, or <code>nixup-rebuild switch --rollback</code></td></tr>
+              <tr><td><code>nixos-rebuild list-generations</code></td><td><strong>Generations</strong>, or <code>nixup-rebuild list-generations</code></td></tr>
+              <tr><td><code>nixos-rebuild switch --specialisation work</code></td><td><strong>&#8942; &rarr; Specialisations</strong>, or <code>nixup-rebuild switch --specialisation work</code></td></tr>
+              <tr><td><code>nixos-rebuild --target-host</code></td><td><code>nixup-rebuild switch --flake .#phone</code> on a PC (<a href="#from-a-pc">below</a>)</td></tr>
+              <tr><td><code>nixos-generate-config</code></td><td><code>nixup-config create</code> on a PC (<a href="#config-create">below</a>)</td></tr>
+              <tr><td><code>nixos-version</code></td><td><code>nixup-version</code> (and <code>nixos-version</code>)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>From a shell on the phone</h3>
+<pre><code>su -c 'nixup-rebuild switch'                          # build the config the app picked, and apply it
+su -c 'nixup-rebuild dry-activate'                    # what a build would change
+su -c 'nixup-rebuild switch --upgrade'                # with everything at its newest
+su -c 'nixup-rebuild switch --file ./configuration.nix'   # another config, this once
+su -c 'nixup-rebuild switch --flake github:you/phone#phone'
+su -c 'nixup-rebuild switch --rollback'               # the generation before the current one
+su -c 'nixup-rebuild list-generations'</code></pre>
+        <p>
+          <code>list-generations</code> prints one line per generation (number, date, label, source), the current one
+          marked. <code>boot</code> and <code>test</code> do not exist on the phone: a build needs no restart.
+        </p>
+
+        <h3>Upgrade</h3>
+        <p>
+          <strong>Upgrade</strong> fetches the app lists and releases again, moves a flake's inputs to their newest
+          (its <code>flake.lock</code> is updated), and gives a <code>configuration.nix</code> the newest nixpkgs;
+          then it builds as <strong>Build</strong> does.
+        </p>
+
+        <h3>Generations</h3>
+        <ul>
+          <li>Each build that changes something is saved: its profile, the versions its apps are at, what it was built from (and the commit), the PC it was built on, its <code>flake.lock</code>, its label and the config's commit, and the specialisation in use.</li>
+          <li>Switching to an older generation applies its profile again: its settings, apps and services. It then becomes the newest generation. Apps come at their newest versions, and packages that were freed are fetched again.</li>
+          <li>The Generations screen has a <strong>Dry run</strong> for each, to see first what switching would change.</li>
+        </ul>
+      </section>
+
+      <section id="from-a-pc">
+        <h2>Building from a PC</h2>
+        <p>
+          A PC with Nix can build the config and apply it on the phone, as <code>nixos-rebuild --target-host</code>
+          does. The module must be on the phone first. Turn on USB debugging, connect, and allow the PC.
+        </p>
+<pre><code>nix run github:by-architect/Nixup -- switch --flake .#phone            # build here, apply on the phone
+nix run github:by-architect/Nixup -- dry-activate --flake .#phone      # what would change
+nix run github:by-architect/Nixup -- switch --flake .#phone --upgrade  # with everything at its newest
+nix run github:by-architect/Nixup -- switch --file configuration.nix   # a configuration.nix alone
+nix run github:by-architect/Nixup -- switch --flake .#phone --target-host adb:192.168.1.20:5555
+nix run github:by-architect/Nixup -- switch --flake .#phone --target-host phone   # over ssh
+nix run github:by-architect/Nixup -- build --flake .#phone             # only build: writes ./result.json</code></pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Option</th><th scope="col">Means</th></tr></thead>
+            <tbody>
+              <tr><td><code>--flake &lt;flake&gt;[#name]</code></td><td>The flake (<code>.</code> when there is a <code>flake.nix</code> here). Without <code>#name</code>: the one named after the phone, else the only one.</td></tr>
+              <tr><td><code>--file &lt;file&gt;</code></td><td>A <code>configuration.nix</code> (<code>./configuration.nix</code> when there is no flake), with the PC's nixpkgs.</td></tr>
+              <tr><td><code>--target-host &lt;where&gt;</code></td><td><code>adb</code> (asks which phone), <code>adb:&lt;serial&gt;</code>, <code>adb:&lt;host&gt;:&lt;port&gt;</code>, or <code>[user@]host</code> for ssh.</td></tr>
+              <tr><td><code>--upgrade</code></td><td>A local flake's inputs at their newest, app lists and releases fetched again.</td></tr>
+              <tr><td><code>--specialisation &lt;name&gt;</code></td><td>Apply that specialisation.</td></tr>
+              <tr><td><code>--override-input</code>, <code>--show-trace</code></td><td>As with <code>nixos-rebuild</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li><strong>Picking the phone:</strong> it lists the phones adb sees, over USB and the network (one phone seen both ways is shown once), and asks which. Its last entry connects a phone over the network, and offers pairing if needed (Wireless debugging &rarr; Pair device with pairing code). The address is remembered. Without a terminal, there must be exactly one phone, or a <code>--target-host</code>.</li>
+          <li><strong>Over ssh,</strong> the user must be able to use <code>su</code>: root, or a user with <code>androidApp = "dev.nixup.manager"</code>.</li>
+        </ul>
+        <h3>What happens</h3>
+        <ol>
+          <li>The PC checks that the phone has Nixup's module and lets it use root.</li>
+          <li>It sends the config's repository list; the phone refreshes its app lists; the PC reads the app names back.</li>
+          <li>The PC evaluates the config into the profile.</li>
+          <li>It sends the profile, the secret files, the small recipes for the files the config makes (and the config's nixpkgs, when the phone does not have it), what it was built from and on which machine, and <code>flake.lock</code>.</li>
+          <li>The phone applies it like its own build, with the same checks. The generation says which PC built it.</li>
+        </ol>
+        <p>
+          The PC never builds the phone's packages: the phone downloads them from cache.nixos.org itself. What the PC
+          sends goes into a root-only folder, removed after. After a build from a PC, the app's <strong>Build</strong>
+          asks whether to apply that build again as it is, or build the config picked on the phone instead.
+        </p>
+        <h3>On a NixOS machine</h3>
+<pre><code># with Nixup's flake as an input named nixup
+nixpkgs.overlays = [ inputs.nixup.overlays.default ];
+environment.systemPackages = [ pkgs.nixup-rebuild ];   # nixup-rebuild and nixup-config</code></pre>
+        <h3>Or let the phone build it</h3>
+<pre><code>adb push configuration.nix /sdcard/Nixup/configuration.nix
+adb shell su -c "nixup-rebuild switch --file /sdcard/Nixup/configuration.nix"   # or dry-activate</code></pre>
+      </section>
+
+      <section id="config-create">
+        <h2>A config from your phone</h2>
+        <p>
+          <code>nixup-config create</code> writes a config from what a phone has now, as
+          <code>nixos-generate-config</code> does for a NixOS machine. Building it changes nothing: it is the phone as
+          it is. It lists the phones adb sees and asks which.
+        </p>
+<pre><code>nix run github:by-architect/Nixup#nixup-config -- create                    # writes ./configuration.nix
+nix run github:by-architect/Nixup#nixup-config -- create --output phone.nix --force   # another file, replaced
+nix run github:by-architect/Nixup#nixup-config -- create --target-host adb:192.168.1.20:5555</code></pre>
+        <ul>
+          <li><strong>What it reads:</strong> the phone's settings (and LineageOS's), model, Android version, dark mode, display size, navigation mode, languages, time zone, keyboard, Data Saver, location, adb's port; the apps, and the repository each came from; the apps that came with the phone and were removed or disabled; battery exceptions and default apps.</li>
+          <li><strong>What it writes:</strong> sections for apps by source, apps that came with the phone (<code>debloat</code>, <code>enabled = false</code>), apps' settings, and the phone's settings. Apps from Google Play or releases, and apps it could not place, are written as comments for you to finish.</li>
+          <li>It needs no root; with Nixup installed and root allowed, it learns more (the phone's own app lists). It finds apps' sources in F-Droid and IzzyOnDroid too.</li>
+          <li>It checks the file against Nixup's options before it ends. Then: look it over, and <code>nixup-rebuild switch --file configuration.nix</code>.</li>
+        </ul>
+      </section>
+
+      <section id="app-tour">
+        <h2>The app, screen by screen</h2>
+        <p>Five screens, a terminal, and a menu. One action runs at a time, and what it says shows on the screen as it goes.</p>
+        <h3>Build</h3>
+        <ul>
+          <li><strong>Config:</strong> what a build reads, with <strong>Pick file</strong>, <strong>New</strong>, <strong>Git</strong> and <strong>Type it</strong> (a flake address, or a full path, each may end in <code>#name</code>).</li>
+          <li>When the config is in the app's git clone: its address, branch, commit and local changes, with <strong>Pull</strong>, <strong>Pull and build</strong> and <strong>Reclone</strong>.</li>
+          <li>The last build (its generation, source, and the PC it came from), then <strong>Build</strong>, <strong>Dry run</strong>, <strong>Upgrade</strong>, <strong>Open its folder</strong> and <strong>Generations</strong>.</li>
+        </ul>
+        <h3>Updates</h3>
+        <ul>
+          <li>When it last checked, and which sources update by themselves.</li>
+          <li>A banner when a newer Nixup is out, with <strong>Install</strong> and <strong>What's new</strong>.</li>
+          <li><strong>Check for updates</strong>, <strong>Update all</strong>, and each newer app with its versions, size and source, and an <strong>Update</strong> button.</li>
+        </ul>
+        <h3>Backups</h3>
+        <ul>
+          <li>The repository, and why automatic backups wait, if they do.</li>
+          <li><strong>Back up all</strong>, <strong>Back up&hellip;</strong> (any installed app with the parts you pick, or a folder), <strong>Refresh</strong>.</li>
+          <li>The config's apps, its folders, and other backups, each with <strong>Back up</strong> and <strong>Restore</strong>, when it was last backed up, and whether it is due.</li>
+        </ul>
+        <h3>Services</h3>
+        <ul>
+          <li>Each service and how it is: running, listening (starts at its first connection), restarting, waiting for its storage, stopped, done, failed, not run, not started (its condition is not met); since when, and when its timer runs next.</li>
+          <li><strong>Start</strong>, <strong>Stop</strong>, <strong>Restart</strong>, <strong>Run again</strong> (one-time jobs) and <strong>Log</strong>.</li>
+        </ul>
+        <h3>Logs</h3>
+        <ul>
+          <li>Everything that happened, by day: builds, updates, backups, services. Filters: <strong>All</strong>, <strong>Builds</strong>, <strong>Updates</strong>, <strong>Backups</strong>, <strong>Services</strong>, <strong>Problems</strong>.</li>
+          <li>Tap an entry for when, who started it (you, the phone by itself, a computer over adb or ssh, Magisk's Action button, &hellip;), how long it took, and <strong>Show log</strong>.</li>
+          <li><strong>Log files</strong> opens <code>apply.log</code>, its older part, and each service's log.</li>
+        </ul>
+        <h3>The top bar</h3>
+        <ul>
+          <li>The <strong>terminal</strong> icon (see <a href="#packages">Packages and the terminal</a>).</li>
+          <li><strong>&#8942;</strong>: <strong>Google Play account</strong>, <strong>Notifications</strong>, <strong>Specialisations</strong>, <strong>Free up space</strong>, <strong>What this phone supports</strong> (which settings this phone can have, and why not) and <strong>About</strong>.</li>
+        </ul>
+        <p>
+          The Updates, Backups, Services and Logs screens each have a search box, and so does every log you open:
+          type part of a name, a package or a message. Case and accents do not matter (&ldquo;sifre&rdquo; finds
+          &ldquo;şifre&rdquo;). In Magisk 28 and newer, the module's <strong>Action</strong> button runs a build too.
+        </p>
+      </section>
+
+      <section id="commands">
+        <h2>Commands</h2>
+        <h3>On the phone, as root</h3>
+        <p>
+          From <code>adb shell su -c '&hellip;'</code>, the app's terminal, <code>nixup-shell</code>, or SSH as root. They
+          are in <code>/system/bin</code> from the first restart after installing.
+        </p>
+<pre><code>nixup-shell                          # root's shell in Nixup's view, with your packages
+nixup-shell htop                     # one command there
+nixup-rebuild switch                 # build: dry-activate, --upgrade, --rollback, list-generations
+nixup-backup status                  # backups: list, status, now, restore, restic
+nixup-version                        # the system's version (nixos-version too)
+sh /data/adb/modules/nixup/units.sh adb list                 # services: start, stop, restart, log &lt;name&gt;
+sh /data/adb/modules/nixup/update.sh adb check               # app updates: check, now [apps]
+sh /data/adb/modules/nixup/build.sh adb gc                   # free up space
+tail -n 50 /data/adb/nixup/apply.log                         # the log</code></pre>
+        <p>From a computer, the same over adb:</p>
+<pre><code>adb shell su -c nixup-shell
+adb shell su -c "nixup-rebuild list-generations"
+adb shell su -c "nixup-backup restore org.example.app"
+adb shell su -c "sh /data/adb/modules/nixup/units.sh adb log sshd"</code></pre>
+        <h3>On a PC, with Nix</h3>
+<pre><code>nix flake init -t github:by-architect/Nixup                       # a flake.nix and configuration.nix to start from
+nix run github:by-architect/Nixup -- switch --flake .#phone        # nixup-rebuild: switch, dry-activate, build
+nix run github:by-architect/Nixup#nixup-config -- create           # a config from what the phone has
+nix run github:by-architect/Nixup#nixup-play-login                 # a Google Play token</code></pre>
+      </section>
+
+      <section id="logs">
+        <h2>Logs and notifications</h2>
+        <ul>
+          <li><strong>Notifications</strong> come in groups you can turn off one by one (<strong>&#8942; &rarr; Notifications</strong>): Going on now, Builds and the config, App updates, Backups, Services, Connections (Tailscale), Terminal.</li>
+          <li>While something runs, it shows in &ldquo;Going on now&rdquo;; when it ends, its result replaces it. Tapping a notification opens the Logs screen (or Updates).</li>
+          <li>Nothing is sent for what you start in the app while it is on screen, and never anything about the SSH server, adb or secrets.</li>
+          <li>Under Nixup's name in Magisk's module list, the last result shows: <code>✔ &hellip;</code> or <code>✘ &hellip; (log: /data/adb/nixup/apply.log)</code>.</li>
+        </ul>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">File</th><th scope="col">Holds</th></tr></thead>
+            <tbody>
+              <tr><td><code>/data/adb/nixup/events</code></td><td>The journal the Logs screen reads (the newest 1000 entries)</td></tr>
+              <tr><td><code>/data/adb/nixup/logs/&lt;run&gt;.log</code></td><td>Everything one build, update or backup said (the newest 60)</td></tr>
+              <tr><td><code>/data/adb/nixup/apply.log</code></td><td>Every run's output in one file (set aside as <code>apply.log.old</code> past 64 KB)</td></tr>
+              <tr><td><code>/data/adb/nixup/units/&lt;name&gt;/log</code></td><td>A service's output (set aside as <code>log.old</code> past 1 MB)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="updating">
+        <h2>Updating Nixup</h2>
+        <p>
+          When a new release is out, Magisk shows an <strong>Update</strong> for Nixup, and Nixup's
+          <strong>Updates</strong> screen shows it with an <strong>Install</strong> button. Install downloads it from
+          Nixup's releases and checks it first: it must be Nixup's module, newer, with its app signed by the same key
+          as the app on the phone. The phone uses it from the next restart. Your config, generations and data stay.
+        </p>
+        <p>The phone looks for a new release with each update check (every 6 hours, on Wi-Fi).</p>
+      </section>
+
+      <section id="uninstall">
+        <h2>Uninstall</h2>
+        <ol>
+          <li>In Magisk, open <strong>Modules</strong> &rarr; <strong>Nixup</strong> &rarr; <strong>Remove</strong>. If Remove is grayed out, an update is waiting: restart first.</li>
+          <li>Restart the phone, and unlock it.</li>
+        </ol>
+        <p>Once the phone is started and unlocked, Nixup undoes itself:</p>
+        <ul>
+          <li>Every setting it changed goes back to how it was before Nixup, and the apps it removed (<code>debloat</code>) come back.</li>
+          <li><strong>Apps Nixup installed are uninstalled</strong>; their data is kept.</li>
+          <li>Services stop, scripts' <code>undo</code> run, adb keys it added go, and its entries in Obtainium's list are removed.</li>
+          <li>If something cannot go back, it tries again at the next three starts. Then the app and all of <code>/data/adb/nixup</code> are removed.</li>
+        </ul>
+        <p>What stays: your config (wherever you keep it), your backups, apps you installed yourself, and apps' data.</p>
+        <div class="callout warn">
+          <span class="label">Deleted with Nixup</span>
+          <p>
+            Everything in <code>/data/adb/nixup</code> goes: the generations, the secrets, the Nix store, a config
+            cloned by the app's Git, and your services' data in <code>/var/lib</code> (a Vaultwarden or Syncthing
+            database, for example). Copy what you need elsewhere first.
+          </p>
+        </div>
+      </section>
+
+      <section id="troubleshooting">
+        <h2>Troubleshooting</h2>
+        <p>Every run's log is on the Logs screen; the last lines usually say what went wrong. Common cases:</p>
+        <dl class="terms">
+          <div><dt>&ldquo;the config did not build&rdquo;</dt><dd>Nix found a mistake. The lines above it give the file, the line and the reason: often a missing <code>;</code>, an option name with a typo, or a value of the wrong type. Nothing was changed.</dd></div>
+          <div><dt>&ldquo;there is no config yet&rdquo;</dt><dd>Pick one on the Build screen: <strong>New</strong>, <strong>Pick file</strong>, <strong>Git</strong> or <strong>Type it</strong>.</dd></div>
+          <div><dt>&ldquo;the config &hellip; is not there&rdquo;</dt><dd>The file moved, was renamed, or its SD card is out. Pick it again.</dd></div>
+          <div><dt>&ldquo;give flake.nix a folder of its own&rdquo;</dt><dd>A flake's whole folder is copied; keep <code>flake.nix</code> in a small folder of its own, not in Download.</dd></div>
+          <div><dt>&ldquo;Not in cache.nixos.org&rdquo;</dt><dd>A package would need compiling (an overlay changed it, or it is unfree). Use the package as nixpkgs has it, or add <a href="#nix-on-phone">build machines</a>.</dd></div>
+          <div><dt>An app is &ldquo;signed with another key&rdquo;</dt><dd>The app on the phone came from somewhere else. Back up its data, uninstall it and build again, or leave it out of the config.</dd></div>
+          <div><dt>Installs wait at Play Protect</dt><dd>Set <code>android.settings.developer.verifyAdbApps = false;</code> so Android does not stop to scan each app.</dd></div>
+          <div><dt>&ldquo;Sign in to Google Play&rdquo;</dt><dd>No account, or Google refused its token: <strong>&#8942; &rarr; Google Play account</strong> &rarr; <strong>Sign in</strong>. If the page says there is no internet, turn on the Nixup app's network access in its App info.</dd></div>
+          <div><dt>A setting is &ldquo;left as it is&rdquo;</dt><dd>The phone does not have what it needs. <strong>&#8942; &rarr; What this phone supports</strong> says which settings it can have.</dd></div>
+          <div><dt>&ldquo;another one is running&rdquo;</dt><dd>A build, update or backup is still going. Wait for it (the Logs screen shows it), then try again.</dd></div>
+          <div><dt>Nothing happens after a restart</dt><dd>Unlock the phone once: Android keeps apps' data locked until then, so builds and backups wait.</dd></div>
+          <div><dt>A service failed</dt><dd>Services &rarr; its <strong>Log</strong>. A service that reads <code>/storage</code> needs <code>media_rw</code> (or root) and often <code>RequiresMountsFor</code>.</dd></div>
+          <div><dt>Backups wait</dt><dd>The Backups screen says why: the SD card is out, there is not enough room, or the phone is busy or hot. They try again every 15 minutes.</dd></div>
+          <div><dt><code>nixup-rebuild: not found</code></dt><dd>The commands arrive with the first restart after installing. Restart once.</dd></div>
+          <div><dt>&ldquo;the config was not built yet&rdquo;</dt><dd><code>nixup-shell</code> has no Nixup view before the first build: build once.</dd></div>
+        </dl>
+      </section>
+
+      <section id="limits">
+        <h2>Limits</h2>
+        <p>What Nixup does not do, or does differently from NixOS:</p>
+        <ul>
+          <li><strong>Packages are never compiled on the phone.</strong> They come from cache.nixos.org, or from your build machines.</li>
+          <li><strong>No Nix sandbox:</strong> Android's kernels cannot provide it.</li>
+          <li><strong>No real systemd:</strong> no cgroups, no limit on restarts, no reloads (a changed service restarts), timers do not wake the phone, path units look every 2 seconds, and socket activation looks every half second.</li>
+          <li><strong>Not on a phone:</strong> PostgreSQL, a D-Bus session bus, a desktop session, setuid programs for normal users, a firewall, NetworkManager, <code>sudo</code>. Tailscale runs in userspace mode only.</li>
+          <li><strong>Apps:</strong> no beta versions from repositories; going back to a generation does not downgrade apps; Google Play apps with expansion files are not supported yet.</li>
+          <li><strong>Backups:</strong> the APK of an app that came with the phone is not backed up (its data is).</li>
+          <li><strong>Settings</strong> that need LineageOS, a newer Android or some hardware are skipped on phones without them.</li>
+          <li><strong>One user:</strong> Nixup works for the phone's owner, not in a work profile or an app clone.</li>
+          <li><code>pkgs.formats.yaml</code> writes its files as JSON (which is valid YAML), to save a large download.</li>
+        </ul>
+      </section>
+
+      <section id="license">
+        <h2>License</h2>
+        <p>
+          Nixup is released under the <a href="https://github.com/by-architect/Nixup/blob/main/LICENSE">GPL-3.0</a>.
+          It includes Termux's terminal code (Apache 2.0) and Nix-on-Droid's terminal options (MIT), ships Nix
+          (LGPL 2.1) and uses Aurora OSS's gplayapi (GPL-3.0) for Google Play; see
+          <a href="https://github.com/by-architect/Nixup/blob/main/NOTICE">NOTICE</a>.
+        </p>
+      </section>
+
+      <nav class="page-nav" aria-label="More">
+        <a href="index.html">&larr; Home</a>
+        <a href="https://github.com/by-architect/Nixup/releases">Releases &rarr;</a>
+      </nav>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>Nixup &middot; GPL-3.0</span>
+      <nav aria-label="Footer">
+        <a href="index.html">Home</a>
+        <a href="https://github.com/by-architect/Nixup/releases">Releases</a>
+        <a href="https://github.com/by-architect/Nixup/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/by-architect/Nixup">Source code</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

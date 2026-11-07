@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nixup — Declarative Android with Nix</title>
+  <meta name="description" content="Nixup configures a rooted Android phone from one Nix file, the way NixOS configures a computer: apps, app settings, system settings, services and backups, checked before every change and reversible.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Nixup — Declarative Android with Nix">
+  <meta property="og:description" content="Configure an Android phone from one configuration.nix: apps, settings, services and backups, with generations you can roll back to.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="index.html" aria-label="Nixup home">
+        <svg viewBox="24 19.6 60 60" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M59.84,47.95C65.64,45.64 70.21,36.18 69.77,29.43Q66.94,30.15 65.39,32.62Q62.71,33.64 61.48,36.23Q59.01,37.69 58.23,40.45Q55.66,42.45 55.17,45.67Z M48.16,47.95C42.36,45.64 37.79,36.18 38.23,29.43Q41.06,30.15 42.61,32.62Q45.29,33.64 46.52,36.23Q48.99,37.69 49.77,40.45Q52.34,42.45 52.83,45.67Z M61.08,49.35C64.88,43.66 75.92,40.41 83.06,42.43Q81.97,44.77 79.57,45.71Q78.32,47.93 75.89,48.68Q74.39,50.69 71.92,51.11Q70.13,52.94 67.57,53.03Q65.36,54.93 62.44,54.78Z M46.92,49.35C43.12,43.66 32.08,40.41 24.94,42.43Q26.03,44.77 28.43,45.71Q29.68,47.93 32.11,48.68Q33.61,50.69 36.08,51.11Q37.87,52.94 40.43,53.03Q42.64,54.93 45.56,54.78Z M61.42,57.83C66.47,57.98 72.26,64.23 73.79,69.50Q70.65,69.78 68.18,67.83Q65.11,67.54 63.08,65.22Q59.80,64.25 58.09,61.28Z M46.58,57.83C41.53,57.98 35.74,64.23 34.21,69.50Q37.35,69.78 39.82,67.83Q42.89,67.54 44.92,65.22Q48.20,64.25 49.91,61.28Z M54,41.5C56.6,45.2 61.2,49.4 61.2,55.4C61.2,60.2 58,63.6 54,63.6C50,63.6 46.8,60.2 46.8,55.4C46.8,52.6 48,50.4 49.6,48.6C49.8,51 50.8,52.6 52.2,53.4C51.6,49 52.4,45 54,41.5ZM54,50.5C55.6,53 57.6,55 57.6,58C57.6,60.4 56,62 54,62C52,62 50.4,60.4 50.4,58C50.4,55.6 52.4,53.4 54,50.5Z"/></svg>
+        Nixup
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a class="optional" href="#features">Features</a>
+        <a class="optional" href="#install">Install</a>
+        <a href="docs.html">Documentation</a>
+        <a href="https://github.com/by-architect/Nixup">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="wrap">
+        <div>
+          <p class="eyebrow">Declarative Android, with Nix</p>
+          <h1>Configure your phone the way you configure NixOS.</h1>
+          <p class="lead">
+            Nixup manages a rooted Android phone from a single <code>configuration.nix</code>: apps, app settings,
+            system settings, services and backups. Every build is checked before anything changes, and every change
+            can be rolled back.
+          </p>
+          <div class="buttons">
+            <a class="button" href="https://github.com/by-architect/Nixup/releases">Download</a>
+            <a class="button secondary" href="docs.html">Read the documentation</a>
+          </div>
+          <p class="fineprint">Free and open source under GPL-3.0 &middot; Android 11+ &middot; arm64 &middot; Magisk, KernelSU or APatch</p>
+        </div>
+
+        <div>
+          <div class="file-tab"><span>configuration.nix</span></div>
+<pre><code>{ pkgs, ... }: {
+  # Apps from F-Droid, IzzyOnDroid, GitHub releases or Google Play
+  android.packages.fdroid = with pkgs.fdroid; [ com.termux ];
+  android.packages.playstore = [ "org.telegram.messenger" ];
+
+  # Per-app permissions, battery use and default apps
+  android.apps."org.thoughtcrime.securesms".permissions.camera = true;
+
+  # System settings, with NixOS's names where they exist
+  time.timeZone = "Europe/Istanbul";
+  android.settings.display.darkMode = true;
+
+  # NixOS services, running on the phone
+  services.tailscale.enable = true;
+  services.syncthing.enable = true;
+
+  # Encrypted backups of apps and folders
+  android.backup = {
+    repository = "/storage/XXXX-XXXX/Backup";
+    passwordFile = ./backup-password;
+    apps = [ "org.thoughtcrime.securesms" ];
+  };
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <div class="notice-bar">
+      <div class="wrap">
+        <div class="notice" role="note">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 6v5M10 13.5v.5" stroke-linecap="round"/></svg>
+          <p><strong>Nixup is in active development.</strong> Back up your phone before you start. The project comes with no warranty and is not responsible for data loss.</p>
+        </div>
+      </div>
+    </div>
+
+    <section class="section" id="why">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Why Nixup</h2>
+          <p>
+            NixOS runs on only a few phones, and Nix-on-Droid cannot manage Android itself. Nixup fills the gap:
+            it keeps Android and your apps, and gives Nix the permissions to manage them.
+          </p>
+        </div>
+        <div class="principles">
+          <div>
+            <span class="num">01</span>
+            <h3>One file describes the phone</h3>
+            <p>Apps, permissions, settings, services and backups live in one config you can keep in git and share with your NixOS machines.</p>
+          </div>
+          <div>
+            <span class="num">02</span>
+            <h3>Checked before anything changes</h3>
+            <p>A build reads and checks the whole config first. A typo, a missing app or a wrong key stops it, and nothing on the phone is touched.</p>
+          </div>
+          <div>
+            <span class="num">03</span>
+            <h3>Every change can be undone</h3>
+            <p>Each build is saved as a generation you can switch back to. Remove a line, and the setting returns to how it was before Nixup.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section soft" id="features">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>What it manages</h2>
+          <p>The parts of a phone you usually set up by hand, written down once.</p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Apps from repositories</h3>
+            <p>Install and update apps from F-Droid, IzzyOnDroid, custom F-Droid repositories, and GitHub, GitLab or Codeberg releases. Every APK is checked against its checksum and signing key.</p>
+            <a class="more" href="docs.html#apps">Repositories and apps &rarr;</a>
+          </article>
+          <article class="card">
+            <h3>Google Play, without Google Play</h3>
+            <p>Download apps from Google Play the way Aurora Store does. No Play Store, Play services or GApps on the phone, only an account.</p>
+            <a class="more" href="docs.html#google-play">Google Play &rarr;</a>
+          </article>
+          <article class="card">
+            <h3>App settings</h3>
+            <p>Permissions, battery use, background data, special access, default apps, per-app language. Remove or disable apps the phone came with.</p>
+            <a class="more" href="docs.html#app-settings">App settings &rarr;</a>
+          </article>
+          <article class="card">
+            <h3>System settings</h3>
+            <p>Display, navigation, sound, time, language and LineageOS options, with NixOS's names where they exist. Each setting is read back to confirm it took.</p>
+            <a class="more" href="docs.html#system-settings">System settings &rarr;</a>
+          </article>
+          <article class="card">
+            <h3>Packages and terminal</h3>
+            <p>Programs from nixpkgs in a built-in root terminal, over SSH or adb. Nix itself is there too: <code>nix shell</code>, <code>nix profile</code>, <code>nix-shell</code>.</p>
+            <a class="more" href="docs.html#packages">Packages and terminal &rarr;</a>
+          </article>
+          <article class="card">
+            <h3>Services and timers</h3>
+            <p>NixOS-style <code>systemd.services</code>, timers, sockets and path units, run by Nixup itself. They start at boot and restart when they fail.</p>
+            <a class="more" href="docs.html#services">Services and scripts &rarr;</a>
+          </article>
+          <article class="card">
+            <h3>NixOS service modules</h3>
+            <p>Over sixty of nixpkgs' own modules run as they are: Syncthing, Tailscale, SSH, Jellyfin, Vaultwarden, nginx, ntfy, AdGuard Home and more.</p>
+            <a class="more" href="docs.html#ready-made-services">Ready-made services &rarr;</a>
+          </article>
+          <article class="card">
+            <h3>Encrypted backups</h3>
+            <p>Apps (APK and data) and folders backed up by the phone with restic, after use and daily. Restore one app, or a whole new phone.</p>
+            <a class="more" href="docs.html#backups">Backups &rarr;</a>
+          </article>
+          <article class="card">
+            <h3>Generations and rollback</h3>
+            <p>Build, dry run, upgrade and roll back like <code>nixos-rebuild</code>, from the app or from a PC over adb or SSH.</p>
+            <a class="more" href="docs.html#building">Building and rollback &rarr;</a>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="workflow">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Works like <code>nixos-rebuild</code></h2>
+          <p>If you know NixOS, you already know the workflow. Build from the app, or from a computer.</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">NixOS</th><th scope="col">Nixup</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>nixos-rebuild switch</code></td><td><strong>Build</strong> in the app</td></tr>
+              <tr><td><code>nixos-rebuild dry-activate</code></td><td><strong>Dry run</strong></td></tr>
+              <tr><td><code>nixos-rebuild switch --upgrade</code></td><td><strong>Upgrade</strong></td></tr>
+              <tr><td><code>nixos-rebuild switch --rollback</code></td><td><strong>Generations</strong>, then switch to one</td></tr>
+              <tr><td><code>nixos-rebuild --target-host</code></td><td><code>nixup-rebuild switch --flake .#phone</code> on a PC</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section soft" id="install">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Get started</h2>
+          <p>Nixup installs as a root module and comes with its own app.</p>
+        </div>
+        <div class="split">
+          <div>
+            <h3>Install</h3>
+            <ol class="steps">
+              <li><strong>Root the phone</strong><p>Magisk (tested), KernelSU or APatch.</p></li>
+              <li><strong>Download the module</strong><p><code>nixup-v&lt;version&gt;.zip</code> from the <a href="https://github.com/by-architect/Nixup/releases">releases page</a>.</p></li>
+              <li><strong>Install it</strong><p>Magisk &rarr; Modules &rarr; Install from storage &rarr; pick the zip.</p></li>
+              <li><strong>Restart the phone</strong></li>
+              <li><strong>Open Nixup</strong><p>Allow root and notifications, then press <strong>New</strong> for a starter config.</p></li>
+            </ol>
+          </div>
+          <div>
+            <h3>Requirements</h3>
+            <ul class="checklist">
+              <li><strong>A rooted phone</strong> with Magisk, KernelSU or APatch.</li>
+              <li><strong>Android 11 or newer</strong>, 64-bit ARM (arm64).</li>
+              <li><strong>A network connection</strong> for builds.</li>
+              <li><strong>Nix on a PC</strong> only if you want to build there.</li>
+            </ul>
+            <h3 class="spaced">Start a config on a PC</h3>
+<pre><code>nix flake init -t github:by-architect/Nixup</code></pre>
+            <p class="note">
+              Removing the module puts back every setting Nixup changed and every app it removed.
+              <a href="docs.html#uninstall">How uninstalling works</a>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section cta">
+      <div class="wrap">
+        <h2>Write it down once.</h2>
+        <p>Read the full documentation for every option, or start from the template, which lists them all.</p>
+        <div class="buttons">
+          <a class="button" href="docs.html">Read the documentation</a>
+          <a class="button secondary" href="https://github.com/by-architect/Nixup">View on GitHub</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>Nixup &middot; GPL-3.0</span>
+      <nav aria-label="Footer">
+        <a href="docs.html">Documentation</a>
+        <a href="https://github.com/by-architect/Nixup/releases">Releases</a>
+        <a href="https://github.com/by-architect/Nixup/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/by-architect/Nixup">Source code</a>
+      </nav>
+      <p class="credits">
+        Nixup includes Termux's terminal code (Apache 2.0) and Nix-on-Droid's terminal options (MIT), ships Nix
+        (LGPL 2.1) and uses Aurora OSS's gplayapi (GPL-3.0) for Google Play. Android is a trademark of Google LLC.
+      </p>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>
