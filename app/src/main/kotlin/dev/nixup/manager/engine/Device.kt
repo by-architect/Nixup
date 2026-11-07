@@ -442,6 +442,20 @@ object Device {
         false
     }
 
+    /**
+     * Lets an app off Android's stopped state, in which nothing starts it in the background (its jobs, syncs, alarms,
+     * broadcasts) until it is opened: where force-stop and an install leave it. Android 15 and later keep a force-stopped
+     * app there. False when it cannot be done here.
+     */
+    fun letOffStopped(id: String): Boolean = try {
+        val packages = Class.forName("android.app.ActivityThread").getMethod("getPackageManager").invoke(null)
+        packages.javaClass.getMethod("setPackageStoppedState", String::class.java, Boolean::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .invoke(packages, id, false, 0)
+        true
+    } catch (e: Exception) {
+        false
+    }
+
     /** Ends the app's processes that are in the background (not as force-stop does: its jobs and alarms stay). */
     fun killInBackground(id: String) = run("am", "kill", id)
 

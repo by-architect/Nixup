@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## y (2026-11-07)
+## 0.1.5 (2026-11-07)
 
 - DAVx⁵'s accounts in the config: `services.davx5` (Nixup's own; NixOS has no DAVx⁵, an Android app). Each build
   sets them up: an account the phone has not got opens DAVx⁵'s login screen on the phone, already filled in with the
@@ -17,20 +17,21 @@ section after the version, and its text is what the Magisk app shows as the upda
   `services.davx5` leaves the config. `install = "fdroid"` installs DAVx⁵ too; it gets the contacts, calendar and
   notifications permissions, unrestricted battery use, and is never paused for being unused (which takes an app's
   permissions away).
-
-## 0.1.3 (2026-11-07)
-
 - Backups keep an app's accounts too (the new `accounts` part, on by default): the accounts it adds to Android's
-  settings, with their passwords, user data, auth tokens, which apps see them and their sync settings. Android keeps
-  them outside the app's folders and deletes them with the app, so a restored DAVx⁵ had its data but no account to
-  sync with. A restore adds the missing ones again as the app itself (Android lets only an account type's own app add
-  its accounts); one that is on the phone stays as it is. The Backups tab offers them among the parts to restore.
-  Backups made before this have none: such an app is signed in again by hand once.
+  settings, with their passwords, user data, auth tokens, which apps see them and their sync settings (which of its
+  sync adapters run, automatically, how often). Android keeps them outside the app's folders and deletes them with
+  the app, so a restored DAVx⁵ had its data but no account to sync with. A restore adds the missing ones again as the
+  app itself, with their sync settings: Android lets only an account type's own app add its accounts, and shows an
+  account's sync settings only to a caller that can see it. One that is on the phone stays as it is. The Backups tab
+  offers them among the parts to restore. Backups made before this have none: such an app is signed in again by hand
+  once.
 - Backups keep which runtime permissions an app was granted, and a restore grants them again (none is taken away; the
   config's own permissions are set again by the next build).
 - A restore takes the app's files out of the backup into a folder of their own first, as Neo Backup does, and only
   then puts them in place of the app's: a restore that fails, or a restart in the middle, leaves the app's data as it
   was (before, its data was emptied first). A restore a restart broke off is picked up again after it.
+- A restored app is let off Android's stopped state, where the restore and an install leave it: Android 15 and later
+  start none of its syncs or jobs until it is opened, so a restored DAVx⁵ did not sync by itself.
 - After an app is installed from a backup, its data waits (up to 30 s) for Android to have made the app's folders:
   before, it went in at once, and Android could replace the folder under it (a whole Termux restore ended in
   thousands of "no such file or directory" errors).

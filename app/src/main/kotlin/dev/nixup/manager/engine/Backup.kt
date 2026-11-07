@@ -734,6 +734,8 @@ class Backup private constructor(
             }
         }
         info?.optJSONObject("permissions")?.let { permissions -> grant(id, permissions).takeIf { it > 0 }?.let { said += count(it, "permission") } }
+        // Stopped for the restore (and an install leaves it stopped too): its syncs and jobs start it again, as before.
+        Device.letOffStopped(id)
         Out.line(
             if (ok) "✔ Restored $id from ${snapshot.date}: ${said.joinToString(", ").ifEmpty { "nothing was missing" }}"
             else "✘ $id: its accounts did not all come back (see above); restored from ${snapshot.date}: ${said.joinToString(", ").ifEmpty { "nothing else" }}",
