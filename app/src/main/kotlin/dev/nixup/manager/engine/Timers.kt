@@ -104,7 +104,7 @@ class Timers(private val data: File) {
     fun apply(): Int {
         toStop.forEach { stop(it) }
         for (name in leaving) {
-            File(dir, name).deleteRecursively()
+            deleteTree(File(dir, name))
             Out.line("✔ timer $name: removed (it left the config)")
         }
         // One nothing wants is kept as it is, so the last build has it.
@@ -137,7 +137,7 @@ class Timers(private val data: File) {
     /** The module is being removed: the timers stop, and their folders go. */
     fun removeAll() {
         applied().keys.forEach { stop(it) }
-        dir.deleteRecursively()
+        deleteTree(dir)
     }
 
     /** The last build's timers, as the app and units.sh list them. */

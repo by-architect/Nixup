@@ -54,23 +54,39 @@ restore_obtainium() {
 # The services stop (the engine does this, logging out of Tailscale first; this is
 # for when it could not run): their loops, then the programs they ran.
 restore_services() {
-  for pidfile in /data/adb/nixup/services/*/supervisor.pid; do
-    [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2> /dev/null
+  for pidfile in /data/adb/nixup/services/*/supervisor.pid /data/adb/nixup/units/*/supervisor.pid; do
+    [ -f "$pidfile" ] || continue
+    pid=$(cat "$pidfile" 2> /dev/null)
+    # Only a supervisor of Nixup's: after a restart its number may be any other process's.
+    [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2> /dev/null | grep -q nixup && kill "$pid" 2> /dev/null
   done
   pkill -f /data/adb/nixup/services/ 2> /dev/null
 }
 
 if [ "${0##*/}" = nixup-restore.sh ]; then
   until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
+  # The apps' settings and the shared storage read right once the phone was unlocked (its first unlock after a start),
+  # as a build waits for it too.
+  until [ "$(getprop sys.user.0.ce_available)" = true ]; do sleep 10; done
   restore_dark_mode
   # The engine gives back every app setting and removes the apps it installed;
   # restore_apps is there for a module from before the engine.
   engine=/data/adb/nixup/engine.apk
-  [ -f "$engine" ] && CLASSPATH="$engine" /system/bin/app_process /system/bin dev.nixup.manager.engine.Main restore < /dev/null
+  restored=0
+  if [ -f "$engine" ]; then
+    CLASSPATH="$engine" /system/bin/app_process /system/bin dev.nixup.manager.engine.Main restore < /dev/null || restored=$?
+  fi
   restore_apps
   restore_debloat
   restore_obtainium
   restore_services
+  # What did not go back (the engine says so) is tried again at the next start, 3 times: until then its records of
+  # what was there before stay, with the engine and this script.
+  tries=$(cat /data/adb/nixup/restore-tries 2> /dev/null || echo 0)
+  if [ "$restored" != 0 ] && [ "$tries" -lt 3 ]; then
+    echo $((tries + 1)) > /data/adb/nixup/restore-tries
+    exit 0
+  fi
   pm uninstall dev.nixup.manager < /dev/null > /dev/null 2>&1
   rm -rf /data/adb/nixup
   # Where Seraph (Nixup's old name) kept its data, left as a link to it by the install.

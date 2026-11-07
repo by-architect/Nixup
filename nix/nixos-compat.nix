@@ -67,6 +67,7 @@ let
   };
   wanted = units: lib.attrNames (lib.filterAttrs (_: unit: unit.enable && (unit.wantedBy != [ ] || unit.requiredBy != [ ])) units);
 
+  cfgProxy = config.networking.proxy;
   hostsText = lib.concatStrings (lib.mapAttrsToList (ip: names: lib.optionalString (names != [ ]) "${ip} ${lib.concatStringsSep " " names}\n")
     config.networking.hosts) + config.networking.extraHosts;
 in
@@ -147,6 +148,70 @@ in
         default = "";
         description = "More lines of the view's /etc/hosts, as on NixOS.";
       };
+      hostFiles = mkOption {
+        type = types.listOf types.path;
+        default = [ ];
+        example = lib.literalExpression ''[ "''${pkgs.stevenblack-blocklist}/hosts" ]'';
+        description = ''
+          Files whose lines go into the view's /etc/hosts, after networking.hosts and extraHosts, as on NixOS
+          (networking.stevenblack's blocklist is one). Unlike NixOS's, the list has no files of networking.hosts and
+          extraHosts: Nixup writes those lines itself. Android's own apps look names up in Android's hosts file, not
+          this one: the services and shells of Nixup's view use it.
+        '';
+      };
+      proxy = {
+        default = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "http://127.0.0.1:3128";
+          description = "The proxy of httpProxy, httpsProxy, ftpProxy, rsyncProxy and allProxy unless they say another, as on NixOS.";
+        };
+        httpProxy = mkOption {
+          type = types.nullOr types.str;
+          default = config.networking.proxy.default;
+          defaultText = lib.literalExpression "config.networking.proxy.default";
+          description = "http_proxy, as on NixOS.";
+        };
+        httpsProxy = mkOption {
+          type = types.nullOr types.str;
+          default = config.networking.proxy.default;
+          defaultText = lib.literalExpression "config.networking.proxy.default";
+          description = "https_proxy, as on NixOS.";
+        };
+        ftpProxy = mkOption {
+          type = types.nullOr types.str;
+          default = config.networking.proxy.default;
+          defaultText = lib.literalExpression "config.networking.proxy.default";
+          description = "ftp_proxy, as on NixOS.";
+        };
+        rsyncProxy = mkOption {
+          type = types.nullOr types.str;
+          default = config.networking.proxy.default;
+          defaultText = lib.literalExpression "config.networking.proxy.default";
+          description = "rsync_proxy, as on NixOS.";
+        };
+        allProxy = mkOption {
+          type = types.nullOr types.str;
+          default = config.networking.proxy.default;
+          defaultText = lib.literalExpression "config.networking.proxy.default";
+          description = "all_proxy, as on NixOS.";
+        };
+        noProxy = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "127.0.0.1,localhost,.localdomain";
+          description = "no_proxy, as on NixOS (with a default proxy and no noProxy: 127.0.0.1,localhost).";
+        };
+        envVars = mkOption {
+          type = types.attrs;
+          internal = true;
+          default = { };
+          description = ''
+            The proxy's environment variables, as on NixOS: every shell session gets them, and so does Nix (the phone's
+            builds' downloads, Nix's daemon). Android's own apps, and Nixup's downloads of apps, keep Android's.
+          '';
+        };
+      };
       nameservers = mkOption {
         type = types.listOf types.str;
         default = [ ];
@@ -172,6 +237,26 @@ in
 
     # (environment.variables, sessionVariables and the shells' environment are NixOS's own: nix/shells.nix.)
     environment = {
+      corePackages = mkOption {
+        type = types.listOf types.package;
+        defaultText = lib.literalExpression "with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]";
+        example = [ ];
+        description = ''
+          The packages every Nix shell has, as on NixOS, in /run/current-system/sw with environment.systemPackages (with
+          Nix packages only: without them the phone's shell is Android's). NixOS's are some thirty; the phone's are bash,
+          coreutils, findutils, grep, sed and less (Android's own commands are there too), and what NixOS's modules add
+          (programs.ssh: the ssh client). Unlike NixOS, they do not count as environment.systemPackages.
+        '';
+      };
+      defaultPackages = mkOption {
+        type = types.listOf types.package;
+        default = [ ];
+        example = lib.literalExpression "with pkgs; [ perl rsync strace ]";
+        description = ''
+          More packages every Nix shell has, as on NixOS, with environment.corePackages. NixOS's are perl, rsync and
+          strace; the phone's are none (each would be a download for every phone).
+        '';
+      };
       pathsToLink = taken (types.listOf types.str) [ ] "folders of packages linked into the system's profile";
       extraOutputsToInstall = taken (types.listOf types.str) [ ] "more outputs of the packages to install";
     };
@@ -243,7 +328,7 @@ in
         # a priority of its own, so that the first of two with the same file wins, as ignoreCollisions has it.
         default =
           let
-            packages = config.environment.systemPackages ++ (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+            packages = config.environment.systemPackages ++ config.environment.corePackages ++ config.environment.defaultPackages;
             outputsOf = package: map (output: package.${output}.outPath or package.outPath) (package.meta.outputsToInstall or [ "out" ]);
           in
           derivation {
@@ -255,7 +340,7 @@ in
             preferLocalBuild = true;
             allowSubstitutes = false;
           };
-        defaultText = lib.literalExpression "environment.systemPackages, with bash, coreutils, findutils, grep, sed and less";
+        defaultText = lib.literalExpression "environment.systemPackages, environment.corePackages and environment.defaultPackages";
         description = "The system's packages in one folder, as on NixOS (made on the phone when something uses it).";
       };
       checks = taken (types.listOf types.package) [ ] "builds that check the system";
@@ -368,11 +453,32 @@ in
   };
 
   config = {
+    # The phone's core packages, as NixOS sets its own: a definition, which the modules' own (programs.ssh: the ssh
+    # client) add to (a default they would replace).
+    environment.corePackages = with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ];
+
     # The view's /etc/hosts and /etc/resolv.conf (Etc.kt writes them).
     system.build.network = lib.filterAttrs (_: value: value != null) {
       hosts = if hostsText == "" then null else hostsText;
       nameservers = if config.networking.nameservers == [ ] then null else config.networking.nameservers;
+      # The files of networking.hostFiles, whose lines Etc.kt adds (their paths: the phone fetches them first).
+      hostFiles = if config.networking.hostFiles == [ ] then null else map (file: "${file}") config.networking.hostFiles;
+      # The proxy's variables, which the phone's own Nix takes too (module/common.sh's nix_env, from Etc.kt's
+      # /etc/nixup/proxy).
+      proxy = if config.networking.proxy.envVars == { } then null else config.networking.proxy.envVars;
     };
+
+    # The proxy's variables, as NixOS makes them, for every shell session and for Nix (its daemon, nix/nix.nix).
+    networking.proxy.envVars =
+      lib.optionalAttrs (cfgProxy.default != null) { no_proxy = "127.0.0.1,localhost"; }
+      // lib.optionalAttrs (cfgProxy.httpProxy != null) { http_proxy = cfgProxy.httpProxy; }
+      // lib.optionalAttrs (cfgProxy.httpsProxy != null) { https_proxy = cfgProxy.httpsProxy; }
+      // lib.optionalAttrs (cfgProxy.rsyncProxy != null) { rsync_proxy = cfgProxy.rsyncProxy; }
+      // lib.optionalAttrs (cfgProxy.ftpProxy != null) { ftp_proxy = cfgProxy.ftpProxy; }
+      // lib.optionalAttrs (cfgProxy.allProxy != null) { all_proxy = cfgProxy.allProxy; }
+      // lib.optionalAttrs (cfgProxy.noProxy != null) { no_proxy = cfgProxy.noProxy; };
+    environment.sessionVariables = config.networking.proxy.envVars;
+    nix.envVars = config.networking.proxy.envVars;
     # NixOS keeps /etc/hosts in environment.etc, which modules read (dnsmasq restarts when its source changes): the
     # same text, turned off, as Etc.kt writes the file itself.
     environment.etc.hosts = {

@@ -463,6 +463,13 @@ in
       everybody = 9997;
       nogroup = 9999;
       sshd = 74;
+      # NixOS's own, with its numbers (ids.gids), which a config shared with NixOS gives its users (extraGroups =
+      # [ "wheel" ]): they name no Android group, so they give nothing on the phone.
+      wheel = 1;
+      tty = 3;
+      disk = 6;
+      dialout = 27;
+      users = 100;
     };
 
     # NixOS's nobody, as Android's own (AID_NOBODY: 9999, which may use the network, as NixOS's 65534 may not here).

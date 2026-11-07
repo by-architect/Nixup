@@ -11,10 +11,15 @@ import java.io.File
  * at most every 5 seconds) or when one changes (PathChanged, PathModified: a file's time or size, or what a folder
  * holds). A path unit of the last build runs as a loop of its own ([LOOP]), started by the build and at boot, which
  * looks every 2 seconds (the phone has no inotify for this) and has the engine start its unit ([Units.firePath]).
- * MakeDirectory makes the folders it watches. Its folder ($DATA/paths/<name>) keeps its spec, the paths as they are
- * outside the view (checks), when it last started its unit (last) and what each start said (log).
+ * MakeDirectory makes the folders it watches. Its paths' specifiers (%h, %t, %S, ...) are filled in as the unit it
+ * starts has them (a user's own path unit's are its user's). Its folder ($DATA/paths/<name>) keeps its spec, the paths
+ * as they are outside the view (checks), when it last started its unit (last) and what each start said (log).
  */
-class Paths(private val data: File) {
+class Paths(
+    private val data: File,
+    /** A path with its specifiers filled in for the unit that its path unit starts (Units.pathOf), or null. */
+    private val filled: (unit: String, path: String) -> String? = { _, path -> path },
+) {
     private val dir = File(data, "paths")
 
     private var wanted: Map<String, JSONObject> = emptyMap()
@@ -69,7 +74,7 @@ class Paths(private val data: File) {
     fun apply(): Int {
         toStop.forEach { stop(it) }
         for (name in leaving) {
-            File(dir, name).deleteRecursively()
+            deleteTree(File(dir, name))
             Out.line("✔ path unit $name: removed (it left the config)")
         }
         for (name in toWrite) File(dir, name).apply { mkdirs() }.resolve("spec.json").writeText(wanted.getValue(name).toString())
@@ -91,7 +96,7 @@ class Paths(private val data: File) {
     /** The module is being removed: the path units stop, and their folders go. */
     fun removeAll() {
         applied().keys.forEach { stop(it) }
-        dir.deleteRecursively()
+        deleteTree(dir)
     }
 
     /** The last build's path units, as the app and units.sh list them. */
@@ -121,7 +126,12 @@ class Paths(private val data: File) {
         }
         stop(name)
         val folder = File(dir, name).apply { mkdirs() }
-        val checks = path.optJSONArray("checks")?.let { checks(it) }.orEmpty()
+        val checks = path.optJSONArray("checks")?.let { checks(it) }.orEmpty().map { (kind, value) ->
+            kind to (filled(path.optString("unit"), value) ?: run {
+                Out.line("✘ path unit $name: $value: its specifiers cannot be filled in (its unit's user is not known)")
+                return false
+            })
+        }
         // The paths as the loop sees them, outside the view; MakeDirectory's folders made first.
         File(folder, "checks").writeText(checks.joinToString("") { (kind, value) -> "$kind\t${Etc.outside(data, value).path}\n" })
         if (path.optBoolean("makeDirectory")) {

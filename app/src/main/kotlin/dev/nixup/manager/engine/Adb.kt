@@ -135,7 +135,8 @@ class Adb(data: File) {
             Device.run("setprop", PORT, journal.getString("port").ifEmpty { "-1" })
             Out.line("✔ adb: its port as before")
         }
-        journalFile.delete()
+        // (Kept when the computers could not be forgotten: the removal's next try at a start tries again.)
+        if (failed == 0) journalFile.delete()
         return failed
     }
 

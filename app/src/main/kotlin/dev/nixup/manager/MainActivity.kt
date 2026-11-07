@@ -580,9 +580,9 @@ class MainActivity : Activity() {
     /** A picked document as the path root reads it at, kept as the config. */
     private fun savePicked(uri: Uri) {
         val path = ConfigSource.pathOf(uri)
-        val media = if (path == null) ConfigSource.mediaId(uri) else null
-        if (path != null || media == null) return checkPicked(path)
-        runner.read(ConfigSource.mediaPathCommand(media)) { _, said -> checkPicked(ConfigSource.mediaPathIn(said)) }
+        val command = if (path == null) ConfigSource.pathCommand(uri) else null
+        if (path != null || command == null) return checkPicked(path)
+        runner.read(command) { _, said -> checkPicked(ConfigSource.pathIn(said)) }
     }
 
     private fun checkPicked(path: String?) = when {
@@ -933,9 +933,14 @@ class MainActivity : Activity() {
         /** A specialisation's name, as nix/specialisation.nix allows it (it goes into build.sh's command). */
         private val SPECIALISATION_NAME = Regex("[A-Za-z0-9][A-Za-z0-9_.-]*")
 
-        /** The specialisation in use, then the last build's whole profile (with its specialisations). */
-        private const val SPECIALISATIONS = "d=/data/adb/nixup; echo \"in-use=\$(cat \$d/specialisation 2>/dev/null)\"; " +
-            "echo '$SPLIT'; cat \$d/system.json 2>/dev/null || cat \$d/profile.json 2>/dev/null"
+        /**
+         * The specialisation in use, then the last build's whole profile (with its specialisations); system.json only
+         * while it goes with profile.json (a module without specialisations writes profile.json alone: common.sh's
+         * system_current).
+         */
+        private const val SPECIALISATIONS = "d=/data/adb/nixup; if [ -f \$d/system.json ] && ! [ \$d/profile.json -nt \$d/system.json ]; then " +
+            "echo \"in-use=\$(cat \$d/specialisation 2>/dev/null)\"; echo '$SPLIT'; cat \$d/system.json; " +
+            "else echo in-use=; echo '$SPLIT'; cat \$d/profile.json 2>/dev/null; fi"
 
         /** Each generation, newest first: its number, when it was made, what from and on which PC; and the current one. */
         private const val GENERATIONS = "g=/data/adb/nixup/generations; echo \"last=\$(cat \$g/last 2>/dev/null)\"; " +

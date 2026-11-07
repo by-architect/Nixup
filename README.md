@@ -216,6 +216,12 @@ Programs from nixpkgs for the phone's shell, as NixOS's `environment.systemPacka
 - A normal user's home is `/home/<name>`, ready right after the phone starts.
 - A user's own packages (`users.users.<name>.packages`) are in its profile, `/etc/profiles/per-user/<name>`, on its
   `PATH` before `environment.systemPackages`, as on NixOS.
+- NixOS's `programs.*` for the shells are nixpkgs' own modules, with all their options: `programs.tmux`, `git`,
+  `neovim`, `vim`, `htop`, `direnv`, `starship`, `zoxide`, `fzf`, `bat`, `nix-index`, `yazi`, `ssh` and others
+  (`nix/programs.nix` lists them). What NixOS puts on every machine (nano, command-not-found) is off on a phone, to
+  save downloads; a program NixOS gives special rights to (mtr, tcpdump, iftop) works for root only.
+  `environment.corePackages` and `environment.defaultPackages` are there as on NixOS (the phone's core is bash,
+  coreutils, findutils, grep, sed and less).
 
 </details>
 
@@ -359,6 +365,9 @@ syntax.
 - `environment.etc` (files in Nixup's `/etc`), `systemd.tmpfiles`, `networking.hosts` and
   `networking.nameservers` work as on NixOS, in Nixup's view of the phone, where `/etc/localtime` is the
   phone's time zone (cron's jobs and every program keep the phone's time).
+- So do `networking.hostFiles`, `networking.stevenblack` (an ad and tracker blocklist in that `/etc/hosts`,
+  for Nixup's services and shells; Android's apps keep Android's hosts file) and `networking.proxy` (the
+  shells' `http_proxy`, ..., and Nix's downloads, from the build after the one that sets it).
 - Services start again at boot, run below the app on the screen (so the phone does not stutter), and send a
   notification when they stop by themselves.
 - Start, stop, restart and logs: the app's **Services** tab.

@@ -7,6 +7,11 @@
 #   nixos-version --json                    all of them, as NixOS's --json has them
 file=/etc/nixup/version
 [ -r "$file" ] || file=/data/adb/nixup/etc/nixup/version
+# (Outside Nixup's shells its files are root's alone: Android's /data/adb.)
+if [ ! -r "$file" ] && [ "$(id -u)" != 0 ]; then
+  echo "nixos-version: outside Nixup's shells only root reads it: su -c nixos-version (or run it in nixup-shell, ssh or the app's terminal)" >&2
+  exit 1
+fi
 [ -r "$file" ] || { echo "nixos-version: no build has been applied yet (or it was made before Nixup kept its version)" >&2; exit 1; }
 value() { sed -n "s/^$1=//p" "$file" | head -n 1; }
 json() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }

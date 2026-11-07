@@ -684,7 +684,7 @@ class Backup private constructor(
         Device.run("am", "force-stop", "--user", "0", id)
         if (overwrite) {
             // What the backup has instead; caches stay (they are not in it).
-            for (path in parts.values) File(path).listFiles().orEmpty().filter { it.name !in listOf("cache", "code_cache") }.forEach { it.deleteRecursively() }
+            for (path in parts.values) File(path).listFiles().orEmpty().filter { it.name !in listOf("cache", "code_cache") }.forEach { deleteTree(it) }
         }
         val args = listOf("restore", "${snapshot.id}:/backup/$id", "--target", "/backup/$id") + parts.keys.flatMap { listOf("--include", "/$it") }
         // How Android made each folder for this install: restic brings back the backed-up folder's owner and label too.
@@ -743,7 +743,7 @@ class Backup private constructor(
     /** Installs [id] from the APKs in [snapshot] (its base APK and splits). */
     private fun installFrom(id: String, snapshot: Snapshot): Boolean {
         val into = File(tmp, "restore-$id")
-        into.deleteRecursively()
+        deleteTree(into)
         into.mkdirs()
         try {
             val (status, _) = inView("exec restic restore ${quote("${snapshot.id}:/backup/$id/apk")} --target ${quote(into.path)} --include '/*.apk'")
@@ -761,7 +761,7 @@ class Backup private constructor(
             Out.line("✔ Installed $id from its backup of ${snapshot.date}")
             return true
         } finally {
-            into.deleteRecursively()
+            deleteTree(into)
         }
     }
 

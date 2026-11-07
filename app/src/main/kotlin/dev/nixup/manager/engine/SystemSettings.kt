@@ -79,13 +79,59 @@ class SystemSettings(data: File) {
         warnings.forEach { Out.line("⚠ $it") }
     }
 
+    /**
+     * At the phone's start: the settings of the profile in place ([system]: its android.system) that the phone has not
+     * got any more, as a build sets them; a ROM may put some back at its start (One UI does: the power key's hold,
+     * Wi-Fi's notices, the status bar's hidden icons). Nothing else is said or changed. Returns how many failed.
+     */
+    fun boot(system: JSONObject?): Int {
+        labels = system?.optJSONObject("labels")?.let { l -> l.keys().asSequence().associateWith { l.getString(it) } } ?: emptyMap()
+        planned = wanted(system).filter { (key, value) ->
+            (missing(key) ?: unsettable(key) ?: check(key, value, emptySet())) == null && !same(key, read(key), value)
+        }.map { Change(it.key, it.value) }
+        giveBack = emptyList()
+        return apply()
+    }
+
+    /**
+     * The settings the apps' installs go by, before them: with android.settings.developer.verifyAdbApps = false, an app
+     * verifier (Google Play Protect) does not stop Nixup's installs (root's count as adb's) to ask on the screen, which
+     * a build nobody watches (system.autoUpgrade) would wait on for up to an hour. Returns how many failed.
+     */
+    fun applyBeforeInstalls(): Int {
+        val first = planned.filter { it.key in BEFORE_INSTALLS }
+        planned = planned - first.toSet()
+        tables.clear()
+        return first.sumOf { change(it.key, it.value) }
+    }
+
     /** Applies the plan: each setting that differs is changed and read back, and those that left the config are given back. Returns how many failed. */
     fun apply(): Int {
         tables.clear()
         var failed = 0
-        for (change in planned) failed += change(change.key, change.value)
+        val changed = planned.filter { change(it.key, it.value) == 0 }
+        failed += planned.size - changed.size
         for (key in giveBack) failed += giveBack(key)
-        return failed
+        return failed + kept(changed)
+    }
+
+    /**
+     * Of the settings just changed, the ones the phone put back by itself a moment later: a ROM's own part may check
+     * a value it reads (One UI's Quick Settings take only its own tiles' names, and put their list back). Returns how
+     * many it did.
+     */
+    private fun kept(changed: List<Change>): Int {
+        if (changed.isEmpty()) return 0
+        Thread.sleep(1500)
+        tables.clear()
+        var back = 0
+        for (change in changed) {
+            val now = read(change.key)
+            if (same(change.key, now, change.value)) continue
+            Out.line("✘ ${label(change.key)}: the phone put back ${shown(now)} (it does not take ${shown(change.value)})")
+            back++
+        }
+        return back
     }
 
     /** Gives every setting the module changed back (the module is being removed). Returns how many failed. */
@@ -203,7 +249,7 @@ class SystemSettings(data: File) {
 
     private fun read(key: String): String? = when (key) {
         "density" -> Device.density()
-        "navigation" -> Device.navigationModes().entries.firstOrNull { it.value }?.key
+        "navigation" -> Device.navigationMode()
         "language" -> Device.languages().ifEmpty { null }
         "timeZone" -> Device.timeZone().ifEmpty { null }
         "keyboard" -> read("secure/default_input_method")
@@ -239,6 +285,8 @@ class SystemSettings(data: File) {
     /** Values that mean the same: 1.0 and 1 for numbers, tr-tr and tr-TR for languages. */
     private fun same(key: String, a: String?, b: String?): Boolean {
         if (a == b) return true
+        // No density set over the screen's own is that one (Android keeps none set when it is given the screen's own).
+        if (key == "density" && Device.screenDensity().let { own -> own != null && (a ?: own) == (b ?: own) }) return true
         if (a == null || b == null) return false
         if (key == "language") return a.equals(b, ignoreCase = true)
         val x = a.toDoubleOrNull()
@@ -257,6 +305,7 @@ class SystemSettings(data: File) {
         "gestural" -> "gestures"
         "threebutton" -> "three buttons"
         "twobutton" -> "two buttons"
+        "none" -> "the phone's own"
         else -> value
     }
 
@@ -301,8 +350,13 @@ class SystemSettings(data: File) {
         private val TABLES = listOf("global", "secure", "system", "lineage.global", "lineage.secure", "lineage.system")
         private val COMMANDS = listOf("density", "navigation", "language", "timeZone", "keyboard", "dataSaver", "location")
 
-        /** Values that change along with a setting: Night Light's on and off by its schedule, the language's property (empty: the ROM's own) by the language, the keyboards enabled by the keyboard. */
+        /**
+         * Values that change along with a setting: Night Light's on and off by its schedule, the language's property
+         * (empty: the ROM's own) by the language, the keyboards enabled by the keyboard, the Bluetooth name by the
+         * device name (One UI copies it, and does not copy it back).
+         */
         private val COMPANIONS = mapOf(
+            "global/device_name" to listOf("secure/bluetooth_name"),
             "secure/night_display_auto_mode" to listOf("secure/night_display_activated"),
             "secure/night_display_custom_start_time" to listOf("secure/night_display_activated"),
             "secure/night_display_custom_end_time" to listOf("secure/night_display_activated"),
@@ -310,6 +364,9 @@ class SystemSettings(data: File) {
             "keyboard" to listOf("secure/enabled_input_methods"),
         )
         private val COMPANION_KEYS = COMPANIONS.values.flatten().toSet()
+
+        /** What the apps' installs go by (see [applyBeforeInstalls]). */
+        private val BEFORE_INSTALLS = setOf("global/verifier_verify_adb_installs")
 
         private val LABELS = mapOf(
             "density" to "android.settings.display.density", "navigation" to "android.settings.navigation.mode",

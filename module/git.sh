@@ -124,6 +124,8 @@ clone() {
   name=${name##*:}
   name=${name%.git}
   case "$name" in "" | . | .. | *[!A-Za-z0-9._-]*) fail "$url: no repository name in it" ;; esac
+  # (Not this script's own names: its record, clone, and the new clone's folder, .new.)
+  case "$name" in clone | .new) name=$name-repository ;; esac
   fresh=$CLONES/.new
   rm -rf "$fresh"
   mkdir -p "$CLONES"
@@ -134,7 +136,7 @@ clone() {
     || { rm -rf "$fresh"; fail "$url${dir:+ ($dir)} has no flake.nix${cname:+ to build #$cname from} or configuration.nix: say its folder"; }
   # Only one clone: the one before goes, with what was changed in it.
   for old in "$CLONES"/*; do [ -d "$old" ] && rm -rf "$old"; done
-  mv "$fresh" "$CLONES/$name"
+  mv "$fresh" "$CLONES/$name" || fail "the new clone could not be put in place ($CLONES/$name)"
   src=$CLONES/$name${src#"$fresh"}
   printf '%s\n' "url=$url" "branch=$branch" "dir=$dir" "name=$cname" "submodules=$submodules" "path=$CLONES/$name" "pulled=$(date +%s)" > "$STATE"
   printf '%s\n' "$src" > "$SOURCE"

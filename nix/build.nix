@@ -66,15 +66,20 @@ let
   };
 
   # What the profile needs of Nix's store: the services' programs and the files the config makes for them, /etc's
-  # files and environment.systemPackages (the backups' restic and the terminal's font come as paths alone). As Nix
-  # finds a build's references, by their names in the text (storePaths); and, from their strings' context, how each
-  # comes (derivations): a derivation's outputs, fetched from cache.nixos.org, or built on the phone when it is a
-  # small file the config makes (a unit's settings file); or a file the config put in the store itself.
+  # files, environment.systemPackages and the users' shells (the backups' restic and the terminal's font come as paths
+  # alone). As Nix finds a build's references, by their names in the text (storePaths); and, from their strings'
+  # context, how each comes (derivations): a derivation's outputs, fetched from cache.nixos.org, or built on the phone
+  # when it is a small file the config makes (a unit's settings file); or a file the config put in the store itself.
   needed = builtins.toJSON {
     inherit (config.system.build) units etc;
     packages = map (package: "${package}") (config.environment.systemPackages ++ shellPackages);
+    # The files of networking.hostFiles (stevenblack's blocklist), which go into the view's /etc/hosts.
+    hostFiles = config.system.build.network.hostFiles or [ ];
     # The shell (see shellPart): the one the login starts, and system.path, which the phone makes.
     shell = shellPart;
+    # The users' own shells (users.users.<name>.shell = pkgs.xonsh), which /etc/passwd names: not always the package
+    # their programs.<shell> puts in system.path (programs.xonsh's has its extraPackages).
+    passwd = config.system.build.users.passwd;
     # The ssh Nix reaches nix.buildMachines with (nix/nix.nix).
     builders = if config.system.build.nixBuilders == null then null else config.system.build.nixBuilders.sshPath;
     # The scripts (system.activationScripts, preSwitchChecks: nix/activation.nix), with the bash they run with.
@@ -121,6 +126,7 @@ in
         || (config.nix.distributedBuilds && config.nix.buildMachines != [ ])
         || config.system.build.nixosServices.used
         || config.system.build.nixosShells.used
+        || config.system.build.nixosPrograms.used
         || config.system.build.activationUsed;
     };
 

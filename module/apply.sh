@@ -41,6 +41,8 @@ if [ -z "$want" ]; then
 fi
 
 now=$(night)
+# (Without Android's answer there would be nothing to give back later.)
+[ -n "$now" ] || fail "Android did not say whether dark mode is on (cmd uimode night): building again tries again"
 remember darkMode "$now"
 if [ "$now" = "$want" ]; then
   log "Dark mode: $want (already)"

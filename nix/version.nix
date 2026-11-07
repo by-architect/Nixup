@@ -181,7 +181,8 @@ in
       example = lib.literalExpression "self.rev or self.dirtyRev or null";
       description = ''
         The git revision of the config's flake, as on NixOS: each generation keeps it, and the app's Generations and
-        nixos-version --configuration-revision show it.
+        nixos-version --configuration-revision show it. A phone builds a flake without writing its flake.lock, and Nix
+        gives no self.rev while the lock is missing or out of date: commit flake.lock with the config.
       '';
     };
 
