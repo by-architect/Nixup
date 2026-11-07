@@ -134,7 +134,7 @@ object Etc {
     /**
      * /etc/nixup/version: the system's version and the config's revision ([version], a profile's version part:
      * system.nixos.version, label, ..., system.configurationRevision; nix/version.nix), as "name=value" lines, which
-     * nixos-version tells and each generation keeps (module/common.sh). None for a profile without it.
+     * nixup-version tells and each generation keeps (module/common.sh). None for a profile without it.
      */
     private fun writeVersion(etc: File, version: JSONObject?) {
         val file = File(etc, "nixup/version")

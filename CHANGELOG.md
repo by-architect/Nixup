@@ -4,6 +4,21 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- `nixup-rebuild` on the phone, as `nixos-rebuild` on NixOS (as root, in adb's shell, the app's terminal or ssh):
+  `nixup-rebuild switch` builds the config the app picked, `dry-activate` says what would change, `switch --upgrade`
+  takes everything at its newest, `switch --rollback` goes back a generation, `list-generations` lists them;
+  `--file` and `--flake` build another config this once, `--specialisation` picks one.
+- `nixup-config create`, on a PC: a phone's config made from what the phone has now (its settings, its apps and the
+  repository each comes from, the apps it came with that are removed or disabled, battery and default apps), as
+  `nixos-generate-config` does for a NixOS machine, checked against Nixup's options before it is written.
+- On a PC, `nixup-rebuild` lists the phones adb sees (over USB and the network) and asks which one, and can connect
+  one over the network (pairing with Wireless debugging when the phone asks); with no terminal, it takes the only one.
+- `nixup-version` is the system's version command now; `nixos-version` stays, the same command, for tools written
+  for NixOS.
+- A dry run takes another config (`build.sh dry --source=…`): before, it dry-ran the picked config instead.
+
 ## 0.1.1 (2026-11-07)
 
 - Password logins over SSH work: with `services.openssh.settings.PasswordAuthentication = true` sshd checks a

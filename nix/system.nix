@@ -400,6 +400,10 @@ in
 
     android.settings.raw = mkMerge (map (m: lib.setAttrByPath (lib.splitString "." m.table ++ [ m.key ]) (stored m)) set);
     android.settingLabels = lib.listToAttrs (map (m: lib.nameValuePair "${m.table}/${m.key}" (m.label or "android.settings.${m.option}")) set);
+    # Every mapping (its option's whole name, its setting, how its value is stored), for nixup-config create, which
+    # turns the settings a phone has back into these options (scripts/nixup-config.nix).
+    system.build.settingMappings = map (m: { inherit (m) table key; option = m.label or "android.settings.${m.option}"; }
+      // lib.optionalAttrs (m ? store) { inherit (m) store; }) (mappings ++ config.android.settingMappings);
 
     assertions = [
       (check (badRawKeys == [ ]) "android.settings.raw: ${lib.concatStringsSep ", " badRawKeys} is not a setting's name (letters, digits, _ . : -).")

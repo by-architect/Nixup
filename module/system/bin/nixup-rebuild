@@ -1,0 +1,116 @@
+#!/system/bin/sh
+# nixup-rebuild: builds this phone's config and makes the phone match it, as nixos-rebuild does on NixOS (the app's
+# Build, Dry run, Upgrade and Generations, from a shell), as root:
+#   nixup-rebuild switch                    build the config the app's Config picked, and apply it
+#   nixup-rebuild switch --upgrade          the same, with everything at its newest (the app's Upgrade)
+#   nixup-rebuild dry-activate              what a build would change, changing nothing (dry-build and build too)
+#   nixup-rebuild switch --rollback         the generation before the current one, applied again
+#   nixup-rebuild list-generations          the generations, the current one marked
+# Options (switch, dry-activate):
+#   --file <configuration.nix>              this file instead of the config the app picked (this build only)
+#   --flake <flake>[#<name>]                a flake instead: a folder with flake.nix, or an address like
+#                                           github:owner/repo (its nixupConfigurations.<name>)
+#   --specialisation <name>                 apply the config's specialisation <name>; --no-specialisation: the config
+# On a PC, Nixup's flake has a nixup-rebuild too, which builds there and applies it here over adb or ssh.
+[ "$(id -u)" = 0 ] || { echo "nixup-rebuild: run it as root: su -c 'nixup-rebuild $*'" >&2; exit 1; }
+# A root shell an app starts (the app's terminal) sees the phone as the app does: the build goes on in init's view
+# of the phone (its mount namespace) instead, as adb's root shell has it. The folder it was started in comes along,
+# for --file and --flake.
+if [ "$(readlink /proc/1/ns/mnt)" != "$(readlink /proc/self/ns/mnt)" ]; then
+  for n in "/data/adb/magisk/busybox nsenter" "/data/adb/ksu/bin/busybox nsenter" "/data/adb/ap/bin/busybox nsenter" /system/bin/nsenter; do
+    $n -t 1 -m -- true 2> /dev/null && NIXUP_REBUILD_PWD=$PWD exec $n -t 1 -m -- /system/bin/sh "$0" "$@"
+  done
+fi
+here=${NIXUP_REBUILD_PWD:-$PWD}
+d=/data/adb/modules_update/nixup
+[ -f "$d/build.sh" ] || d=/data/adb/modules/nixup
+data=/data/adb/nixup
+die() { echo "nixup-rebuild: $*" >&2; exit 1; }
+# A path of the shell it was started in, as it is here: Nixup's view (its shells, ssh) has /home, /etc, /var and /run
+# of its own, which are Nixup's folders outside it (as the engine's Etc.outside has them).
+outside() {
+  if [ -z "$NIXUP_REBUILD_PWD" ]; then echo "$1"; return; fi
+  case "$1" in
+    /home | /home/*) echo "$data/users${1#/home}" ;;
+    /etc/*) echo "$data/etc${1#/etc}" ;;
+    /var/*) echo "$data/var${1#/var}" ;;
+    /run/*) echo "$data/run${1#/run}" ;;
+    *) echo "$1" ;;
+  esac
+}
+usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; }
+
+action=$1
+[ $# -gt 0 ] && shift
+case "$action" in
+  switch | dry-activate | dry-build | build | list-generations) ;;
+  "" | -h | --help | help) usage; exit 0 ;;
+  boot | test) die "$action is not on the phone: a build needs no restart (switch applies it at once)" ;;
+  *) die "no such action: $action (switch, dry-activate, list-generations; --help says more)" ;;
+esac
+
+if [ "$action" = list-generations ]; then
+  current=$(cat "$data/generations/last" 2> /dev/null)
+  [ -n "$current" ] || die "there is no generation yet (no build has been applied)"
+  for g in $(ls "$data/generations" | grep -x '[0-9][0-9]*' | sort -n); do
+    when=$(stat -c %y "$data/generations/$g/profile.json" 2> /dev/null | cut -c1-16)
+    label=$(sed -n 's/^label=//p' "$data/generations/$g/version" 2> /dev/null)
+    from=$(head -n 1 "$data/generations/$g/source" 2> /dev/null)
+    mark=
+    [ "$g" = "$current" ] && mark="  (current)"
+    printf '%4s  %s  %s  %s%s\n' "$g" "$when" "${label:--}" "${from:--}" "$mark"
+  done
+  exit 0
+fi
+
+# Its options, each one whole (a path may have spaces in it).
+upgrade= rollback= source= spec=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --upgrade) upgrade=1 ;;
+    --rollback) rollback=1 ;;
+    --file | --flake)
+      [ $# -ge 2 ] || die "$1 needs a value"
+      what=$1 value=$2
+      shift
+      case "$value" in /*) ;; *:*) ;; *) value=$here/$value ;; esac
+      case "$value" in /*) value=$(outside "$value") ;; esac
+      # A folder (., ./config) is its flake.nix; a flake's name after # stays with it.
+      if [ "$what" = --flake ]; then
+        path=${value%%#*} name=
+        case "$value" in *#*) name=${value#*#} ;; esac
+        [ -d "$path" ] && path=${path%/}/flake.nix
+        value=$path${name:+#$name}
+      fi
+      source=$value ;;
+    --file=* | --flake=*) opt=${1%%=*} value=${1#*=}; shift; set -- "$opt" "$value" "$@"; continue ;;
+    --specialisation)
+      [ $# -ge 2 ] || die "--specialisation needs a name"
+      spec="--specialisation $2"
+      shift ;;
+    --specialisation=*) spec="--specialisation ${1#*=}" ;;
+    --no-specialisation) spec=--no-specialisation ;;
+    *) die "no such option: $1 (--help says which there are)" ;;
+  esac
+  shift
+done
+
+if [ -n "$rollback" ]; then
+  [ "$action" = switch ] || die "--rollback goes with switch"
+  [ -z "$source$upgrade" ] || die "--rollback applies an earlier generation as it was: no --file, --flake or --upgrade"
+  current=$(cat "$data/generations/last" 2> /dev/null)
+  [ -n "$current" ] || die "there is no generation to go back from"
+  previous=$(ls "$data/generations" | grep -x '[0-9][0-9]*' | sort -n | awk -v c="$current" '$1 < c { p = $1 } END { print p }')
+  [ -n "$previous" ] || die "there is no generation before $current"
+  echo "Going back to generation $previous (it becomes the newest)" >&2
+  exec sh "$d/build.sh" shell generation "$previous" $spec
+fi
+
+case "$action" in
+  switch) if [ -n "$upgrade" ]; then mode=update; else mode=switch; fi ;;
+  *) [ -z "$upgrade" ] || die "--upgrade goes with switch"; mode=dry ;;
+esac
+if [ -n "$source" ]; then
+  exec sh "$d/build.sh" shell "$mode" "--source=$source" $spec
+fi
+exec sh "$d/build.sh" shell "$mode" $spec

@@ -1,33 +1,3 @@
 #!/system/bin/sh
-# nixos-version: the system's version, as NixOS's command tells it (system.nixos.version, nix/version.nix), from what
-# the last build applied (/etc/nixup/version, written by the engine):
-#   nixos-version                           26.05.20261013.a033e66 (Yarara)
-#   nixos-version --hash, --revision        the git revision of the config's nixpkgs
-#   nixos-version --configuration-revision  the config's own (system.configurationRevision)
-#   nixos-version --json                    all of them, as NixOS's --json has them
-file=/etc/nixup/version
-[ -r "$file" ] || file=/data/adb/nixup/etc/nixup/version
-# (Outside Nixup's shells its files are root's alone: Android's /data/adb.)
-if [ ! -r "$file" ] && [ "$(id -u)" != 0 ]; then
-  echo "nixos-version: outside Nixup's shells only root reads it: su -c nixos-version (or run it in nixup-shell, ssh or the app's terminal)" >&2
-  exit 1
-fi
-[ -r "$file" ] || { echo "nixos-version: no build has been applied yet (or it was made before Nixup kept its version)" >&2; exit 1; }
-value() { sed -n "s/^$1=//p" "$file" | head -n 1; }
-json() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-case "$1" in
-  "") echo "$(value version) ($(value codeName))" ;;
-  --hash | --revision)
-    revision=$(value revision)
-    [ -n "$revision" ] || { echo "nixos-version: the config's nixpkgs did not say its revision" >&2; exit 1; }
-    echo "$revision" ;;
-  --configuration-revision)
-    revision=$(value configurationRevision)
-    [ -n "$revision" ] || { echo "nixos-version: the config has no system.configurationRevision" >&2; exit 1; }
-    echo "$revision" ;;
-  --json)
-    printf '{"nixosVersion":"%s","nixpkgsRevision":"%s","configurationRevision":"%s"}\n' \
-      "$(json "$(value version)")" "$(json "$(value revision)")" "$(json "$(value configurationRevision)")" ;;
-  -h | --help) sed -n '2,7s/^# \{0,1\}//p' "$0" ;;
-  *) echo "nixos-version: unknown option $1 (--hash, --revision, --configuration-revision, --json)" >&2; exit 1 ;;
-esac
+# nixos-version: NixOS's name for nixup-version, for tools written for NixOS (fastfetch, scripts): the same command.
+exec "${0%/*}/nixup-version" "$@"

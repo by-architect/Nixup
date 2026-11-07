@@ -504,13 +504,15 @@ It works like `nixos-rebuild`:
 
 | NixOS | Nixup |
 |---|---|
-| `nixos-rebuild switch` | **Build** in the app |
-| `nixos-rebuild dry-activate` | **Dry run** |
-| `nixos-rebuild switch --upgrade` | **Upgrade** |
-| `nixos-rebuild switch --rollback` | **Generations** → pick one → Switch to it |
-| `nixos-rebuild switch --specialisation work` | ⋮ → **Specialisations** → pick one (no new build), or `--specialisation work` with `build.sh` or `nixup-rebuild` |
-| `nixos-rebuild --target-host` | `nixup-rebuild switch --flake .#phone` on a PC |
-| `nixos-version` | `nixos-version` (in the terminal, `nixup-shell` or adb), with `--revision`, `--configuration-revision`, `--json` |
+| `nixos-rebuild switch` | **Build** in the app, or `nixup-rebuild switch` on the phone (as root) |
+| `nixos-rebuild dry-activate` | **Dry run**, or `nixup-rebuild dry-activate` |
+| `nixos-rebuild switch --upgrade` | **Upgrade**, or `nixup-rebuild switch --upgrade` |
+| `nixos-rebuild switch --rollback` | **Generations** → pick one → Switch to it, or `nixup-rebuild switch --rollback` |
+| `nixos-rebuild list-generations` | **Generations**, or `nixup-rebuild list-generations` |
+| `nixos-rebuild switch --specialisation work` | ⋮ → **Specialisations** → pick one (no new build), or `nixup-rebuild switch --specialisation work` |
+| `nixos-rebuild --target-host` | `nixup-rebuild switch --flake .#phone` on a PC (it asks which phone) |
+| `nixos-generate-config` | `nixup-config create` on a PC: a config from what the phone has now |
+| `nixos-version` | `nixup-version` (`nixos-version` too), with `--revision`, `--configuration-revision`, `--json` |
 
 - A build reads and checks everything first; if anything is wrong, **nothing changes**.
 - Each build that changes something is saved as a generation, with what it was built from, its label
@@ -547,6 +549,14 @@ Start from the [template](templates/default), which has every option, or create 
 nix flake init -t github:by-architect/Nixup
 ```
 
+Or make one from what a phone has now (its settings, its apps and where they come from, the apps it came with that
+are removed or disabled), as `nixos-generate-config` does for a NixOS machine; it lists the phones adb sees and asks
+which, and checks the config it writes:
+
+```sh
+nix run github:by-architect/Nixup#nixup-config -- create                 # writes ./configuration.nix
+```
+
 Edit it on the PC or on the phone.
 
 ### Set Up On The Phone
@@ -561,19 +571,24 @@ Edit it on the PC or on the phone.
 
 The module must be installed on the phone first. Turn on USB debugging, connect, and allow the PC.
 
-Build on the PC and apply it on the phone (the flake needs `nixupConfigurations.phone`):
+Build on the PC and apply it on the phone (the flake needs `nixupConfigurations.phone`). It lists the phones adb
+sees (over USB and the network) and asks which, and can connect one over the network:
 
 ```sh
 nix run github:by-architect/Nixup -- switch --flake .#phone          # dry-activate: dry run; --upgrade: newest versions
+nix run github:by-architect/Nixup -- switch --file configuration.nix # a configuration.nix alone
+nix run github:by-architect/Nixup -- switch --flake .#phone --target-host adb:192.168.1.20:5555   # that phone
 nix run github:by-architect/Nixup -- switch --flake .#phone --target-host phone   # over ssh instead
 ```
 
-Or let the phone build its own config:
+With Nixup's flake among a NixOS machine's inputs, its overlay gives `pkgs.nixup-rebuild` (with `nixup-config`):
+`environment.systemPackages = [ pkgs.nixup-rebuild ];`.
+
+Or let the phone build its own config, with the phone's `nixup-rebuild`:
 
 ```sh
 adb push configuration.nix /sdcard/Nixup/configuration.nix
-adb shell su -c "echo /storage/emulated/0/Nixup/configuration.nix > /data/adb/nixup/source"
-adb shell su -c "sh /data/adb/modules/nixup/build.sh adb"          # or: build.sh adb dry
+adb shell su -c "nixup-rebuild switch --file /sdcard/Nixup/configuration.nix"   # or dry-activate
 ```
 
 ### Good To Know
@@ -582,6 +597,8 @@ Nixup's commands over adb (as root):
 
 ```sh
 adb shell su -c nixup-shell                                           # root shell with your Nix packages
+adb shell su -c "nixup-rebuild switch"                                # build: dry-activate, --upgrade, --rollback
+adb shell su -c "nixup-rebuild list-generations"
 adb shell su -c "nixup-backup status"                                 # backups: list, status, now, restore
 adb shell su -c "nixup-backup restore org.example.app"
 adb shell su -c "sh /data/adb/modules/nixup/units.sh adb list"        # services: start, stop, restart, log
@@ -589,7 +606,8 @@ adb shell su -c "sh /data/adb/modules/nixup/update.sh adb check"      # app upda
 adb shell su -c "tail -n 50 /data/adb/nixup/apply.log"                # the log
 ```
 
-`nixup-shell` and `nixup-backup` work after the first restart with the module installed.
+`nixup-shell`, `nixup-rebuild`, `nixup-backup` and `nixup-version` work after the first restart with the module
+installed; in the app's terminal, `nixup-shell` and ssh they are there too.
 
 ## Updating
 

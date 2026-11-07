@@ -9,8 +9,8 @@
 #     flake, as on NixOS, whose generations keep their flake.lock instead);
 #   - /etc/os-release and /etc/lsb-release in Nixup's view, which programs read (fastfetch, neofetch, Python's
 #     platform), with Nixup's name and ID_LIKE=nixos;
-#   - nixos-version (module/system/bin), which tells them as NixOS's command does: --hash, --revision,
-#     --configuration-revision, --json;
+#   - nixup-version (module/system/bin; nixos-version too), which tells them as NixOS's nixos-version does: --hash,
+#     --revision, --configuration-revision, --json;
 #   - system.build.toplevel: the profile (config.system.build.profile), as a tool written for NixOS asks for it.
 { config, lib, options, ... }:
 let
@@ -181,7 +181,7 @@ in
       example = lib.literalExpression "self.rev or self.dirtyRev or null";
       description = ''
         The git revision of the config's flake, as on NixOS: each generation keeps it, and the app's Generations and
-        nixos-version --configuration-revision show it. A phone builds a flake without writing its flake.lock, and Nix
+        nixup-version --configuration-revision show it. A phone builds a flake without writing its flake.lock, and Nix
         gives no self.rev while the lock is missing or out of date: commit flake.lock with the config.
       '';
     };
@@ -212,7 +212,7 @@ in
     # As NixOS's: what a tool written for NixOS builds (nixos-rebuild's system.build.toplevel) is the profile here.
     system.build.toplevel = config.system.build.profile;
 
-    # What the phone keeps with each generation and nixos-version tells (Etc.kt writes /etc/nixup/version).
+    # What the phone keeps with each generation and nixup-version tells (Etc.kt writes /etc/nixup/version).
     system.build.version = {
       inherit (cfg) version release codeName revision label;
       inherit (config.system) configurationRevision copySystemConfiguration;

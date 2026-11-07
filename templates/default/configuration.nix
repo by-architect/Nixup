@@ -1,8 +1,13 @@
 # Logos's config: a POCO X3 NFC on crDroid (Android 16, based on LineageOS), as it is set up now
 # (read from the phone on 2026-11-02). It builds as it is, with no flake:
 #   on the phone   Nixup app: Config, pick this file, then Build (or Git: clone the repository
-#                  it is in; Pull and build brings its new commits)
+#                  it is in; Pull and build brings its new commits); or as root in a shell:
+#                  nixup-rebuild switch --file ./configuration.nix (dry-activate, --rollback, ...)
 #   on a PC        nix run github:by-architect/Nixup -- switch --file ./configuration.nix
+#                  (it asks which of the phones adb sees)
+#
+# A config of a phone's own, from what it has now (its settings and apps):
+#   nix run github:by-architect/Nixup#nixup-config -- create
 #
 # As a start for another phone it builds there too: what that phone does not have (an app given
 # settings here, a LineageOS setting, a sensor) is told while building and left out. Put in your
@@ -770,7 +775,7 @@
   system.userActivationScripts = { };             # scripts each normal user runs
 
   # The system's version and where it was built from, as on NixOS: the app's Generations shows each one's label and
-  # the config's commit, nixos-version tells them, and /etc/os-release has them (nix/version.nix).
+  # the config's commit, nixup-version tells them, and /etc/os-release has them (nix/version.nix).
   system.stateVersion = "26.05";                  # the release of your first build: leave it there (NixOS's modules keep its defaults)
   system.nixos.tags = [ ];                        # words before the version in each generation's label, like [ "travel" ]
   system.configurationRevision = null;            # the config's git commit; in a flake: self.rev or self.dirtyRev or null

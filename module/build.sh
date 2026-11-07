@@ -31,13 +31,13 @@
 #            the config itself, and again and generation the specialisation they had
 #   --no-specialisation
 #            the config itself, for again and generation
-# switch and update take these too (system.autoUpgrade's timer gives them; its build keeps the
-# specialisation in use, unless one is asked for):
+# switch, update and dry take these too (system.autoUpgrade's timer gives them, and nixup-rebuild's --file and
+# --flake; an automatic upgrade keeps the specialisation in use, unless one is asked for):
 #   --source=<config>   another config than the one picked, for this build (a flake's address)
 #   --channel=<url>     the nixexprs.tar.xz a configuration.nix alone gets its nixpkgs from
 #   --pull              a picked config in a git clone (the app's Git) gets its repository's new
-#                       commits first (git.sh pull)
-#   --gc                once the build has worked, as gc
+#                       commits first (git.sh pull; not with dry, which changes nothing)
+#   --gc                once the build has worked, as gc (not with dry)
 # The config is what the app's Config picked (config_source in common.sh): a
 # configuration.nix, built alone; a flake.nix, whose folder is the flake (as
 # nixos-rebuild --flake reads /etc/nixos); or a flake's address, like github:owner/repo,
@@ -73,14 +73,14 @@ esac
 # switch's and update's options (see above), kept for a run picked up after a restart (resumable).
 OPTIONS= PULL= THEN_GC=
 case "$MODE" in
-  switch | update)
+  switch | update | dry)
     if [ $# -ge 2 ]; then shift 2; else set --; fi
     for option; do
       case "$option" in
         --source=*) NIXUP_SOURCE=${option#--source=} ;;
         --channel=*) NIXUP_CHANNEL=${option#--channel=} ;;
-        --pull) PULL=1 ;;
-        --gc) THEN_GC=1 ;;
+        --pull) [ "$MODE" != dry ] || fail "build.sh dry: --pull changes the clone, and a dry run changes nothing"; PULL=1 ;;
+        --gc) [ "$MODE" != dry ] || fail "build.sh dry: --gc frees up space, and a dry run changes nothing"; THEN_GC=1 ;;
         *) fail "build.sh $MODE: no such option: $option (--source=, --channel=, --pull, --gc)" ;;
       esac
       OPTIONS="$OPTIONS $option"

@@ -15,9 +15,10 @@
 #                              phone (its device name), or the only one
 #   --file <configuration.nix> a configuration.nix built alone (default: ./configuration.nix, when there is
 #                              no flake.nix); its nixpkgs (lib and packages) comes from NIX_PATH
-#   --target-host <phone>      adb (the phone adb sees, the default), adb:<serial>, or [user@]host for ssh
-#                              (whose user can run su on the phone: root, or a user of Nixup's own app,
-#                              users.users.<name>.androidApp = "dev.nixup.manager")
+#   --target-host <phone>      adb (the default: the phones adb sees are listed and one is asked for, and one
+#                              can be connected over the network), adb:<serial> (or adb:<host>:<port>, connected
+#                              first), or [user@]host for ssh (whose user can run su on the phone: root, or a
+#                              user of Nixup's own app, users.users.<name>.androidApp = "dev.nixup.manager")
 #   --specialisation <name>    apply the config's specialisation <name> (specialisation.<name>) instead of the
 #                              config itself, as nixos-rebuild --specialisation; the phone keeps it until a build
 #                              picks another (it can switch between them later without a PC: build.sh again
@@ -28,7 +29,8 @@
 #                              a flake's input from elsewhere for this build, as nixos-rebuild takes it (like
 #                              --override-input nixup path:../Nixup, for Nixup's own working copy)
 #   --show-trace               Nix's whole trace when the config has an error
-# Needs nix (with flakes), adb or ssh, and the Nixup module on the phone.
+# Needs nix (with flakes), adb or ssh, and the Nixup module on the phone. On the phone itself (its shells, adb's
+# shell) nixup-rebuild is the module's own, which builds there: this one hands over to it.
 set -euo pipefail
 # What it writes here (a secret given as text among it) is for its user alone.
 umask 077
@@ -39,7 +41,16 @@ say() { echo "$*" >&2; }
 
 # Nixup's own files (nix/), next to this script's folder: in its repository, its flake's copy, or the
 # package (pkgs.nixup-rebuild).
-nixup_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+nixup_dir="$(cd "$here/.." && pwd)"
+
+# On a phone (Android, not a PC's Linux), the phone's own nixup-rebuild builds there.
+if [[ -x /system/bin/getprop ]]; then
+  for phone_command in /system/bin/nixup-rebuild /data/adb/modules/nixup/system/bin/nixup-rebuild; do
+    [[ -x $phone_command ]] && exec "$phone_command" "$@"
+  done
+  die "this is a phone, whose own nixup-rebuild comes with Nixup's module (install it, and restart the phone)"
+fi
 
 action="${1:-}"
 [[ $# -gt 0 ]] && shift
@@ -77,46 +88,17 @@ fi
 [[ -z $specialisation || $specialisation =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "--specialisation: \"$specialisation\" is not a specialisation's name (letters, digits and _ . -)"
 command -v nix > /dev/null || die "there is no nix here"
 
-# --- The phone: through adb, or ssh.
-serial="" host=""
-case $target in
-  adb)
-    # The phones adb sees; one phone seen several ways (USB, and Wi-Fi) is one phone, taken by USB.
-    mapfile -t seen < <(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
-    ((${#seen[@]})) || die "adb sees no phone: connect it (USB debugging on), or give --target-host"
-    declare -A phones=()
-    for s in "${seen[@]}"; do
-      id="$(adb -s "$s" shell getprop ro.serialno < /dev/null 2> /dev/null | tr -d '\r')"
-      id=${id:-$s}
-      [[ -n ${phones[$id]:-} && ${phones[$id]} != *:* ]] || phones[$id]=$s
-    done
-    ((${#phones[@]} == 1)) || die "adb sees ${#phones[@]} phones (${seen[*]}): pick one with --target-host adb:<serial>"
-    serial="${phones[*]}" ;;
-  adb:*) serial=${target#adb:} ;;
-  *) host=$target ;;
-esac
-
-# A word for the phone's shell, quoted.
-q() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
+# --- The phone: through adb (the phones it sees listed, and one asked for), or ssh (lib-phone.sh).
+# shellcheck source=lib-phone.sh
+source "$here/lib-phone.sh"
+phone_pick "$target"
+serial=$PHONE_SERIAL host=$PHONE_HOST
 # Runs a command as root on the phone: what it says comes here, and so does its exit status.
-as_root() {
-  if [[ -n $serial ]]; then adb -s "$serial" shell -T "su -c $(q "$1")" < /dev/null
-  else ssh -o BatchMode=yes "$host" "su -c $(q "$1")" < /dev/null
-  fi
-}
+as_root() { phone_root "$1"; }
 # Its output as it is, for files (tar).
-from_root() {
-  if [[ -n $serial ]]; then adb -s "$serial" exec-out "su -c $(q "$1")" < /dev/null
-  else ssh -o BatchMode=yes "$host" "su -c $(q "$1")" < /dev/null
-  fi
-}
+from_root() { phone_root_out "$1"; }
 # A file from here into a file on the phone that root alone can read (it waits until it is all there).
-send() {
-  local command="umask 077; cat > $(q "$2")"
-  if [[ -n $serial ]]; then adb -s "$serial" shell -T "su -c $(q "$command")" < "$1"
-  else ssh -o BatchMode=yes "$host" "su -c $(q "$command")" < "$1"
-  fi
-}
+send() { phone_send "$1" "$2"; }
 
 by=adb
 [[ -n $host ]] && by=ssh

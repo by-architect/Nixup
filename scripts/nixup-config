@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# nixup-config: a phone's Nixup config, made from what the phone has now, as nixos-generate-config writes a NixOS
+# machine's from the machine.
+#
+#   nixup-config create [options]   reads the phone's settings, its apps and where they came from, and writes a
+#                                   configuration.nix that keeps the phone as it is (and checks it evaluates)
+# Options:
+#   --target-host <phone>   adb (the default: the phones adb sees are listed and one is asked for, and one can be
+#                           connected over the network), adb:<serial> (or adb:<host>:<port>), or [user@]host for ssh
+#   --output <file>         where the config goes (default: ./configuration.nix)
+#   --force                 write over a file that is there already
+# What it reads needs no root: Android's settings, the apps and what installed them. With root (Magisk letting Shell
+# use su), the phone's Nixup indexes tell which repository each app is in; without, F-Droid's and IzzyOnDroid's
+# sites are asked (curl). Needs adb or ssh, nix (with nixpkgs on NIX_PATH, or the flake registry's) and curl.
+set -euo pipefail
+
+usage() { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; }
+die() { echo "nixup-config: $*" >&2; exit 1; }
+say() { echo "$*" >&2; }
+
+# Nixup's own files (nix/), next to this script's folder: in its repository, its flake's copy, or the package.
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+nixup_dir="$(cd "$here/.." && pwd)"
+
+action="${1:-}"
+[[ $# -gt 0 ]] && shift
+case $action in
+  create) ;;
+  "" | -h | --help | help) usage; exit 0 ;;
+  *) die "no such action: $action (create; --help says more)" ;;
+esac
+target="adb" output="configuration.nix" force=0
+while (($#)); do
+  case $1 in
+    --target-host) [[ $# -ge 2 ]] || die "--target-host needs a phone"; target=$2; shift 2 ;;
+    --target-host=*) target=${1#--target-host=}; shift ;;
+    --output) [[ $# -ge 2 ]] || die "--output needs a file"; output=$2; shift 2 ;;
+    --output=*) output=${1#--output=}; shift ;;
+    --force) force=1; shift ;;
+    -h | --help) usage; exit 0 ;;
+    *) die "no such option: $1 (--help says which there are)" ;;
+  esac
+done
+[[ ! -e $output || $force == 1 ]] || die "$output is there already: give another --output, or --force to write over it"
+command -v nix > /dev/null || die "there is no nix here"
+
+# shellcheck source=lib-phone.sh
+source "$here/lib-phone.sh"
+phone_pick "$target"
+say "== Reading $PHONE_LABEL"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+p="$work/phone"
+mkdir -p "$p"
+
+# Android's settings tables, and LineageOS's own where the ROM has them.
+for table in system secure global; do
+  phone_run "settings list $table" > "$p/settings-$table.txt" || die "could not read the phone's $table settings"
+done
+if ! phone_run "content query --uri content://lineagesettings/global --projection name" 2>&1 | grep -q "Could not find provider"; then
+  for table in system secure global; do
+    phone_run "content query --uri content://lineagesettings/$table --projection name:value" > "$p/lineage-$table.txt" 2> /dev/null || true
+  done
+fi
+
+# What a command tells, not a table (as the engine reads them: Device.kt).
+read -r -d '' facts_script << 'EOF' || true
+echo "model=$(getprop ro.product.model)"
+echo "serial=$(getprop ro.serialno)"
+echo "android=$(getprop ro.build.version.release)"
+echo "darkMode=$(cmd uimode night 2> /dev/null | sed -n 's/^Night mode: //p')"
+echo "densityForced=$(settings get secure display_density_forced)"
+wm density | sed -n 's/^Physical density: /densityPhysical=/p; s/^Override density: /densityOverride=/p'
+echo "navigation=$(cmd overlay list --user 0 android 2> /dev/null | sed -n 's/^.*\[x\] com\.android\.internal\.systemui\.navbar\.\([a-z]*\).*$/\1/p' | head -n 1)"
+echo "locales=$(settings get system system_locales)"
+echo "localeProp=$(getprop persist.sys.locale)"
+echo "timeZone=$(getprop persist.sys.timezone)"
+echo "inputMethod=$(settings get secure default_input_method)"
+echo "dataSaver=$(cmd netpolicy get restrict-background 2> /dev/null | sed -n 's/.*status: //p')"
+echo "location=$(cmd location is-location-enabled --user 0 2> /dev/null)"
+echo "adbPort=$(getprop service.adb.tcp.port)"
+EOF
+phone_run "$facts_script" | tr -d '\r' > "$p/facts.txt" || die "could not read the phone's settings"
+echo "date=$(date '+%F %H:%M')" >> "$p/facts.txt"
+
+# The apps: the user's (and what installed each), the system's (installed for the user, and all of them), the
+# disabled ones, battery's exceptions, the default apps, and the overlays (packages, but not apps).
+phone_run "pm list packages -3 -i --user 0" | tr -d '\r' > "$p/apps-user.txt" || die "could not list the phone's apps"
+phone_run "pm list packages -s --user 0" | tr -d '\r' > "$p/apps-system.txt" || die "could not list the phone's apps"
+phone_run "pm list packages -s -u --user 0" | tr -d '\r' > "$p/apps-system-all.txt" || die "could not list the phone's apps"
+phone_run "pm list packages -d --user 0" | tr -d '\r' > "$p/apps-disabled.txt" || true
+phone_run "dumpsys deviceidle whitelist" | tr -d '\r' > "$p/deviceidle.txt" || true
+phone_run "cmd overlay list --user 0" | tr -d '\r' > "$p/overlays.txt" || true
+for role in BROWSER:browser DIALER:dialer SMS:sms HOME:home ASSISTANT:assistant CALL_SCREENING:callScreening; do
+  holder="$(phone_run "cmd role get-role-holders --user 0 android.app.role.${role%%:*}" 2> /dev/null | tr -d '\r' | head -n 1 || true)"
+  if [[ $holder =~ ^[A-Za-z][A-Za-z0-9_.]*$ ]]; then echo "${role#*:}=$holder"; fi
+done > "$p/roles.txt"
+mapfile -t ids < <(sed -n 's/^package:\([^ ]*\).*/\1/p' "$p/apps-user.txt" | grep -vx 'dev.nixup.manager\|com.topjohnwu.magisk')
+say "Settings: $(cat "$p"/settings-*.txt | grep -c '=') values; apps: ${#ids[@]} installed by you"
+
+# Where each app comes from: the phone's Nixup indexes (repos/<repo>/packages/<id>.json), with root; then F-Droid's
+# and IzzyOnDroid's sites. The phone's Nixup profile names its repositories, and its Config the config it builds.
+: > "$p/repos.txt"
+if [[ $(phone_root "id -u" 2> /dev/null | tr -d '\r') == 0 ]]; then
+  if phone_root "[ -d /data/adb/nixup/repos ]" 2> /dev/null; then
+    printf '%s\n' "${ids[@]}" > "$work/ids.txt"
+    phone_send "$work/ids.txt" /data/local/tmp/nixup-config-ids.txt || die "could not send the app list to the phone"
+    phone_root 'cd /data/adb/nixup/repos && while read -r id; do for r in fdroid */; do r=${r%/}; [ -f "$r/packages/$id.json" ] && { printf "%s\t%s\n" "$id" "$r"; break; }; done; done < /data/local/tmp/nixup-config-ids.txt; rm -f /data/local/tmp/nixup-config-ids.txt' \
+      | tr -d '\r' > "$p/repos.txt" || true
+    phone_root "cat /data/adb/nixup/profile.json" 2> /dev/null | tr -d '\r' > "$p/nixup-profile.json" || true
+    grep -q '^{' "$p/nixup-profile.json" || rm -f "$p/nixup-profile.json"
+    echo "nixupSource=$(phone_root "head -n 1 /data/adb/nixup/source" 2> /dev/null | tr -d '\r')" >> "$p/facts.txt"
+    say "The phone's Nixup indexes: $(wc -l < "$p/repos.txt") of the apps found there"
+  fi
+else
+  say "No root through $PHONE_BY: the apps' repositories are asked of F-Droid's and IzzyOnDroid's sites instead"
+fi
+if command -v curl > /dev/null; then
+  asked=0
+  for id in "${ids[@]}"; do
+    grep -q "^$id"$'\t' "$p/repos.txt" && continue
+    asked=$((asked + 1))
+    for site in "fdroid https://f-droid.org/api/v1/packages" "izzyondroid https://apt.izzysoft.de/fdroid/api/v1/packages"; do
+      if [[ $(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${site#* }/$id" || true) == 200 ]]; then
+        printf '%s\t%s\n' "$id" "${site%% *}" >> "$p/repos.txt"
+        break
+      fi
+    done
+  done
+  ((asked == 0)) || say "Asked F-Droid's and IzzyOnDroid's sites about $asked apps"
+else
+  say "(no curl here: apps the phone's Nixup indexes do not have are left as comments)"
+fi
+
+# The config, made by Nix from what was read (nixup-config.nix), with Nixup's own options and mappings.
+nixx() { nix --extra-experimental-features 'nix-command flakes' "$@"; }
+nixpkgs=()
+nix-instantiate --find-file nixpkgs > /dev/null 2>&1 || nixpkgs=(-I nixpkgs=flake:nixpkgs)
+say "== Writing $output"
+nixx eval "${nixpkgs[@]}" --raw --impure --expr \
+  "import (/. + \"$here/nixup-config.nix\") { nixupDir = \"$nixup_dir\"; phoneDir = \"$p\"; }" > "$work/configuration.nix" \
+  || die "the config could not be made (Nix says why above)"
+# Checked as a build would (its options' types, Nixup's checks): what was read must make a config Nixup takes.
+if nixx eval "${nixpkgs[@]}" --raw --impure --expr \
+  "let e = import (/. + \"$nixup_dir/nix/eval.nix\") { lib = import <nixpkgs/lib>; modules = [ (/. + \"$work/configuration.nix\") ]; };
+   in builtins.seq (builtins.toJSON e.config.system.build.profile) \"ok\"" > /dev/null 2> "$work/check.txt"; then
+  checked="it evaluates with Nixup's options"
+else
+  sed -n '/error:/,$p' "$work/check.txt" | head -n 20 >&2
+  checked="it does NOT evaluate with Nixup's options (above): fix it before building"
+fi
+cp "$work/configuration.nix" "$output"
+say "Wrote $output ($(grep -c . "$output") lines; $checked)"
+say "Look it over, then apply it: nixup-rebuild switch --file $output"

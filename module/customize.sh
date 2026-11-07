@@ -43,10 +43,11 @@ pm uninstall dev.andronix.manager < /dev/null > /dev/null 2>&1 && ui_print "- Re
 set_perm "$MODPATH/bin/nix" 0 0 0755
 # What tells the app about events, for the services too ($NIXUP_NOTIFY).
 set_perm "$MODPATH/notify.sh" 0 0 0755
-# nixup-shell, nixup-backup and nixos-version, in /system/bin once Magisk mounts the module (from the next start).
-set_perm "$MODPATH/system/bin/nixup-shell" 0 0 0755
-set_perm "$MODPATH/system/bin/nixup-backup" 0 0 0755
-set_perm "$MODPATH/system/bin/nixos-version" 0 0 0755
+# nixup-shell, nixup-rebuild, nixup-backup, nixup-version (and nixos-version, its NixOS name), in /system/bin once
+# Magisk mounts the module (from the next start).
+for name in nixup-shell nixup-rebuild nixup-backup nixup-version nixos-version; do
+  set_perm "$MODPATH/system/bin/$name" 0 0 0755
+done
 # Nix's other commands are nix itself by another name (it acts as the one it is run by): the module's scripts run
 # nix-instantiate and nix-store, and nix-channel finds nix-env next to it (the shells' are in /etc/nixup/bin).
 for name in nix-build nix-channel nix-collect-garbage nix-copy-closure nix-daemon nix-env nix-hash nix-instantiate \

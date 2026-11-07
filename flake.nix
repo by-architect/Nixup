@@ -24,18 +24,25 @@
 
     # nixup-rebuild, which builds a phone's config on a PC and applies it on the phone, as
     # nixos-rebuild --target-host does: nix run github:by-architect/Nixup -- switch --flake .#phone
-    # It runs from the flake's own files, with the adb (or ssh) and nix of the machine.
+    # (it lists the phones adb sees and asks which); and nixup-config, which makes a phone's config from
+    # what the phone has: nix run github:by-architect/Nixup#nixup-config -- create
+    # They run from the flake's own files, with the adb (or ssh) and nix of the machine.
     apps = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ] (system: rec {
       nixup-rebuild = {
         type = "app";
-        program = "${self}/rebuild/nixup-rebuild";
+        program = "${self}/scripts/nixup-rebuild";
         meta.description = "Build a phone's Nixup config here and apply it on the phone";
+      };
+      nixup-config = {
+        type = "app";
+        program = "${self}/scripts/nixup-config";
+        meta.description = "Make a phone's Nixup config from what the phone has now";
       };
       # A Google Play account's token for the config (android.playstore.tokenFile), signed in here:
       # nix run github:by-architect/Nixup#nixup-play-login
       nixup-play-login = {
         type = "app";
-        program = "${self}/rebuild/nixup-play-login";
+        program = "${self}/scripts/nixup-play-login";
         meta.description = "Sign in to Google Play here and get the account's token for a phone's Nixup config";
       };
       default = nixup-rebuild;
@@ -43,7 +50,7 @@
 
     # The same as a package, built with the nixpkgs it is added to: pkgs.nixup-rebuild.
     overlays.default = final: prev: {
-      nixup-rebuild = final.callPackage ./rebuild/package.nix { };
+      nixup-rebuild = final.callPackage ./scripts/package.nix { };
     };
   };
 }

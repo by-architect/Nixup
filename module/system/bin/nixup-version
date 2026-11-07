@@ -1,0 +1,33 @@
+#!/system/bin/sh
+# nixup-version: the system's version (system.nixos.version, nix/version.nix), as NixOS's nixos-version tells it (the
+# same command is nixos-version here too), from what the last build applied (/etc/nixup/version, from the engine):
+#   nixup-version                           26.05.20261013.a033e66 (Yarara)
+#   nixup-version --hash, --revision        the git revision of the config's nixpkgs
+#   nixup-version --configuration-revision  the config's own (system.configurationRevision)
+#   nixup-version --json                    all of them, as NixOS's --json has them
+file=/etc/nixup/version
+[ -r "$file" ] || file=/data/adb/nixup/etc/nixup/version
+# (Outside Nixup's shells its files are root's alone: Android's /data/adb.)
+if [ ! -r "$file" ] && [ "$(id -u)" != 0 ]; then
+  echo "nixup-version: outside Nixup's shells only root reads it: su -c nixup-version (or run it in nixup-shell, ssh or the app's terminal)" >&2
+  exit 1
+fi
+[ -r "$file" ] || { echo "nixup-version: no build has been applied yet (or it was made before Nixup kept its version)" >&2; exit 1; }
+value() { sed -n "s/^$1=//p" "$file" | head -n 1; }
+json() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+case "$1" in
+  "") echo "$(value version) ($(value codeName))" ;;
+  --hash | --revision)
+    revision=$(value revision)
+    [ -n "$revision" ] || { echo "nixup-version: the config's nixpkgs did not say its revision" >&2; exit 1; }
+    echo "$revision" ;;
+  --configuration-revision)
+    revision=$(value configurationRevision)
+    [ -n "$revision" ] || { echo "nixup-version: the config has no system.configurationRevision" >&2; exit 1; }
+    echo "$revision" ;;
+  --json)
+    printf '{"nixosVersion":"%s","nixpkgsRevision":"%s","configurationRevision":"%s"}\n' \
+      "$(json "$(value version)")" "$(json "$(value revision)")" "$(json "$(value configurationRevision)")" ;;
+  -h | --help) sed -n '2,7s/^# \{0,1\}//p' "$0" ;;
+  *) echo "nixup-version: unknown option $1 (--hash, --revision, --configuration-revision, --json)" >&2; exit 1 ;;
+esac
