@@ -4,7 +4,8 @@
 #   android.backup.apps = [ "org.example.notes" ];          # these apps, with android.backup.defaults
 #   android.apps."org.example.chat".backup = { include = [ "data" ]; };   # or one by one
 #   android.backup.folders = [ "/storage/emulated/0/DCIM" ];
-# An app's backup is its APK (and splits) and its data (include picks which). It is made by itself:
+# An app's backup is its APK (and splits) and its data (include picks which: its folders, and the
+# accounts it adds to Android's settings, as DAVx5's), with the permissions it has. It is made by itself:
 # "auto" when the app was left in the background for quietTime (and at least once a schedule),
 # "schedule" once a schedule, "manual" only with nixup-backup now. Only what changed is read again
 # and stored, an idle app's processes are paused for the moment of the copy (so its files are whole;
@@ -24,7 +25,7 @@ let
   cfg = config.android.backup;
   secretFiles = import ./secret-files.nix { inherit lib; };
 
-  parts = [ "data" "deviceData" "storage" "media" "obb" ];
+  parts = [ "data" "deviceData" "storage" "media" "obb" "accounts" ];
   whens = [ "auto" "schedule" "manual" ];
 
   # "10m", "6h", "1d", "30s" (or hourly, daily, weekly) as seconds; null when it is none of them.
@@ -52,12 +53,16 @@ let
     };
     include = mkOption {
       type = if isDefault then types.listOf (types.enum parts) else types.nullOr (types.listOf (types.enum parts));
-      default = if isDefault then [ "data" "deviceData" "storage" ] else null;
-      example = [ "data" "deviceData" "storage" "media" "obb" ];
+      default = if isDefault then [ "data" "deviceData" "storage" "accounts" ] else null;
+      example = [ "data" "deviceData" "storage" "media" "obb" "accounts" ];
       description = ''
         Which of its data: "data" (its own files, /data/data/<app>), "deviceData" (what it keeps readable before
         the first unlock, /data/user_de/0/<app>), "storage" (Android/data/<app> on the shared storage), "media"
-        (Android/media/<app>) and "obb" (Android/obb/<app>, large game files). Caches are left out.
+        (Android/media/<app>), "obb" (Android/obb/<app>, large game files) and "accounts" (the accounts it adds to
+        Android's account settings, as DAVx5's calendar and contacts accounts, with their passwords and sync
+        settings: Android keeps them outside the app's folders and removes them with the app; a restore adds them
+        again as the app itself). Caches are left out. Every backup also keeps the runtime permissions the app has,
+        which a restore grants again.
       '';
     };
     when = mkOption {

@@ -148,6 +148,7 @@
     <string name="restore_confirm_apk">Its APK is installed: version %1$s.</string>
     <string name="restore_confirm_apk_from">Its APK is installed first, from its backup of %2$s (this one has none): version %1$s.</string>
     <string name="restore_confirm_data">What it has now of %1$s is replaced by the backup\'s; the app is stopped first.</string>
+    <string name="restore_confirm_accounts">Its accounts that are not on the phone come back, with their passwords and sync settings (one that is there stays as it is).</string>
     <string name="restore_apk_needed">The app is not installed: its APK comes back first, then its data.</string>
     <string name="restore_not_found_title">App not found</string>
     <string name="restore_not_found_message">%1$s is not installed, and none of its backups has its APK, so it cannot come back from them.\n\nInstall it first (from its repository, or by hand), then restore its data here.</string>
@@ -164,12 +165,14 @@
     <string name="part_storage">Its files in Android/data</string>
     <string name="part_media">Its files in Android/media</string>
     <string name="part_obb">Its files in Android/obb (game data)</string>
+    <string name="part_accounts">Its accounts (in Android\'s settings, with their sync settings)</string>
     <string name="parts_unknown">The backup does not say what it has.</string>
     <string name="part_short_data">its data</string>
     <string name="part_short_deviceData">its device data</string>
     <string name="part_short_storage">Android/data</string>
     <string name="part_short_media">Android/media</string>
     <string name="part_short_obb">Android/obb</string>
+    <string name="part_short_accounts">its accounts</string>
     <string name="backups_count_newest">%1$s, the newest from %2$s</string>
 
     <!-- Services. -->

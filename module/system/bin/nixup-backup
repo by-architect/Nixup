@@ -3,10 +3,10 @@
 #   nixup-backup list [app or folder]       the backups there are
 #   nixup-backup status                     when each app and folder was backed up last, and whether it is due
 #   nixup-backup now [apps or folders]      back up now: all of them, or the ones named, which may be any installed
-#                                            app or folder (--parts=apk,data,deviceData,storage,media,obb: what to
-#                                            take of each app, instead of its settings)
-#   nixup-backup restore <app> [snapshot]   the app's data back from its newest backup (or the one named, from
-#                                            list), over what it has, and its APK when it is not installed
+#                                            app or folder (--parts=apk,data,deviceData,storage,media,obb,accounts:
+#                                            what to take of each app, instead of its settings)
+#   nixup-backup restore <app> [snapshot]   the app's data, accounts and permissions back from its newest backup (or
+#                                            the one named, from list), over what it has, and its APK when it is not installed
 #                                            (--parts=apk,data,...: the parts named; apk installs it from the backup)
 #   nixup-backup restore <folder> [snapshot]
 #                                            the folder's files back into it (--to=<folder>: into a new folder)

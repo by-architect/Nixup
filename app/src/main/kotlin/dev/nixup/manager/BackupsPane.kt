@@ -369,7 +369,8 @@ class BackupsPane(private val activity: MainActivity, root: View, private val ru
     }
 
     private fun confirmRestore(id: String, snapshot: Snapshot, parts: List<String>, apk: Snapshot?) {
-        val data = parts.filter { it != "apk" }
+        // Its folders are replaced; its accounts come back where they are missing (one on the phone stays as it is).
+        val data = parts.filter { it != "apk" && it != "accounts" }
         val apkLine = apk?.takeIf { "apk" in parts }?.let {
             if (it.id == snapshot.id) activity.getString(R.string.restore_confirm_apk, version(it))
             else activity.getString(R.string.restore_confirm_apk_from, version(it), Ui.date(it.time))
@@ -377,6 +378,7 @@ class BackupsPane(private val activity: MainActivity, root: View, private val ru
         val message = listOfNotNull(
             apkLine,
             activity.getString(R.string.restore_confirm_data, data.joinToString(", ") { shortPartName(it) }).takeIf { data.isNotEmpty() },
+            activity.getString(R.string.restore_confirm_accounts).takeIf { "accounts" in parts },
         ).joinToString("\n\n")
         AlertDialog.Builder(activity)
             .setTitle(activity.getString(R.string.restore_confirm_title, label(id), Ui.date(snapshot.time)))
@@ -441,6 +443,7 @@ class BackupsPane(private val activity: MainActivity, root: View, private val ru
             "deviceData" -> R.string.part_deviceData
             "storage" -> R.string.part_storage
             "media" -> R.string.part_media
+            "accounts" -> R.string.part_accounts
             else -> R.string.part_obb
         },
     )
@@ -451,6 +454,7 @@ class BackupsPane(private val activity: MainActivity, root: View, private val ru
             "deviceData" -> R.string.part_short_deviceData
             "storage" -> R.string.part_short_storage
             "media" -> R.string.part_short_media
+            "accounts" -> R.string.part_short_accounts
             else -> R.string.part_short_obb
         },
     )
@@ -463,6 +467,6 @@ class BackupsPane(private val activity: MainActivity, root: View, private val ru
 
     companion object {
         /** An app's parts, as backup.sh names them: its APKs, then its data. */
-        private val PARTS = listOf("apk", "data", "deviceData", "storage", "media", "obb")
+        private val PARTS = listOf("apk", "data", "deviceData", "storage", "media", "obb", "accounts")
     }
 }
