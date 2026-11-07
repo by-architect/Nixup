@@ -5,7 +5,7 @@
 #   now [--parts=<parts>] [apps or folders]
 #                            backs up all of them now, or the ones named: any installed app (with
 #                            android.backup.defaults) or folder of the phone; --parts: what to take
-#                            of each app (apk,data,deviceData,storage,media,obb), not its settings
+#                            of each app (apk,data,deviceData,storage,media,obb,accounts), not its settings
 #   list [app or folder]     lists the backups
 #   status                   each app and folder: when it was backed up last, and whether it is due
 #   restore <app> [snapshot] [--parts=<parts>]

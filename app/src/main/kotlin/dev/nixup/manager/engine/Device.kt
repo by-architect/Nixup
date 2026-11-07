@@ -427,6 +427,21 @@ object Device {
         return "$type:s0:c${app and 0xff},c${256 + (app shr 8 and 0xff)},c${512 + (user and 0xff)},c${768 + (user shr 8 and 0xff)}"
     }
 
+    /**
+     * Has Android's storage (vold, through the storage service) make an app's folder of the shared storage
+     * (/storage/emulated/0/Android/data/<app>, .../media/<app>, .../obb/<app>) and what is in it as it makes them: its
+     * owner, group, modes and storage-quota project, as Android's media provider has it done for files written past
+     * FUSE. Where the storage is sdcardfs, vold leaves it (sdcardfs gives them by itself). False when it cannot be asked.
+     */
+    fun fixupAppDir(path: String): Boolean = try {
+        val binder = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java).invoke(null, "mount") as android.os.IBinder
+        val service = Class.forName("android.os.storage.IStorageManager\$Stub").getMethod("asInterface", android.os.IBinder::class.java).invoke(null, binder)
+        service.javaClass.getMethod("fixupAppDir", String::class.java).invoke(service, path)
+        true
+    } catch (e: Exception) {
+        false
+    }
+
     /** Ends the app's processes that are in the background (not as force-stop does: its jobs and alarms stay). */
     fun killInBackground(id: String) = run("am", "kill", id)
 

@@ -60,7 +60,7 @@ import kotlin.system.exitProcess
  *                                 backs up the last build's apps and folders (android.backup), all or the ones named,
  *                                 which may be any installed app or folder (with --auto: the ones that are due, as the
  *                                 app's job asks every 15 minutes; --parts: what to take of each app, of apk, data,
- *                                 deviceData, storage, media, obb, instead of its settings)
+ *                                 deviceData, storage, media, obb, accounts, instead of its settings)
  *   backups [app or folder] [--json]
  *                                 lists the backups
  *   backup-status [--json]        each app and folder backed up: when last, and whether (and why) it is due
@@ -71,6 +71,8 @@ import kotlin.system.exitProcess
  *   backup-restore <folder> [snapshot] [--to=<folder>]
  *                                 brings a folder's files back, into it or into a new folder
  *   backup-parts <app> <snapshot> what one backup of the app has (--json)
+ *   accounts-add <app>            adds the accounts it reads (JSON) through Android's account service: what a restore
+ *                                 runs as the app itself, which alone may add its accounts (see Accounts)
  *   restic <arguments...>         restic itself, with the backups' repository and password
  *   units [--json]                each service of the last build (its systemd.services units), and how it is, and its
  *                                 timers (systemd.timers) with their next times
@@ -169,6 +171,8 @@ object Main {
                     else backups().restoreNow(what, files.getOrNull(1), option(args, "parts")?.split(',')?.filter { it.isNotBlank() })
                 }
                 "backup-parts" -> json { backups().partsJson(files.getOrNull(0) ?: usage(), files.getOrNull(1) ?: usage()) }
+                // (Run by a restore, as the app itself: see Accounts.)
+                "accounts-add" -> Accounts.addAsApp(files.firstOrNull() ?: usage())
                 "restic" -> backups().passThrough(args.drop(1))
                 "units" -> Units(data).list().let { list ->
                     if ("--json" in args) json { list }

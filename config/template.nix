@@ -399,11 +399,11 @@
   android.settings.lineage.statsCollection = false;   # anonymous statistics to LineageOS
 
   # ==== 4. Backups =============================================================================
-  # Each app's APK and data, and folders, backed up by the phone itself into a restic repository
-  # (encrypted, each file stored once). An app is backed up after it was used, a build that installs
-  # it brings its data back, and an app not on any list comes back from its backup. By hand, any app
-  # (its APK, its data) or folder: the app's Backups tab, or su -c nixup-backup (list, status, now,
-  # restore, restic ...). Off while repository is null.
+  # Each app's APK, data, accounts and permissions, and folders, backed up by the phone itself into
+  # a restic repository (encrypted, each file stored once). An app is backed up after it was used, a
+  # build that installs it brings its data back, and an app not on any list comes back from its
+  # backup. By hand, any app (its APK, its data) or folder: the app's Backups tab, or su -c
+  # nixup-backup (list, status, now, restore, restic ...). Off while repository is null.
   android.backup = {
     repository = null;                            # "/storage/<card>/Backup", "sftp:me@pc:/backup/phone", ...
     passwordFile = null;                          # ./backup-password: keep a copy off the phone
@@ -414,7 +414,7 @@
     defaults = {
       apk = true;                                 # its APK too: installable from the backup
       data = true;                                # false: the APK alone
-      include = [ "data" "deviceData" "storage" ];   # also "media", "obb" (Android/media, Android/obb)
+      include = [ "data" "deviceData" "storage" "accounts" ];   # also "media", "obb"; "accounts": the ones it adds to Android (DAVx5's)
       when = "auto";                              # "auto": after use; "schedule"; "manual"
       autoRestore = false;                        # true (a new phone): data back when a build installs it, and backed-up apps reinstalled; never an app removed here
     };

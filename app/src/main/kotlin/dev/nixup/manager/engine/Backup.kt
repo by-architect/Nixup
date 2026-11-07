@@ -6,6 +6,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
+import java.nio.file.Files
 import java.time.OffsetDateTime
 
 /**
@@ -14,12 +15,21 @@ import java.time.OffsetDateTime
  *
  * An app's backup is one snapshot of /backup/<app>, where its parts are bound for the moment of the backup: apk (the
  * folder of its APKs), data (/data/user/0/<app>), deviceData (/data/user_de/0/<app>), storage, media and obb (its
- * folders in Android/ of the shared storage); caches are left out. So each app's snapshots are one group of restic's
- * (host and path), which restic's forget keeps as android.backup.keep says, and each snapshot is tagged with the app
- * and the version code it was made of. An app whose processes are all idle (cached, as Android keeps an app that
+ * folders in Android/ of the shared storage); caches are left out, and so is the link to its native libraries an older
+ * Android puts in its data. Next to them, info.json says what Android keeps of the app outside its folders: the runtime
+ * permissions it was granted, and with the accounts part its accounts (see [Accounts]: DAVx⁵'s CalDAV/CardDAV
+ * accounts, which Android removes with the app). So each app's snapshots are one group of restic's (host and path),
+ * which restic's forget keeps as android.backup.keep says, and each snapshot is tagged with the app, the version code
+ * it was made of and its parts. An app whose processes are all idle (cached, as Android keeps an app that
  * left the screen) has them stopped while its files are read (SIGSTOP, then SIGCONT), so the copy is whole; one in
  * use (on the screen, or with a service running) is read as it is, without stopping it: a stopped process that the
  * system calls would hold the system up, and the whole phone with it.
+ *
+ * A restore works as Neo Backup's does: the app is stopped, its files come out of the backup into a folder of their
+ * own first (so a restore that fails leaves the app's data as it was), then take the place of what it has, made its
+ * own (its uid, and the groups and SELinux labels Android gives its folders, links left as links); then its accounts
+ * come back, and the permissions it had. After an install from a backup, its data waits for Android to have made the
+ * app's folders.
  *
  * Before a backup, what it needs is checked ([preflight]): the repository's storage there (an SD card in) and room
  * on it, and the phone not short of memory or hot; an automatic one that cannot run now waits for the next check.
@@ -68,7 +78,7 @@ class Backup private constructor(
 
     private fun settingsOf(app: JSONObject) = Settings(
         app.optBoolean("apk", true), app.optBoolean("data", true),
-        app.optJSONArray("include")?.strings() ?: listOf("data", "deviceData", "storage"),
+        app.optJSONArray("include")?.strings() ?: listOf("data", "deviceData", "storage", "accounts"),
         app.optString("when", "auto"), app.optBoolean("autoRestore", false),
     )
 
@@ -106,9 +116,10 @@ class Backup private constructor(
 
     /**
      * Runs [body] (shell lines, after the environment restic needs) in Nixup's view; what restic prints on standard
-     * output is returned, and what it says on standard error goes to [say] line by line.
+     * output is returned, and what it says on standard error goes to [say] line by line. [input] is what [body] reads
+     * (an app's info.json, which may hold its accounts' passwords: through a pipe, never in a file).
      */
-    private fun inView(body: String, say: (String) -> Unit = { Out.line("  $it") }): Pair<Int, String> {
+    private fun inView(body: String, input: ByteArray? = null, say: (String) -> Unit = { Out.line("  $it") }): Pair<Int, String> {
         if (!view.isFile) Units(data).writeView()
         tmp.mkdirs()
         val script = File(tmp, "backup-${Os.getpid()}-${System.nanoTime()}.sh")
@@ -134,7 +145,7 @@ class Backup private constructor(
         })
         try {
             val process = ProcessBuilder(BUSYBOX, "sh", view.path, script.path).start()
-            process.outputStream.close()
+            process.outputStream.use { stream -> input?.let { runCatching { stream.write(it) } } }
             val errors = Thread { process.errorStream.bufferedReader().forEachLine { line -> if (line.isNotBlank()) say(line) } }.apply { start() }
             val out = process.inputStream.bufferedReader().readText()
             val status = process.waitFor()
@@ -146,7 +157,7 @@ class Backup private constructor(
     }
 
     private fun restic(vararg args: String, say: (String) -> Unit = { Out.line("  $it") }): Pair<Int, String> =
-        inView("exec restic " + args.joinToString(" ") { quote(it) }, say)
+        inView("exec restic " + args.joinToString(" ") { quote(it) }, say = say)
 
     /** Makes the repository, when there is none yet and initialize is on; false when it cannot be had. */
     private fun ready(): Boolean {
@@ -198,6 +209,7 @@ class Backup private constructor(
 
     // --- An app's parts.
 
+    /** The folder of one of an app's [FOLDERS] parts. */
     private fun partPath(part: String, id: String): String = when (part) {
         "data" -> "/data/user/0/$id"
         "deviceData" -> "/data/user_de/0/$id"
@@ -206,6 +218,12 @@ class Backup private constructor(
         "obb" -> "/data/media/0/Android/obb/$id"
         else -> throw IllegalArgumentException(part)
     }
+
+    /**
+     * The link an older Android puts in an app's data to its native libraries (lib, to its folder in /data/app): left
+     * out of backups and never replaced by a restore, as Neo Backup does, as it leads to where the app was installed then.
+     */
+    private fun libLink(folder: File) = Files.isSymbolicLink(File(folder, "lib").toPath())
 
     /** The folder of the app's APKs, when it was installed (not one that came with the phone, in /system). */
     private fun apkDir(id: String): String? = Device.run("pm", "path", "--user", "0", id).second.lineSequence()
@@ -216,8 +234,17 @@ class Backup private constructor(
         "mkdir -p ${quote("/backup/$id/$part")} ${quote(path)}\n\"\$b\" mount --bind ${quote(path)} ${quote("/backup/$id/$part")}"
     }
 
-    private fun excludes(id: String) = listOf("apk/oat", "apk/lib", "data/cache", "data/code_cache", "deviceData/cache", "deviceData/code_cache", "storage/cache")
-        .flatMap { listOf("--exclude", "/backup/$id/$it") }
+    private fun excludes(id: String) = (
+        listOf("apk/oat", "apk/lib", "data/cache", "data/code_cache", "deviceData/cache", "deviceData/code_cache", "storage/cache") +
+            listOfNotNull("data/lib".takeIf { libLink(File(partPath("data", id))) })
+        ).flatMap { listOf("--exclude", "/backup/$id/$it") }
+
+    /** The app's runtime permissions as they are now: granted or not, and whether the user set or fixed them. */
+    private fun permissionsJson(id: String): JSONObject = JSONObject().apply {
+        Device.dump(id)?.runtime?.forEach { (name, p) ->
+            put(name, JSONObject().put("granted", p.granted).put("userSet", p.userSet).put("userFixed", p.userFixed))
+        }
+    }
 
     // --- Stopping an app's processes for the moment of a copy.
 
@@ -253,10 +280,10 @@ class Backup private constructor(
 
     private class Result(val snapshot: String?, val added: Long, val skipped: Boolean)
 
-    /** One restic backup of [paths]; null when it failed. */
-    private fun backup(setup: String, paths: List<String>, tags: List<String>, extra: List<String>): Result? {
+    /** One restic backup of [paths] ([input]: what [setup] reads); null when it failed. */
+    private fun backup(setup: String, paths: List<String>, tags: List<String>, extra: List<String>, input: ByteArray? = null): Result? {
         val args = listOf("backup", "--json", "--host", host, "--skip-if-unchanged") + tags.flatMap { listOf("--tag", it) } + extra + paths
-        val (status, out) = inView(setup + "\ncd /\nexec restic " + args.joinToString(" ") { quote(it) }) { line ->
+        val (status, out) = inView(setup + "\ncd /\nexec restic " + args.joinToString(" ") { quote(it) }, input) { line ->
             // restic's errors come as JSON lines too.
             val message = runCatching { JSONObject(line) }.getOrNull()?.let { it.optJSONObject("error")?.optString("message") ?: it.optString("message") } ?: line
             Out.line("  $message")
@@ -281,21 +308,28 @@ class Backup private constructor(
         }
         val parts = LinkedHashMap<String, String>()
         if (settings.apk) apkDir(id)?.let { parts["apk"] = it }
-        if (settings.data) for (part in settings.include) partPath(part, id).takeIf { File(it).isDirectory }?.let { parts[part] = it }
-        if (parts.isEmpty()) {
+        if (settings.data) for (part in settings.include.filter { it in FOLDERS }) partPath(part, id).takeIf { File(it).isDirectory }?.let { parts[part] = it }
+        // What Android keeps of it outside its folders: its accounts (the accounts part), and the permissions it has.
+        val accounts = if (settings.data && "accounts" in settings.include) Accounts.read(id)?.takeIf { it.length() > 0 } else null
+        if (parts.isEmpty() && accounts == null) {
             Out.line("  $id has nothing to back up")
             return true
         }
-        val setup = binds(id, parts)
+        val info = JSONObject().put("app", id).put("versionCode", installed.versionCode).put("versionName", installed.versionName)
+            .put("permissions", permissionsJson(id))
+        accounts?.let { info.put("accounts", it) }
+        val setup = "mkdir -p ${quote("/backup/$id")}\ncat > ${quote("/backup/$id/$INFO")}\n" + binds(id, parts)
         // Its version, and the parts it has, so a restore can say what it brings back (a comma would split a tag).
         val tags = listOf(APP_TAG, "app:$id", "versionCode:${installed.versionCode}") +
             listOfNotNull(installed.versionName.trim().ifEmpty { null }?.let { "versionName:" + it.replace(',', '.') }) +
-            parts.keys.map { "part:$it" }
+            (parts.keys + listOfNotNull("accounts".takeIf { accounts != null })).map { "part:$it" }
         // Stopped while it is read only when all its processes are idle; an app in use is read as it is.
         val pids = Device.uid(id)?.takeIf { it >= 10000 }?.let { pidsOf(it) } ?: emptyList()
         val idle = pids.all { cached(it) }
         if (!idle) Out.line("  $id is in use: read as it is, without stopping it")
-        val result = stopped(if (idle) pids else emptyList()) { backup(setup, listOf("/backup/$id"), tags, excludes(id)) }
+        val result = stopped(if (idle) pids else emptyList()) {
+            backup(setup, listOf("/backup/$id"), tags, excludes(id), info.toString().toByteArray())
+        }
         if (result == null) {
             Out.line("✘ Could not back up $id")
             return false
@@ -305,7 +339,7 @@ class Backup private constructor(
         }.let { saveState() }
         Out.line(
             if (result.skipped) "✔ $id: nothing changed since its last backup"
-            else "✔ Backed up $id ${installed.versionName} (${Out.size(result.added)} new)",
+            else "✔ Backed up $id ${installed.versionName} (${Out.size(result.added)} new${accounts?.let { ", ${count(it.length(), "account")}" } ?: ""})",
         )
         return true
     }
@@ -333,7 +367,7 @@ class Backup private constructor(
      * an "auto" app once it was left in the background for quietTime (and at least once a schedule), a "schedule"
      * one once a schedule, any but a "manual" one after it was updated, and the folders once a schedule. One named
      * by hand need not be the config's: any installed app (with android.backup.defaults) or folder of the phone.
-     * [parts] (apk, data, deviceData, storage, media, obb) is what to take of each app instead of its settings.
+     * [parts] (apk, data, deviceData, storage, media, obb, accounts) is what to take of each app instead of its settings.
      */
     fun run(only: List<String>, auto: Boolean, parts: List<String>? = null): Int = locked {
         if (!Device.unlocked()) {
@@ -447,7 +481,7 @@ class Backup private constructor(
     private fun grown(id: String, settings: Settings): Long {
         if (Device.versionCode(id) == null) return 0
         val paths = (if (settings.apk) listOfNotNull(apkDir(id)) else emptyList()) +
-            (if (settings.data) settings.include.map { partPath(it, id) }.filter { File(it).isDirectory } else emptyList())
+            (if (settings.data) settings.include.filter { it in FOLDERS }.map { partPath(it, id) }.filter { File(it).isDirectory } else emptyList())
         val now = sizeOf(paths)
         val then = state().optJSONObject(id)?.optLong("size", -1L) ?: -1L
         return if (then < 0) now else maxOf(0L, now - then)
@@ -653,13 +687,16 @@ class Backup private constructor(
 
     /** An app's data has nothing but what Android makes at its install (cache and code_cache, empty). */
     private fun hasData(id: String): Boolean = listOf("data", "deviceData").any { part ->
-        File(partPath(part, id)).listFiles().orEmpty().any { it.name !in listOf("cache", "code_cache") || it.list().orEmpty().isNotEmpty() }
+        File(partPath(part, id)).listFiles().orEmpty().any { it.name !in CACHES || it.list().orEmpty().isNotEmpty() }
     }
 
     /**
      * Brings [id]'s data back from [snapshot]: with [overwrite] over what it has (nixup-backup restore), else only
-     * when it has none yet. The app is stopped first, and what comes back is made its own (its uid, and the groups and
-     * SELinux labels of the folders it goes into).
+     * when it has none yet; [only], else the config's parts of it, of those the backup has. The app is stopped, and its
+     * files come out of the backup into a folder of their own first: only once all are out do they take the place of
+     * what it has (a restore that fails leaves its data as it was), made its own (its uid, and the groups and SELinux
+     * labels of the folders they go into). Then its accounts come back (the accounts part), and the runtime permissions
+     * it had and has not now (none is taken away; the config's own permissions are set again by the build after).
      */
     fun restoreData(id: String, snapshot: Snapshot, overwrite: Boolean, only: List<String>? = null): Boolean {
         val uid = Device.uid(id) ?: run {
@@ -674,33 +711,140 @@ class Backup private constructor(
             Out.line("  $id has data already: left as it is (nixup-backup restore $id brings the backup's over it)")
             return true
         }
-        // [only], else the config's parts of it; of those, the ones the backup has: a part it has not got is not emptied.
+        // A part the backup has not got is not emptied; a backup from before parts were tagged has no accounts.
         val has = snapshot.parts
-        val parts = (only ?: apps[id]?.include ?: DATA_PARTS).filter { it != "apk" && (has == null || it in has) }.associateWith { partPath(it, id) }
-        if (parts.isEmpty()) {
+        val wanted = (only ?: apps[id]?.include ?: DATA_PARTS).filter { it != "apk" && (has == null || it in has) }
+        val folders = wanted.filter { it in FOLDERS }.associateWith { partPath(it, id) }
+        val accounts = "accounts" in wanted && has != null
+        if (folders.isEmpty() && !accounts) {
             Out.line("  The backup of $id from ${snapshot.date} has none of its data")
             return true
         }
+        val info = info(id, snapshot)
         Device.run("am", "force-stop", "--user", "0", id)
-        if (overwrite) {
-            // What the backup has instead; caches stay (they are not in it).
-            for (path in parts.values) File(path).listFiles().orEmpty().filter { it.name !in listOf("cache", "code_cache") }.forEach { deleteTree(it) }
+        if (folders.isNotEmpty() && !restoreFolders(id, snapshot, folders, uid, overwrite)) return false
+        var ok = true
+        val said = folders.keys.map { shortName(it) }.toMutableList()
+        if (accounts) {
+            val list = info?.optJSONArray("accounts")
+            if (list == null) Out.line("  The backup of $id from ${snapshot.date} has no accounts to bring back")
+            else Accounts.restore(id, uid, list).let { restored ->
+                if (restored.lost > 0) ok = false
+                if (restored.back > 0) said += count(restored.back, "account")
+            }
         }
-        val args = listOf("restore", "${snapshot.id}:/backup/$id", "--target", "/backup/$id") + parts.keys.flatMap { listOf("--include", "/$it") }
-        // How Android made each folder for this install: restic brings back the backed-up folder's owner and label too.
-        val made = parts.mapValues { (part, path) -> madeAs(part, path) }
-        val (status, _) = inView(binds(id, parts) + "\ncd /\nexec restic " + args.joinToString(" ") { quote(it) })
-        for ((part, path) in parts) {
-            val folder = made.getValue(part)
-            // A part the backup did not have leaves no empty folder behind.
-            if (!folder.existed && File(path).list().isNullOrEmpty()) File(path).delete() else handOverData(path, uid, folder)
+        info?.optJSONObject("permissions")?.let { permissions -> grant(id, permissions).takeIf { it > 0 }?.let { said += count(it, "permission") } }
+        Out.line(
+            if (ok) "✔ Restored $id from ${snapshot.date}: ${said.joinToString(", ").ifEmpty { "nothing was missing" }}"
+            else "✘ $id: its accounts did not all come back (see above); restored from ${snapshot.date}: ${said.joinToString(", ").ifEmpty { "nothing else" }}",
+        )
+        return ok
+    }
+
+    private fun shortName(part: String) = when (part) {
+        "data" -> "its data"
+        "deviceData" -> "its device data"
+        "storage" -> "Android/data"
+        "media" -> "Android/media"
+        "obb" -> "Android/obb"
+        else -> "its $part"
+    }
+
+    /** What [snapshot] of [id] says of it besides its files ([INFO]: its permissions and accounts); null for a backup from before it. */
+    private fun info(id: String, snapshot: Snapshot): JSONObject? {
+        val (status, out) = inView("exec restic dump ${quote(snapshot.id)} ${quote("/backup/$id/$INFO")}", say = {})
+        return if (status == 0) runCatching { JSONObject(out) }.getOrNull() else null
+    }
+
+    /**
+     * Restores [parts] (each one's folder) of [id] (uid [uid]) from [snapshot]: out of the backup into a folder of
+     * their own, then in place of what each folder has ([overwrite]; else next to Android's empty caches), made the
+     * app's. False, with the app's folders as they were, when they could not all come out of the backup.
+     */
+    private fun restoreFolders(id: String, snapshot: Snapshot, parts: Map<String, String>, uid: Int, overwrite: Boolean): Boolean {
+        val staging = File(tmp, "restore-data-$id")
+        deleteTree(staging)
+        staging.mkdirs()
+        try {
+            val args = listOf("restore", "${snapshot.id}:/backup/$id", "--target", staging.path) + parts.keys.flatMap { listOf("--include", "/$it") }
+            val (status, _) = inView("cd /\nexec restic " + args.joinToString(" ") { quote(it) })
+            if (status != 0) {
+                Out.line("✘ Could not restore the data of $id (restic exit $status): it has its data as before")
+                return false
+            }
+            // Its own folders are Android's to make (one made here may be replaced by Android's, data and all): all
+            // there before any of its data is replaced.
+            parts.filterKeys { it in OWN && File(staging, it).isDirectory }.values.firstOrNull { !File(it).isDirectory }?.let { path ->
+                Out.line("✘ $id: Android has not made its folder $path (yet): it has its data as before")
+                return false
+            }
+            // Something may have started it meanwhile (a broadcast, its sync).
+            Device.run("am", "force-stop", "--user", "0", id)
+            for ((part, path) in parts) {
+                val from = File(staging, part)
+                if (!from.isDirectory) continue
+                val folder = File(path)
+                val made = madeAs(part, path)
+                if (!folder.isDirectory && !folder.mkdirs()) {
+                    Out.line("✘ $id: its folder $path cannot be made")
+                    return false
+                }
+                // The caches a backup leaves out stay, and an older Android's link to the app's native libraries.
+                val caches = when (part) {
+                    "data", "deviceData" -> CACHES
+                    "storage" -> listOf("cache")
+                    else -> emptyList()
+                }
+                val keep = { entry: File -> entry.name in caches || (part == "data" && entry.name == "lib" && Files.isSymbolicLink(entry.toPath())) }
+                if (overwrite) folder.listFiles().orEmpty().filter { !keep(it) }.forEach { deleteTree(it) }
+                for (entry in from.listFiles().orEmpty()) {
+                    if (keep(entry)) continue
+                    val target = File(folder, entry.name)
+                    deleteTree(target)
+                    if (!move(entry, target)) {
+                        Out.line("✘ $id: ${entry.name} could not be put into $path (is the phone's storage full?)")
+                        return false
+                    }
+                }
+                handOverData(path, uid, made)
+                // A folder of the shared storage as Android makes it (owner, group, modes, storage quota), where its
+                // storage is FUSE; sdcardfs gives the app's files their owners by itself.
+                if (!made.own) Device.fixupAppDir(shown(path))
+            }
+            return true
+        } finally {
+            deleteTree(staging)
         }
-        if (status != 0) {
-            Out.line("✘ Could not restore the data of $id (restic exit $status)")
+    }
+
+    /**
+     * Moves [from] to [to] (which is not there): a rename where it can be; else a copy that keeps links, special files
+     * (a FIFO), owners, modes and times, and the original goes. A folder encrypted with another key refuses a rename
+     * into it (Android's device-encrypted /data/user_de, from Nixup's own folder: EPERM or EXDEV, as the kernel has it).
+     */
+    private fun move(from: File, to: File): Boolean {
+        if (runCatching { Os.rename(from.path, to.path) }.isSuccess) return true
+        if (Device.run("cp", "-a", from.path, to.path).first != 0) {
+            deleteTree(to)
             return false
         }
-        Out.line("✔ Restored the data of $id from ${snapshot.date}")
+        deleteTree(from)
         return true
+    }
+
+    /**
+     * Grants [id] the runtime permissions it had when it was backed up ([saved]) that it asks for and has not now, with
+     * the user's flags; none is taken away. Returns how many were granted.
+     */
+    private fun grant(id: String, saved: JSONObject): Int {
+        val dump = Device.dump(id) ?: return 0
+        var granted = 0
+        for (name in saved.keys()) {
+            val was = saved.optJSONObject(name) ?: continue
+            if (!was.optBoolean("granted") || dump.runtime[name]?.granted != false) continue
+            if (Device.setPermission(id, name, true, was.optBoolean("userSet"), was.optBoolean("userFixed"))) granted++
+        }
+        return granted
     }
 
     /** How a part's folder is to be: whether it was there, and the group, mode and SELinux label it gets. */
@@ -713,7 +857,7 @@ class Backup private constructor(
      */
     private fun madeAs(part: String, path: String): Made {
         val folder = File(path)
-        val own = part == "data" || part == "deviceData"
+        val own = part in OWN
         val like = if (own || folder.isDirectory) folder else folder.parentFile!!
         val existed = folder.isDirectory
         if (!like.isDirectory) return Made(existed, null, "2770", "", own)
@@ -734,10 +878,23 @@ class Backup private constructor(
         Device.run("chown", "$uid:$gid", path)
         Device.run("chmod", made.mode, path)
         label?.let { Device.run("chcon", it, path) }
-        for (entry in folder.listFiles().orEmpty().filter { !made.own || it.name !in listOf("cache", "code_cache") }) {
+        for (entry in folder.listFiles().orEmpty().filter { !made.own || it.name !in CACHES }) {
             Device.run("chown", "-R", "$uid:$gid", entry.path)
-            label?.let { Device.run("chcon", "-R", it, entry.path) }
+            // -h: a link is labelled itself, never what it points to (Termux's storage/shared is the whole shared storage).
+            label?.let { Device.run("chcon", "-R", "-h", it, entry.path) }
         }
+    }
+
+    /**
+     * Waits (up to 30 s, as Neo Backup does) for Android to have made a newly installed app's folders after pm said
+     * Success, so its data does not go in while Android is still setting it up.
+     */
+    private fun settled(id: String): Boolean {
+        repeat(30) {
+            if (Device.uid(id) != null && File(partPath("data", id)).isDirectory && File(partPath("deviceData", id)).isDirectory) return true
+            Thread.sleep(1000)
+        }
+        return false
     }
 
     /** Installs [id] from the APKs in [snapshot] (its base APK and splits). */
@@ -759,6 +916,7 @@ class Backup private constructor(
             // Not one of a list of android.packages: a build does not remove it as having left the config.
             Installer(data).run { writeOwned(readOwned() - id) }
             Out.line("✔ Installed $id from its backup of ${snapshot.date}")
+            if (!settled(id)) Out.line("  Android has not made $id's folders yet: its data goes in anyway")
             return true
         } finally {
             deleteTree(into)
@@ -877,7 +1035,8 @@ class Backup private constructor(
         // An SD card's file system has no owners or labels; the phone's storage has.
         if (target.path.startsWith("/data/media/")) {
             Device.run("chown", "-R", "${stat.st_uid}:${stat.st_gid}", target.path)
-            if (label.startsWith("u:")) Device.run("chcon", "-R", label, target.path)
+            // -h: links are labelled themselves, never what they point to.
+            if (label.startsWith("u:")) Device.run("chcon", "-R", "-h", label, target.path)
         }
         scan(shown(target.path))
         if (status != 0) {
@@ -1013,8 +1172,16 @@ class Backup private constructor(
 
     companion object {
         /** An app's parts, as a backup has them: its APKs, then its data. */
-        private val PARTS = listOf("apk", "data", "deviceData", "storage", "media", "obb")
+        private val PARTS = listOf("apk", "data", "deviceData", "storage", "media", "obb", "accounts")
         private val DATA_PARTS = PARTS - "apk"
+        /** The parts that are folders of the phone; the others are its APK and its accounts (in info.json). */
+        private val FOLDERS = listOf("data", "deviceData", "storage", "media", "obb")
+        /** What a backup says of the app besides its files: its permissions and accounts (see [Accounts]). */
+        private const val INFO = "info.json"
+        /** The parts that are the app's own folders, which Android makes at its install (the others: on the shared storage). */
+        private val OWN = listOf("data", "deviceData")
+        /** The cache folders Android makes in an app's own folders, left out of backups. */
+        private val CACHES = listOf("cache", "code_cache")
         private const val APP_TAG = "nixup-app"
         private const val FOLDER_TAG = "nixup-folder"
         private const val WARM = "nixup-warm"

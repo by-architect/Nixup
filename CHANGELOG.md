@@ -14,7 +14,34 @@ section after the version, and its text is what the Magisk app shows as the upda
   its first sync), on DAVx⁵ 4.5.17 to 4.5.21, whose database Nixup knows; any other DAVx⁵ gets the login screen.
   An account there gets the config's user name and password at each build. `syncCollections` (`all` by
   default, or `none`) is DAVx⁵'s own setting of what it selects for syncing as it finds it, given back when
-  `services.davx5` leaves the config. `install = "fdroid"` installs DAVx⁵ too; it gets the contacts, calendar and notifications permissions, unrestricted battery use, and is never paused for being unused (which takes an app's permissions away).
+  `services.davx5` leaves the config. `install = "fdroid"` installs DAVx⁵ too; it gets the contacts, calendar and
+  notifications permissions, unrestricted battery use, and is never paused for being unused (which takes an app's
+  permissions away).
+
+## 0.1.3 (2026-11-07)
+
+- Backups keep an app's accounts too (the new `accounts` part, on by default): the accounts it adds to Android's
+  settings, with their passwords, user data, auth tokens, which apps see them and their sync settings. Android keeps
+  them outside the app's folders and deletes them with the app, so a restored DAVx⁵ had its data but no account to
+  sync with. A restore adds the missing ones again as the app itself (Android lets only an account type's own app add
+  its accounts); one that is on the phone stays as it is. The Backups tab offers them among the parts to restore.
+  Backups made before this have none: such an app is signed in again by hand once.
+- Backups keep which runtime permissions an app was granted, and a restore grants them again (none is taken away; the
+  config's own permissions are set again by the next build).
+- A restore takes the app's files out of the backup into a folder of their own first, as Neo Backup does, and only
+  then puts them in place of the app's: a restore that fails, or a restart in the middle, leaves the app's data as it
+  was (before, its data was emptied first). A restore a restart broke off is picked up again after it.
+- After an app is installed from a backup, its data waits (up to 30 s) for Android to have made the app's folders:
+  before, it went in at once, and Android could replace the folder under it (a whole Termux restore ended in
+  thousands of "no such file or directory" errors).
+- An app's device data (`deviceData`) is restored on phones whose kernel refuses moving files there from Nixup's own
+  folder (another encryption key): it is copied instead.
+- A restore no longer relabels what links in an app's data or a folder point to: `chcon` followed them (Termux's
+  `storage/shared` points at the whole shared storage).
+- Files restored into Android/data, Android/media and Android/obb get their owner and storage quota from Android's own
+  storage service, where the phone's storage is FUSE.
+- The link to an app's native libraries that older Androids put in its data is left out of backups and never
+  replaced by a restore, as Neo Backup does.
 
 ## 0.1.2 (2026-11-07)
 
