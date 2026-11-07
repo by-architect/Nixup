@@ -1665,7 +1665,8 @@ class Units(private val data: File) {
          * Runs a unit's script ($1) as root in Nixup's view of the phone: a root of its own, in a mount namespace of
          * its own, with Android's own folders as they are, /nix (Nixup's store), Nixup's /etc, /var and /run (the
          * units' state, which stays), /home (the normal users' homes, Nixup's users folder) and /tmp (one for all, as
-         * on NixOS: Nixup's run/tmp; its own with PrivateTmp, NIXUP_PRIVATE_TMP);
+         * on NixOS: Nixup's run/tmp; its own with PrivateTmp, NIXUP_PRIVATE_TMP); a /usr/bin/env, as on NixOS, which
+         * leads to the env program Etc links (environment.usrbinenv);
          * Android's time zone is Nixup's /etc/localtime (see Etc), else TZ, its offset from UTC ("<+0300>-03:00").
          * /proc/sys/kernel/modprobe and poweroff_cmd are empty there: Nix's garbage collector reads them with a read
          * Android's 4.x kernels may refuse ("Out of memory"), which stops it.
@@ -1700,6 +1701,11 @@ class Units(private val data: File) {
               mkdir -p "${'$'}v/tmp"
               if [ -n "${'$'}NIXUP_PRIVATE_TMP" ]; then "${'$'}b" mount -t tmpfs -o mode=1777 tmp "${'$'}v/tmp"
               else mkdir -p "${'$'}data/run/tmp" && chmod 1777 "${'$'}data/run/tmp" && "${'$'}b" mount --bind "${'$'}data/run/tmp" "${'$'}v/tmp"
+              fi
+              # /usr/bin/env, as NixOS has it, for scripts that start with #!/usr/bin/env (Android has no /usr): a link
+              # to /etc/nixup/usrbinenv, the env program of environment.usrbinenv, not there without Nix packages.
+              if [ ! -e "${'$'}v/usr" ] && [ ! -L "${'$'}v/usr" ]; then
+                mkdir -p "${'$'}v/usr/bin" && ln -s /etc/nixup/usrbinenv "${'$'}v/usr/bin/env" || true
               fi
               # Kernel files the garbage collector of Nix reads (for store paths in them), of which an Android kernel
               # may refuse a big read (Out of memory), which stops it: empty ones here, as containers have them.

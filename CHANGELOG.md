@@ -4,6 +4,13 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- Scripts that start with `#!/usr/bin/env bash` (or `python3`, ...) run in Nixup's shells and services: the view has
+  a `/usr/bin/env`, as NixOS has, coreutils' `env` unless `environment.usrbinenv` names another (null leaves it out).
+  Only with Nix packages: without them the phone's shell is Android's.
+- With `programs.nano.enable = true;`, `EDITOR` is nano, as on NixOS.
+
 ## 0.1.3 (2026-11-07)
 
 - Backups keep an app's accounts too (the new `accounts` part, on by default): the accounts it adds to Android's

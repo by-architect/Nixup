@@ -90,6 +90,8 @@ in
     (lib.optionalAttrs (source != null) {
       # On NixOS every machine has them; on a phone each would be a download for every config, or cannot work.
       programs.nano.enable = lib.mkDefault false;
+      # (NixOS's EDITOR is nano, which every machine of its has: here when it is on.)
+      environment.variables.EDITOR = lib.mkIf config.programs.nano.enable (lib.mkDefault "nano");
       # (Its database is the one a NixOS channel has, which the phone has not.)
       programs.command-not-found.enable = lib.mkDefault false;
       # (systemd's, which the phone has not got: its ssh_config would bring systemd.)

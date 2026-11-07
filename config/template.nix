@@ -735,6 +735,7 @@
   programs.direnv.enable = false;                 # direnv's hook in the shells
   programs.starship.enable = false;               # starship's prompt in the shells
   # environment.defaultPackages = with pkgs; [ rsync ];   # more packages every Nix shell has (NixOS's: perl rsync strace)
+  # environment.usrbinenv = null;                 # null: no /usr/bin/env (not set: coreutils' env, for scripts that start with #!/usr/bin/env)
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
   networking.hosts = { };                         # names in Nixup's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
   networking.nameservers = [ ];                   # DNS servers of Nixup's services ([ ]: the network's), like [ "9.9.9.9" ]

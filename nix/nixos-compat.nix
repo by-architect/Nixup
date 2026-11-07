@@ -257,6 +257,17 @@ in
           strace; the phone's are none (each would be a download for every phone).
         '';
       };
+      usrbinenv = mkOption {
+        type = types.nullOr types.path;
+        default = "${pkgs.coreutils}/bin/env";
+        defaultText = lib.literalExpression ''"''${pkgs.coreutils}/bin/env"'';
+        example = lib.literalExpression ''"''${pkgs.busybox}/bin/env"'';
+        description = ''
+          The env program that is /usr/bin/env in Nixup's view, as on NixOS, for the scripts that start with
+          #!/usr/bin/env bash (or python3, ...); null leaves it out. With Nix packages only: without them the phone's
+          shell is Android's, and there is none. (Android has no /usr: the view has one of its own.)
+        '';
+      };
       pathsToLink = taken (types.listOf types.str) [ ] "folders of packages linked into the system's profile";
       extraOutputsToInstall = taken (types.listOf types.str) [ ] "more outputs of the packages to install";
     };
