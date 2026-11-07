@@ -6,7 +6,6 @@ import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.file.Files
-import java.nio.file.LinkOption
 import java.util.concurrent.TimeUnit
 
 /**
@@ -45,7 +44,7 @@ class Units(private val data: File) {
     /** Units nothing starts with the build (a timer's, or one to start by hand) that are new or changed: written, not started. */
     private var toWrite: List<String> = emptyList()
     private val timers = Timers(data)
-    private val paths = Paths(data)
+    private val paths = Paths(data, ::pathOf)
     /** The units the timers and path units start, each with what starts it ("its timer foo"): they start then. */
     private var timerUnits: Map<String, List<String>> = emptyMap()
 
@@ -160,12 +159,12 @@ class Units(private val data: File) {
     @Suppress("UNUSED_PARAMETER")
     fun apply(android: JSONObject? = null): Int {
         moveLegacy()
-        if (toStart.isEmpty() && toStop.isEmpty() && leaving.isEmpty() && toRefresh.isEmpty() && toWrite.isEmpty() && !timers.changes) return 0
+        if (toStart.isEmpty() && toStop.isEmpty() && leaving.isEmpty() && toRefresh.isEmpty() && toWrite.isEmpty() && !timers.changes && !paths.changes) return 0
         toStop.forEach { stop(it) }
         for (name in leaving) {
             stop(name)
             cleanUp(name)
-            File(dir, name).deleteRecursively()
+            deleteTree(File(dir, name))
             Out.line("✔ $name: removed (it left the config)")
         }
         for (name in toRefresh) {
@@ -202,7 +201,7 @@ class Units(private val data: File) {
             return 0
         }
         // /run is empty after a restart, as on Linux.
-        runDir.deleteRecursively()
+        deleteTree(runDir)
         writeView()
         Etc.write(data)
         Tmpfiles.apply(data, android?.optJSONArray("tmpfiles"))
@@ -252,8 +251,8 @@ class Units(private val data: File) {
         paths.removeAll()
         val had = applied()
         order(had.keys, had).reversed().forEach { stop(it) }
-        dir.deleteRecursively()
-        runDir.deleteRecursively()
+        deleteTree(dir)
+        deleteTree(runDir)
         if (had.isNotEmpty()) Out.line("✔ Services: stopped")
         return 0
     }
@@ -347,6 +346,32 @@ class Units(private val data: File) {
 
     /** Path unit [path]'s paths say so (see Paths): its unit starts, as with a timer's. */
     fun firePath(path: String): Int = fireUnit(paths.spec(path)?.optString("unit") ?: throw Stop("there is no path unit $path in the last build", 2))
+
+    /**
+     * A path unit's path [value] with its specifiers filled in as the unit [name] it starts has them (see [specifier]),
+     * as systemd fills in a path unit's: a user's own unit's %h, %t, %S, ... are in its user's home and /run/user/<uid>.
+     * Null when its user is not known yet.
+     */
+    private fun pathOf(name: String, value: String): String? {
+        if ('%' !in value) return value
+        val unit = runCatching { JSONObject(File(dir, "$name/spec.json").readText()) }.getOrDefault(JSONObject())
+        val account = unit.string("user")?.let { Etc.accounts(data).users[it] ?: return null }
+        val text = StringBuilder()
+        for (part in specified(name, unit, value)) {
+            when (part) {
+                is Part.Text -> text.append(part.text)
+                is Part.Variable -> text.append(
+                    when (part.name) {
+                        "HOME" -> account?.home
+                        "nixup_uid" -> account?.uid?.toString()
+                        "nixup_gid" -> account?.gid?.toString()
+                        else -> null
+                    } ?: return null,
+                )
+            }
+        }
+        return text.toString()
+    }
 
     private fun fireUnit(name: String): Int {
         waitForBuild()
@@ -499,6 +524,9 @@ class Units(private val data: File) {
                 }
                 path.mkdirs()
                 runCatching {
+                    // (A link there, as a user may make one in its own home, is not taken: chown and chmod would change
+                    // what it points to.)
+                    if (android.system.OsConstants.S_ISLNK(Os.lstat(path.path).st_mode)) throw IllegalStateException("it is a link, not a folder: left as it is")
                     if (uid != null) {
                         val stat = Os.lstat(path.path)
                         if (stat.st_uid != uid || stat.st_gid != (gid ?: uid)) {
@@ -564,20 +592,32 @@ class Units(private val data: File) {
         val busybox = busybox()
         val log = File(unitDir, "log")
         val devNull = File("/dev/null")
-        File(unitDir, "run.conf").writeText(runConf(unit, unitDir))
-        File(unitDir, "ready").delete()
-        File(unitDir, "unready").delete()
-        if (!background.isFile) writeView()
-        // Below the apps on the screen (see BACKGROUND), its loop and so all it starts.
-        ProcessBuilder(
-            busybox, "sh", background.path, busybox, nice(unit),
-            busybox, "setsid", "sh", "-c", SUPERVISOR, MARK + name, busybox, view.path, log.path, unitDir.path, name,
-        ).directory(unitDir).redirectInput(devNull).redirectOutput(devNull).redirectError(devNull).apply { unitEnvironment(environment()) }.start()
+        // One loop for it, however many start it at once (its timer, a build, units.sh): the others find it there.
+        RandomAccessFile(File(unitDir, ".launch.lock"), "rw").use { lockFile ->
+            val lock = lockFile.channel.lock()
+            try {
+                if (supervisorPid(name) != null) {
+                    Out.line("✔ $name: running")
+                    return true
+                }
+                File(unitDir, "run.conf").writeText(runConf(unit, unitDir))
+                File(unitDir, "ready").delete()
+                File(unitDir, "unready").delete()
+                if (!background.isFile) writeView()
+                // Below the apps on the screen (see BACKGROUND), its loop and so all it starts.
+                ProcessBuilder(
+                    busybox, "sh", background.path, busybox, nice(unit),
+                    busybox, "setsid", "sh", "-c", SUPERVISOR, MARK + name, busybox, view.path, log.path, unitDir.path, name,
+                ).directory(unitDir).redirectInput(devNull).redirectOutput(devNull).redirectError(devNull).apply { unitEnvironment(environment()) }.start()
+                // Its loop's pid file comes a moment after it starts: until then another start would not see it.
+                var tries = 0
+                while (supervisorPid(name) == null && tries++ < 30) Thread.sleep(100)
+            } finally {
+                lock.release()
+            }
+        }
         // A forking one has started once its start has ended and its service is found; a notify one once it says so.
         if (unit.optString("type") == "forking" || unit.optBoolean("notify")) {
-            // Its loop first (its pid file comes a moment after it starts).
-            var tries = 0
-            while (supervisorPid(name) == null && tries++ < 30) Thread.sleep(100)
             // (Longer than its loop waits, so a start that took too long is seen ended, not running.)
             val until = System.currentTimeMillis() + 1000L * (timeout(unit, "timeoutStart", 90).coerceAtMost(120) + 15)
             while (System.currentTimeMillis() < until && !File(unitDir, "ready").isFile && !File(unitDir, "unready").isFile && supervisorPid(name) != null) Thread.sleep(300)
@@ -704,7 +744,11 @@ class Units(private val data: File) {
      */
     private fun inView(name: String, unit: JSONObject, script: File, log: File, seconds: Long, show: Boolean = false): Pair<Boolean, Int> {
         if (!background.isFile) writeView()
-        val process = ProcessBuilder(busybox(), "sh", background.path, busybox(), nice(unit), busybox(), "sh", view.path, script.path)
+        // In a session of its own (its number, the group's, in .run.pid), so that a run that does not end is ended
+        // whole: its shell and what it started.
+        val group = File(script.parentFile, ".run.pid").apply { delete() }
+        val process = ProcessBuilder(busybox(), "setsid", "/system/bin/sh", "-c", "echo \$\$ > \"\$0\"; exec \"\$@\"", group.path,
+            busybox(), "sh", background.path, busybox(), nice(unit), busybox(), "sh", view.path, script.path)
             .directory(script.parentFile).redirectErrorStream(true).redirectInput(File("/dev/null")).apply { unitEnvironment(environment()) }.start()
         val reader = Thread {
             runCatching {
@@ -716,7 +760,11 @@ class Units(private val data: File) {
             }
         }.apply { start() }
         val done = process.waitFor(seconds, TimeUnit.SECONDS)
-        if (!done) process.destroyForcibly()
+        if (!done) {
+            runCatching { group.readText().trim().toInt() }.getOrNull()?.let { runCatching { Os.kill(-it, android.system.OsConstants.SIGKILL) } }
+            process.destroyForcibly()
+        }
+        group.delete()
         reader.join(2000)
         return done to (if (done) process.exitValue() else -1)
     }
@@ -757,8 +805,8 @@ class Units(private val data: File) {
         val supervisor = supervisorPid(name)
         if (supervisor != null) {
             Device.run("kill", "-TERM", "$supervisor")
-            // Its loop waits for its ExecStop, its processes (TimeoutStopSec) and its ExecStopPost.
-            val seconds = 10 + (spec?.let { timeout(it, "timeoutStop", 10).coerceAtMost(300) } ?: 10)
+            // Its loop waits for its ExecStop and then its processes (TimeoutStopSec each), and its ExecStopPost.
+            val seconds = 10 + 2 * (spec?.let { timeout(it, "timeoutStop", 10).coerceAtMost(300) } ?: 10)
             var tries = 0
             while (supervisorPid(name) != null && tries++ < seconds * 5) Thread.sleep(200)
             supervisorPid(name)?.let { Device.run("kill", "-KILL", "$it") }
@@ -789,6 +837,14 @@ class Units(private val data: File) {
         val unitDir = File(dir, name)
         val script = File(unitDir, "cleanup.sh").takeIf { it.isFile } ?: return
         val spec = runCatching { JSONObject(File(unitDir, "spec.json").readText()) }.getOrNull() ?: return
+        // A user that left the config with it cannot run it (/etc/passwd is the new build's already): its home is left
+        // as it is, as NixOS leaves a removed user's home.
+        spec.string("user")?.let { user ->
+            if (user !in Etc.accounts(data).users) {
+                Out.line("$name: its user $user left the config too, so its home is left as it is")
+                return
+            }
+        }
         val (done, code) = inView(name, spec, script, File(unitDir, "log"), 600, show = true)
         if (!done || code != 0) Out.line("✘ $name: what it does once it leaves the config did not end well (${if (done) code else "it took too long"})")
     }
@@ -799,11 +855,7 @@ class Units(private val data: File) {
             (File(dir, "$name/stop.sh").isFile || File(dir, "$name/stoppost.sh").isFile)
 
     /** Removes [file] and what is in it, a link without what it leads to. */
-    private fun remove(file: File) {
-        val path = file.toPath()
-        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) file.listFiles().orEmpty().forEach { remove(it) }
-        runCatching { Files.deleteIfExists(path) }
-    }
+    private fun remove(file: File) = deleteTree(file)
 
     private fun writeScripts(name: String, unit: JSONObject, unitDir: File) {
         unitDir.listFiles().orEmpty().filter { it.name.endsWith(".sh") }.forEach { it.delete() }
@@ -1400,7 +1452,7 @@ class Units(private val data: File) {
                 old.renameTo(new)
             }
         }
-        legacy.deleteRecursively()
+        deleteTree(legacy)
         Out.line("✔ Services: the earlier Nixup's moved over to units")
     }
 
@@ -1678,7 +1730,7 @@ class Units(private val data: File) {
         /**
          * Keeps a simple (or forking) unit running: its start.sh in the view, its post.sh once it has started, and again
          * as its Restart says (after RestartSec), with its ExecStopPost (stoppost.sh) after each run; a TERM runs its
-         * stop.sh (ExecStop), ends it as its KillMode, KillSignal and TimeoutStopSec say (control-group: all of its
+         * stop.sh (ExecStop, ended whole past TimeoutStopSec), ends it as its KillMode, KillSignal and TimeoutStopSec say (control-group: all of its
          * processes, which its view's mount namespace tells, as systemd's cgroup does), then runs its stoppost.sh. A
          * forking unit's service is the process its PIDFile names, else the one left in its view after its start ends.
          * Its log is set aside past 1 MB. With notify.sh, it tells the app when the unit stops by itself (once, until it
@@ -1697,6 +1749,17 @@ class Units(private val data: File) {
             child= watcher= main=
             tell() { [ -n "${'$'}notify" ] && "${'$'}b" sh "${'$'}notify" service "${'$'}@" "service:${'$'}name" < /dev/null > /dev/null 2>&1; }
             inview() { "${'$'}b" sh "${'$'}view" "${'$'}1" >> "${'$'}log" 2>&1 < /dev/null; }
+            # Its ExecStop, at most TimeoutStopSec, as systemd waits for it: in a session of its own, ended whole after.
+            stopview() {
+              "${'$'}b" setsid "${'$'}b" sh "${'$'}view" "${'$'}1" >> "${'$'}log" 2>&1 < /dev/null &
+              stopper=${'$'}! i=0
+              while kill -0 ${'$'}stopper 2> /dev/null && [ ${'$'}i -lt ${'$'}((timeout * 5)) ]; do sleep 0.2; i=${'$'}((i + 1)); done
+              if kill -0 ${'$'}stopper 2> /dev/null; then
+                echo "${'$'}name: its ExecStop did not end in ${'$'}timeout seconds" >> "${'$'}log"
+                kill -9 -${'$'}stopper 2> /dev/null; kill -9 ${'$'}stopper 2> /dev/null
+              fi
+              wait ${'$'}stopper 2> /dev/null
+            }
             # Its processes: those in the mount namespace of the view its start made.
             # (One stat for all: the namespace's number is its file's inode. A readlink for each of a phone's ~900
             # processes took half a minute.)
@@ -1731,7 +1794,7 @@ class Units(private val data: File) {
             }
             stopping() {
               [ -n "${'$'}watcher" ] && kill ${'$'}watcher 2> /dev/null
-              [ -n "${'$'}stop" ] && [ -n "${'$'}main" ] && inview "${'$'}stop"
+              [ -n "${'$'}stop" ] && [ -n "${'$'}main" ] && stopview "${'$'}stop"
               [ -n "${'$'}main" ] && end
               [ -n "${'$'}child" ] && wait ${'$'}child 2> /dev/null
               holder_end

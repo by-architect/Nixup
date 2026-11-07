@@ -7,12 +7,29 @@ PROFILE=$DATA/profile.json
 # SPECIALISATION_IN_USE when one is.
 SYSTEM=$DATA/system.json
 SPECIALISATION_IN_USE=$DATA/specialisation
+# Whether system.json is the whole of the profile applied now: a module without specialisations (an older one, or a
+# branch's) writes profile.json alone, which is then newer, and its build is the one to go by.
+system_current() { [ -f "$SYSTEM" ] && ! [ "$PROFILE" -nt "$SYSTEM" ]; }
 LOG=$DATA/apply.log
 BY=${BY:-manual}
 # Who started it, for the engine's events too.
 export NIXUP_BY=$BY
+# Which try of a run a restart broke off this is (resume.sh): this run's alone, not what it starts (a timer's loop,
+# whose later builds are their own).
+RESUMED=${NIXUP_RESUMED:-}
+unset NIXUP_RESUMED
+# What the scripts make is root's to write: Magisk starts them with umask 0, which would leave Nixup's folders and
+# /etc writable by every user of its view (see Etc.closeModes).
+umask 022
 
 mkdir -p "$DATA/tmp"
+# This script's own temporary files: a run of another at the same time (a backup by its timer, a dry run from the app
+# while a build runs) has its own, so neither reads what the other wrote (the engine's status, a command for Nix). The
+# folder of a script that ended goes with the next one.
+for old in "$DATA/tmp"/[0-9]*; do [ -d "$old" ] && [ ! -d "/proc/${old##*/}" ] && rm -rf "$old"; done
+RUN_TMP=$DATA/tmp/$$
+rm -rf "$RUN_TMP"
+mkdir -p "$RUN_TMP"
 # Keep the log small: past 64 KB the old one is set aside.
 [ -f "$LOG" ] && [ "$(stat -c %s "$LOG")" -gt 65536 ] && mv -f "$LOG" "$LOG.old"
 
@@ -20,6 +37,13 @@ mkdir -p "$DATA/tmp"
 log() {
   printf '%s\n' "$*"
   printf '%s\n' "$(date '+%F %T') [$BY] $*" >> "$LOG"
+}
+
+# As log, a line of $1 and a file's text (a profile, one line of JSON): not through printf's arguments, which hold
+# 128 KiB at most.
+log_file() {
+  { printf '%s' "$1"; tr -d '\n' < "$2"; echo; }
+  { printf '%s' "$(date '+%F %T') [$BY] $1"; tr -d '\n' < "$2"; echo; } >> "$LOG"
 }
 
 # Shown under the module's name in the Magisk app.
@@ -43,7 +67,7 @@ event() { NIXUP_BY=$BY NIXUP_RUN=$RUN sh "$MODDIR/notify.sh" "$@"; }
 # failed", unless it told how it ended itself; one that told nothing (nothing was due) leaves no log.
 # Arguments: its kind (as an event's) and title.
 LOGS=$DATA/logs
-RUN= RUN_LOG= RUN_KIND= RUN_TITLE= FAILED= AT_EXIT= RESUME_NAME=
+RUN= RUN_LOG= RUN_KIND= RUN_TITLE= FAILED= AT_EXIT= RESUME_NAME= RUN_WAKE=
 run_open() {
   RUN_KIND=$1 RUN_TITLE=$2
   run_priority
@@ -67,6 +91,10 @@ run_open() {
     exec > "$pipe" 2>&1
     rm -f "$pipe"
   fi
+  # The phone stays awake while it runs (its screen may go off): one nobody watches (a timer's, at night) would
+  # otherwise stop when the phone sleeps again, a download broken off. An hour at most, should it never end.
+  RUN_WAKE=nixup-$RUN
+  echo "$RUN_WAKE 3600000000000" > /sys/power/wake_lock 2> /dev/null || RUN_WAKE=
   trap finish EXIT
 }
 
@@ -108,7 +136,7 @@ resumable() {
   shift
   echo $$ > "$PENDING/$RESUME_NAME.pid"
   echo "$BY" > "$PENDING/$RESUME_NAME.by"
-  { date +%s; echo "${NIXUP_RESUMED:-0}"; echo "$NIXUP_PROFILE"; printf '%s\n' "$@"; } > "$PENDING/$RESUME_NAME"
+  { date +%s; echo "${RESUMED:-0}"; echo "$NIXUP_PROFILE"; printf '%s\n' "$@"; } > "$PENDING/$RESUME_NAME"
 }
 
 # The process of the run of that name still running (a module script's sh), if there is one.
@@ -128,11 +156,12 @@ $1"
 
 finish() {
   status=$?
+  [ -z "$RUN_WAKE" ] || echo "$RUN_WAKE" > /sys/power/wake_unlock 2> /dev/null
   eval "$AT_EXIT"
   if [ -n "$RESUME_NAME" ]; then
     if [ "$status" = 75 ]; then
       # Waiting is no try: its count goes back.
-      [ -n "$NIXUP_RESUMED" ] && sed -i "2s/.*/$((NIXUP_RESUMED - 1))/" "$PENDING/$RESUME_NAME"
+      [ -n "$RESUMED" ] && sed -i "2s/.*/$((RESUMED - 1))/" "$PENDING/$RESUME_NAME"
     else
       rm -f "$PENDING/$RESUME_NAME"
     fi
@@ -156,6 +185,8 @@ finish() {
 ORIGINAL=$DATA/original
 remember() {
   [ -f "$ORIGINAL/$1" ] && return 0
+  # (Android gave no answer: nothing to give back later.)
+  [ -n "$2" ] || return 1
   mkdir -p "$ORIGINAL" && echo "$2" > "$ORIGINAL/$1"
 }
 
@@ -196,8 +227,8 @@ readable_path() {
 # run's log with the rest of what the script says).
 engine() {
   { CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.nixup.manager.engine.Main "$@" 2>&1
-    echo $? > "$DATA/tmp/engine.status"; } | tee -a "$LOG"
-  return "$(cat "$DATA/tmp/engine.status")"
+    echo $? > "$RUN_TMP/engine.status"; } | tee -a "$LOG"
+  return "$(cat "$RUN_TMP/engine.status")"
 }
 
 # A new generation, as nixos-rebuild makes one when the system changed: the
@@ -213,8 +244,12 @@ new_generation() {
   rm -rf "$generations/new"
   mkdir -p "$generations/new"
   # The whole profile (with the specialisations), and the one in use; going back to it picks that one again.
-  if [ -f "$SYSTEM" ]; then cp "$SYSTEM" "$generations/new/profile.json"; else cp "$PROFILE" "$generations/new/profile.json"; fi
-  [ -s "$SPECIALISATION_IN_USE" ] && cp "$SPECIALISATION_IN_USE" "$generations/new/specialisation"
+  if system_current; then
+    cp "$SYSTEM" "$generations/new/profile.json"
+    [ -s "$SPECIALISATION_IN_USE" ] && cp "$SPECIALISATION_IN_USE" "$generations/new/specialisation"
+  else
+    cp "$PROFILE" "$generations/new/profile.json"
+  fi
   [ -f "$DATA/resolved.json" ] && cp "$DATA/resolved.json" "$generations/new/apps.json"
   # Its version and the config's revision (system.nixos.label, system.configurationRevision: the engine's
   # /etc/nixup/version), and with system.copySystemConfiguration the configuration.nix it was built from (GEN_CONFIG).
@@ -227,7 +262,8 @@ new_generation() {
     [ -n "$GEN_BUILT_ON" ] && printf '%s\n' "$GEN_BUILT_ON" > "$generations/new/built-on"
     [ -n "$GEN_LOCK" ] && [ -f "$GEN_LOCK" ] && cp "$GEN_LOCK" "$generations/new/flake.lock"
   elif [ "$last" -gt 0 ]; then
-    for kept in source built-on flake.lock; do
+    # (The last build again: what it was built from, its config's copy too.)
+    for kept in source built-on flake.lock configuration.nix; do
       [ -f "$generations/$last/$kept" ] && cp "$generations/$last/$kept" "$generations/new/$kept"
     done
   fi
@@ -297,8 +333,11 @@ nix_view() {
   [ -f "$DATA/units/view.sh" ] || engine etc > /dev/null || return 1
   tool=$1
   shift
-  script=$DATA/tmp/nix-view.sh
-  { printf 'exec %s' "'$MODDIR/bin/$tool'"; for word; do printf " '%s'" "$word"; done; printf '\n'; } > "$script"
+  script=$RUN_TMP/nix-view.sh
+  # (Its view's / read-only for it: its builds run as root, and one that makes its home there (Nix gives builds
+  # HOME=/homeless-shelter: fish's do) would stop every build after it, as Nix checks that it is not there.)
+  { [ -z "$BUSYBOX" ] || printf "'%s' mount -o remount,ro / 2> /dev/null\n" "$BUSYBOX"
+    printf 'exec %s' "'$MODDIR/bin/$tool'"; for word; do printf " '%s'" "$word"; done; printf '\n'; } > "$script"
   sh "$DATA/units/view.sh" "$script"
 }
 
@@ -323,11 +362,20 @@ fetch_packages() {
   here=
   for drv in $drvs; do [ -f "$DATA/nix${drv%%^*}" ] && here="$here $drv"; done
   if [ -n "$here" ]; then
-    nix_view nix build --dry-run --no-link $here 2> "$DATA/tmp/packages.plan" || { cat "$DATA/tmp/packages.plan" >&2; return 1; }
-    cat "$DATA/tmp/packages.plan" >&2
+    # A dry run plans the other packages with them, in one list, and not the paths these make: it builds none of
+    # them, and no cache has them ("don't know how to build").
+    rest=
+    if [ "$2" = dry ]; then
+      made=" $(nix_view nix-store --query --outputs $(for drv in $here; do echo "${drv%%^*}"; done) 2> /dev/null | tr '\n' ' ') "
+      for path in $paths; do case "$made" in *" $path "*) ;; *) rest="$rest $path" ;; esac; done
+      paths=
+    fi
+    nix_view nix build --dry-run --no-link $here $rest 2> "$RUN_TMP/packages.plan" || { cat "$RUN_TMP/packages.plan" >&2; return 1; }
+    # (A build says it again as it goes.)
+    [ "$2" != dry ] || cat "$RUN_TMP/packages.plan" >&2
     # What it would build: files made from the config, or a package (from its source) it must not.
     refused= remote=
-    for drv in $(sed -n '/will be built:$/,/^[^ ]/s/^ *\(\/nix\/store\/[^ ]*\.drv\)$/\1/p' "$DATA/tmp/packages.plan"); do
+    for drv in $(sed -n '/will be built:$/,/^[^ ]/s/^ *\(\/nix\/store\/[^ ]*\.drv\)$/\1/p' "$RUN_TMP/packages.plan"); do
       file=$DATA/nix$drv
       if grep -qE '\("srcs?","' "$file" && ! grep -qF '("preferLocalBuild","1")' "$file"; then
         refused="$refused ${drv#/nix/store/*-}"
@@ -335,7 +383,7 @@ fetch_packages() {
       fi
     done
     if [ -n "$refused" ]; then
-      builders=$DATA/tmp/builders
+      builders=$RUN_TMP/builders
       engine builders "$1" > "$builders" 2> /dev/null || : > "$builders"
       if [ ! -s "$builders" ]; then
         log "Not in cache.nixos.org, and packages the phone does not build (from their source):$refused"
@@ -348,9 +396,9 @@ fetch_packages() {
         # Nix's ssh first, then those packages on the machines alone (no job of the phone's own: --max-jobs 0),
         # then the rest here as before.
         ssh_bin=$(sed -n 1p "$builders")
-        sed '1d' "$builders" > "$DATA/tmp/nix-machines"
+        sed '1d' "$builders" > "$RUN_TMP/nix-machines"
         nix_store build --no-link "${ssh_bin%/bin}" || { log "Nix's ssh (openssh) could not be fetched"; return 1; }
-        PATH="$ssh_bin:$PATH" nix_view nix build --no-link --max-jobs 0 --builders "@$DATA/tmp/nix-machines" --option builders-use-substitutes true $remote \
+        PATH="$ssh_bin:$PATH" nix_view nix build --no-link --max-jobs 0 --builders "@$RUN_TMP/nix-machines" --option builders-use-substitutes true $remote \
           || { log "The build machines could not build them (Nix says why above: a machine's sshKey, publicHostKey, system?)"; return 1; }
       fi
     fi
@@ -393,12 +441,16 @@ check_kept() {
 # config's nixpkgs), as a NixOS system keeps them through its registry.
 keep_packages() {
   roots=$DATA/nix/nix/var/nix/gcroots/nixup
+  # The lists first: when the engine cannot give them, the roots there are stay (a gc after would take the packages
+  # in use).
+  needed=$(engine paths "$PROFILE") || return 1
+  kept=$(engine paths "$PROFILE" --kept) || return 1
   rm -rf "$roots" && mkdir -p "$roots"
   i=0
-  for path in $(engine paths "$PROFILE" | grep '^/nix/store/'); do
+  for path in $(printf '%s\n' "$needed" | grep '^/nix/store/'); do
     ln -s "$path" "$roots/$i" && i=$((i + 1))
   done
-  for path in $(engine paths "$PROFILE" --kept | grep '^/nix/store/'); do
+  for path in $(printf '%s\n' "$kept" | grep '^/nix/store/'); do
     [ -e "$DATA/nix$path" ] && ln -s "$path" "$roots/$i" && i=$((i + 1))
   done
   return 0
@@ -426,12 +478,15 @@ applied_of() {
 # to apply (none: the config itself), which the phone keeps until another build.
 switch_to() {
   whole=$1
+  # A profile in a format this module does not know (a PC's newer Nixup) is refused before anything changes, not
+  # by apply.sh once the engine has applied it.
+  grep -q '"schemaVersion":1[,}]' "$1" || { rm -f "$1"; fail "the build's profile is not schemaVersion 1 (made by another version of Nixup?); nothing was changed"; }
   if [ -n "$SPECIALISATION" ] || grep -q '"specialisation":{' "$1"; then
     [ -n "$SPECIALISATION" ] && log "== Specialisation $SPECIALISATION"
     set -- "$1.applied" "$2"
     at_exit "rm -f '$1'"
-    applied_of "$whole" "$SPECIALISATION" > "$1" 2> "$DATA/tmp/specialisation.err" || {
-      sed -n 's/^ *error: *//p' "$DATA/tmp/specialisation.err" | grep . | tail -n 1 >&2
+    applied_of "$whole" "$SPECIALISATION" > "$1" 2> "$RUN_TMP/specialisation.err" || {
+      sed -n 's/^ *error: *//p' "$RUN_TMP/specialisation.err" | grep . | tail -n 1 >&2
       rm -f "$whole" "$1"
       if [ -n "$SPECIALISATION" ]; then fail "there is no specialisation $SPECIALISATION in this build; nothing was changed"
       else fail "the build's profile could not be read (see above); nothing was changed"; fi
@@ -448,9 +503,14 @@ switch_to() {
     update) engine apply "$1" --force $sent ;;
     *) engine apply "$1" $sent ;;
   esac
-  case $? in
+  applied=$? partly=
+  case $applied in
     0) ;;
     2) rm -f "$1" "$whole"; fail "a check failed (see above); nothing was changed" ;;
+    # All of it applied, but a setting, a service or an activation script failed: the build is the phone's all the
+    # same (its services start at boot, its generation is kept), as NixOS's switch makes a system with units that
+    # failed its own, and the run ends failed.
+    3) partly=1 ;;
     *) rm -f "$1" "$whole"; fail "stopped partway (see above); build again to carry on" ;;
   esac
   # What the engine changed (or would change), in one line, for the run's end (see Apply.kt).
@@ -464,10 +524,14 @@ switch_to() {
   log "== Activating"
   mv -f "$1" "$PROFILE"
   if [ "$whole" != "$1" ]; then mv -f "$whole" "$SYSTEM"; else cp "$PROFILE" "$SYSTEM"; fi
+  # (Not older than profile.json, which says it goes with it: see system_current.)
+  touch "$SYSTEM"
   if [ -n "$SPECIALISATION" ]; then printf '%s\n' "$SPECIALISATION" > "$SPECIALISATION_IN_USE"; else rm -f "$SPECIALISATION_IN_USE"; fi
   keep_packages
-  sh "$MODDIR/apply.sh" "$BY" || exit 1
+  # (Its profile is in place now: a failure here is the build's too, after its generation.)
+  sh "$MODDIR/apply.sh" "$BY" || partly=1
   new_generation
+  [ -z "$partly" ] || fail "applied, but some of it failed (see above); it is the phone's build now, and building again tries again"
   run_end ok "$GENERATION_TOLD" "${summary:-Nothing changed}"
   # The app schedules its update check, now that the config may have changed.
   tell_app schedule &

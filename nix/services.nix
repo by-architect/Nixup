@@ -164,8 +164,9 @@ in
       example = 40000;
       description = ''
         The UDP port of a peer relay (other devices of the tailnet reach each other through this one),
-        as on NixOS: a port turns it on (with `tailscale set` at each build), "" turns it off, null
-        leaves it unmanaged (a port set before may stay: "" first, to be sure it is off).
+        Nixup's own (NixOS has it in extraSetFlags, as "--relay-server-port=40000"): a port turns it on
+        (with `tailscale set` at each build), "" turns it off, null leaves it unmanaged (a port set
+        before may stay: "" first, to be sure it is off).
       '';
     };
   };

@@ -6,6 +6,46 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- A new phone builds again: today's nixos-unstable dropped a NixOS module Nixup imported (`security/dhparams.nix`),
+  which stopped every first build; Nixup now takes only the modules the nixpkgs has, and evaluates a
+  configuration.nix with that nixpkgs' own lib (Home Manager no longer warns of a mismatch).
+- Safer by default: Nixup's folders and its `/etc` were writable by every user of its view (Magisk starts modules
+  with umask 0), so a service's user or a build user could change what root runs; they are root's alone now, and
+  an older install's are put right at the next start.
+- On Samsung phones (One UI): density and navigation go back to the phone's own when they leave the config (its
+  screen resolution's density, its own navigation); settings One UI resets at each start are put back at each
+  start; Quick Settings tiles it refuses are told, not shown as done; a Samsung preload that cannot be brought back
+  is told as such.
+- A build in which a service, a setting or an activation script failed is still the phone's build (its services
+  start at boot, its generation is kept), as NixOS's switch does, and ends failed with what did not work. A profile
+  in a format the module does not know (sent by a PC with a newer Nixup) is refused before anything changes.
+- The app's New and Pick file work in Downloads; an install that waits on Google Play Protect's question says so,
+  and `android.settings.developer.verifyAdbApps = false` is set before the installs.
+- Builds, backups and updates keep the phone awake while they run (a timer's at night no longer stops when the
+  phone sleeps), and two of them at once no longer mix their files; a broken-off build is picked up after a restart
+  as before, and Free up space waits for a running build.
+- Removing Nixup waits for the phone's unlock and tries again at the next start when something did not go back.
+  Installing it again with the same config works at once: the apps the removal took off (their data kept) no longer
+  stop the first build with "this system has no such switch"; their settings wait until the build installs them.
+- Restoring an app's backup no longer follows the links in its data: restoring Termux could empty the whole shared
+  storage (its `storage/shared` link). Nixup never follows a link when it empties a folder (a user's in `/run`
+  either), nor when it gives a user's folders their owner and mode.
+- `unitConfig`'s `After`, `Wants`, `Requires` and the other order keys work as on NixOS, `ConditionUser` is
+  decided when the config is built, and sockets, timers, paths and targets take `restartTriggers` and NixOS's other
+  unit options; `users.groups` has NixOS's `wheel`, `users`, `disk`, `tty` and `dialout`.
+- A path unit can watch a path under a specifier, as systemd's: `PathChanged = "%h/inbox"` in a Home Manager or
+  `systemd.user` unit is in its user's home (`%t`, `%S`, `%C`, `%L`, `%E` too).
+- A config whose profile is past 128 KiB (a few specialisations, or Home Manager users with many units) builds on
+  the phone: it stopped with "Argument list too long".
+- A service's `ExecStop` that hangs is ended after `TimeoutStopSec`, as systemd ends it, with what it started.
+- Removing a user together with its Home Manager config is told plainly (its home is left as it is, as NixOS
+  leaves it), not as a failure.
+- Users that only Nixup knows (a `uid` of their own) log in without "bad uid" and get their `XDG_RUNTIME_DIR`.
+- A user's own shell package (`users.users.<name>.shell = pkgs.xonsh`) is fetched: sshd refused such a user ("shell
+  … does not exist") unless the same package was in `environment.systemPackages`.
+- NixOS's `programs.*` for the shells, as nixpkgs' own modules: `programs.tmux`, `git`, `neovim`, `vim`, `htop`,
+  `direnv`, `starship`, `zoxide`, `fzf`, `bat`, `nix-index`, `yazi`, `ssh`, `mosh`, `nushell` and others, with
+  `environment.corePackages` and `environment.defaultPackages`; nano and command-not-found stay off on a phone.
 - NixOS's `networking.hostFiles`, `networking.stevenblack` (nixpkgs' own module: StevenBlack's ad and tracker
   blocklist, with `block` and `whitelist`) and `networking.proxy` (`default`, `httpProxy`, `httpsProxy`,
   `ftpProxy`, `rsyncProxy`, `allProxy`, `noProxy`): the files' lines go into the `/etc/hosts` of Nixup's

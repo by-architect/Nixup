@@ -14,7 +14,13 @@ BY=resume
 ls "$PENDING" 2> /dev/null | grep -q . || exit 0
 # One at a time: a boot's and the job's could meet.
 lock=$DATA/tmp/resume.lock
-mkdir "$lock" 2> /dev/null || { [ -d "/proc/$(cat "$lock/pid" 2> /dev/null)" ] && exit 0; rm -rf "$lock"; mkdir "$lock"; }
+if ! mkdir "$lock" 2> /dev/null; then
+  # (A lock a restart left behind names a number that another process may have now.)
+  pid=$(cat "$lock/pid" 2> /dev/null)
+  [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2> /dev/null | grep -q 'resume\.sh' && exit 0
+  rm -rf "$lock"
+  mkdir "$lock"
+fi
 echo $$ > "$lock/pid"
 trap 'rm -rf "$lock"' EXIT
 
@@ -66,6 +72,8 @@ for name in build update backup-restore backup-now backup-auto; do
         waited=$((waited + 30))
       done ;;
   esac
+  # A run of its own started while it waited (a timer's, the app's): that one goes on, and this record is its now.
+  if running_of "$name" > /dev/null || [ "$(sed -n 1p "$file" 2> /dev/null)" != "$started" ]; then continue; fi
   # Its run writes it again, with this try counted, until it ends.
   rm -f "$file" "$file.pid" "$file.by"
   event "$kind" info "Picking up $what a restart broke off" "Started $(date -d "@$started" '+%F %H:%M' 2> /dev/null); try $((tries + 1))"

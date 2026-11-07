@@ -42,8 +42,9 @@ let
     mv -f /etc/ssh/authorized_keys.d/.${name}.new /etc/ssh/authorized_keys.d/${name}
   '';
 
+  # An IPv6 address with a port in brackets, as sshd reads it: "::" or, as NixOS's configs write it, "[::]".
   listen = { addr, port, ... }:
-    let host = if port != null && lib.hasInfix ":" addr then "[${addr}]" else addr;
+    let host = if port != null && lib.hasInfix ":" addr && !lib.hasPrefix "[" addr then "[${addr}]" else addr;
     in "ListenAddress ${host}${lib.optionalString (port != null) ":${toString port}"}\n";
 
   sshdConfig = ''

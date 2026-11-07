@@ -146,8 +146,32 @@ object Device {
         if (installer != null) command += listOf("-i", installer)
         val process = ProcessBuilder(command).redirectErrorStream(true).start()
         apk.inputStream().use { input -> process.outputStream.use { input.copyTo(it) } }
-        val said = process.inputStream.bufferedReader().readText().trim()
+        val said = verifying { process.inputStream.bufferedReader().readText().trim() }
         return if (process.waitFor() == 0 && said.contains("Success")) null else said.ifEmpty { "exit ${process.exitValue()}" }
+    }
+
+    /**
+     * [wait] for pm to install; when that takes long because an app verifier (Google Play Protect) asks on the screen
+     * whether to install the app, the build says so once: Android waits for an answer there, up to an hour.
+     */
+    private fun <T> verifying(wait: () -> T): T {
+        val watch = Thread {
+            try {
+                Thread.sleep(30_000)
+                val focus = run("dumpsys", "window").second.lineSequence().firstOrNull { "mCurrentFocus=" in it }.orEmpty()
+                if ("com.android.vending/" in focus || "com.google.android.gms/" in focus) {
+                    Out.line("  Google Play Protect asks on the screen whether to install it: the install waits for an answer there " +
+                        "(android.settings.developer.verifyAdbApps = false lets Nixup's installs through without asking)")
+                }
+            } catch (e: InterruptedException) {
+                // (It ended first.)
+            }
+        }.apply { isDaemon = true; start() }
+        try {
+            return wait()
+        } finally {
+            watch.interrupt()
+        }
     }
 
     /**
@@ -168,7 +192,7 @@ object Device {
                 return said.ifEmpty { "exit ${process.exitValue()}" }
             }
         }
-        val (status, said) = run("pm", "install-commit", session)
+        val (status, said) = verifying { run("pm", "install-commit", session) }
         return if (status == 0 && said.contains("Success")) null else said.trim()
     }
 
@@ -193,6 +217,7 @@ object Device {
         var enabled = 0
         var suspended = false
         var installed = false
+        var apk = true
         var user = -1
         var section: String? = null
         var sectionIndent = 0
@@ -214,6 +239,7 @@ object Device {
                     runtime[m.groupValues[1]] = Permission(m.groupValues[2] == "true", "USER_SET" in flags, "USER_FIXED" in flags)
                 }
                 else -> when {
+                    text == "pkg=null" -> apk = false
                     text == "requested permissions:" -> { section = "requested"; sectionIndent = indent }
                     text == "runtime permissions:" && user == 0 -> { section = "runtime"; sectionIndent = indent }
                     text.startsWith("User ") -> {
@@ -228,8 +254,9 @@ object Device {
                 }
             }
         }
-        // Uninstalled with its data kept, an app is still listed: not installed for the main user.
-        return if (installed) Dump(requested, runtime, enabled, suspended) else null
+        // Uninstalled with its data kept, an app is still listed: not installed for the main user, or (One UI after a
+        // restart) said to be installed with no APK left (pkg=null).
+        return if (installed && apk) Dump(requested, runtime, enabled, suspended) else null
     }
 
     /** Grants or revokes a runtime permission, with the user-set and user-fixed flags of the state wanted. */
@@ -468,17 +495,36 @@ object Device {
     private val SETTING_LINE = Regex("([A-Za-z0-9_.:-]+)=(.*)")
 
     /** The display density set over the screen's own (wm density), or null when the screen has its own. */
-    fun density(): String? = Regex("""Override density: (\d+)""").find(run("wm", "density").second)?.groupValues?.get(1)
+    /**
+     * The density set over the screen's own: what Android keeps of `wm density` (display_density_forced), else what wm
+     * says is set over it. One UI keeps its screen resolution's own there (450 at FHD+, which wm shows as the screen's),
+     * and that is what a reset must give back, not none.
+     */
+    fun density(): String? = secureSetting("display_density_forced").takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+        ?: Regex("""Override density: (\d+)""").find(run("wm", "density").second)?.groupValues?.get(1)
 
     fun setDensity(dpi: String?): Boolean = run("wm", "density", dpi ?: "reset").first == 0
+
+    /** The screen's own density, as wm says it (Physical density). */
+    fun screenDensity(): String? = Regex("""Physical density: (\d+)""").find(run("wm", "density").second)?.groupValues?.get(1)
 
     /** The navigation modes this phone has (gestural, threebutton, twobutton: overlays of the system), and the one on. */
     fun navigationModes(): Map<String, Boolean> = run("cmd", "overlay", "list", "--user", "0", "android").second.lineSequence()
         .mapNotNull { NAVBAR_LINE.matchEntire(it.trim()) }
         .associate { it.groupValues[2] to (it.groupValues[1] == "x") }
 
-    fun setNavigationMode(mode: String): Boolean =
+    /**
+     * The navigation mode on: its overlay of the system's (gestural, threebutton, twobutton), or "none" when the phone
+     * has them but none is on, as One UI has it (its own navigation); null on a phone without them.
+     */
+    fun navigationMode(): String? = navigationModes().let { modes -> modes.entries.firstOrNull { it.value }?.key ?: if (modes.isEmpty()) null else "none" }
+
+    /** Turns [mode]'s overlay on, and the others off; "none" turns them all off (the phone's own navigation again). */
+    fun setNavigationMode(mode: String): Boolean = if (mode == "none") {
+        navigationModes().filterValues { it }.keys.all { run("cmd", "overlay", "disable", "--user", "0", "com.android.internal.systemui.navbar.$it").first == 0 }
+    } else {
         run("cmd", "overlay", "enable-exclusive", "--user", "0", "--category", "com.android.internal.systemui.navbar.$mode").first == 0
+    }
 
     private val NAVBAR_LINE = Regex("""\[(.)] com\.android\.internal\.systemui\.navbar\.(gestural|threebutton|twobutton)""")
 

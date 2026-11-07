@@ -144,13 +144,19 @@ class AppSettings(data: File) {
 
     private fun giveBack(app: String, key: String): Int {
         val original = journal.optJSONObject(app)?.optString(key) ?: return 0
+        // An app no longer there has nothing to give back.
+        if (Device.versionCode(app) == null) {
+            forgetKey(app, key)
+            return 0
+        }
         write(app, key, original)
         val after = settled(app, key) { it == original || (key.startsWith("op:") && sameOp(it, original)) }
-        forgetKey(app, key)
         if (after == original || (key.startsWith("op:") && sameOp(after, original))) {
+            forgetKey(app, key)
             Out.line("✔ $app: ${describe(key)} back as before")
             return 0
         }
+        // (Kept: the next build, or the removal's next try at a start, tries again.)
         Out.line("✘ $app: ${describe(key)} could not go back to $original (it reads $after)")
         return 1
     }
@@ -276,7 +282,12 @@ class AppSettings(data: File) {
         }
         settings.optString("language").takeIf { it.isNotEmpty() }?.let { language ->
             val tags = if (language == "system") "" else language
-            wants += Want("language", "language ${language}", tags) { it.equals(tags, ignoreCase = true) }
+            // (An app's own language is Android 13's: cmd locale.)
+            if (Device.sdk < 33) {
+                warnings += "$app: an app's own language needs Android 13 or newer (this phone has API ${Device.sdk}): language is left out"
+            } else {
+                wants += Want("language", "language ${language}", tags) { it.equals(tags, ignoreCase = true) }
+            }
         }
         settings.optJSONArray("defaultFor")?.let { roles ->
             for (i in 0 until roles.length()) {

@@ -36,7 +36,9 @@ class Debloat(data: File) {
             val app = Device.preinstalled(id)
             when {
                 app == null -> warnings += "android.apps.\"$id\".debloat: this phone has no $id, so it is passed over"
-                !app.system -> warnings += "android.apps.\"$id\".debloat: $id did not come with the phone, so it is left (uninstall it by hand to have it gone)"
+                // (Some phones come with apps that are not the system's, which Android cannot bring back once removed:
+                // One UI's own in /data/app.)
+                !app.system -> warnings += "android.apps.\"$id\".debloat: $id is not one of the system's apps (Android could not bring it back), so it is left (uninstall it by hand to have it gone)"
                 !app.installed -> removed += id
                 else -> {
                     val refused = when {

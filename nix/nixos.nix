@@ -99,7 +99,7 @@ let
   };
 
   # What NixOS's modules take for granted: NixOS's fixed uids and gids (ids), the modules' maintainers and docs
-  # (meta), and the `utils` argument.
+  # (meta), the `utils` argument, and security.dhparams (gone from nixos-unstable since 2026-11, with what used it).
   support = [ "misc/ids.nix" "misc/meta.nix" "misc/extra-arguments.nix" "security/dhparams.nix" ];
 
   placeholder = prefix: name: mkOption {
@@ -111,8 +111,10 @@ let
   set = option: option.highestPrio < (lib.mkOptionDefault null).priority;
 in
 {
-  imports = lib.optionals (source != null)
-    (map (file: source + "/nixos/modules/${file}") (support ++ lib.attrValues services ++ lib.attrValues networking));
+  # The ones this nixpkgs has: a module it dropped leaves its options out (a config setting one is told they do not
+  # exist), instead of stopping every build.
+  imports = lib.optionals (source != null) (lib.filter builtins.pathExists
+    (map (file: source + "/nixos/modules/${file}") (support ++ lib.attrValues services ++ lib.attrValues networking)));
 
   options = lib.optionalAttrs (source == null) {
     services = lib.mapAttrs (name: _: placeholder "services" name) services;

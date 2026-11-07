@@ -44,17 +44,23 @@
 # fetched. Nixup keeps no config folder of its own.
 MODDIR=${0%/*}
 # The specialisation asked for (--specialisation <name>, --no-specialisation), wherever it is among the arguments; the
-# others, plain words, stay in their order.
-SPECIALISATION= SPECIALISATION_GIVEN= SPECIALISATION_ARGS= rest=
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --specialisation) SPECIALISATION=$2 SPECIALISATION_GIVEN=1; shift; [ $# -gt 0 ] && shift ;;
-    --specialisation=*) SPECIALISATION=${1#*=} SPECIALISATION_GIVEN=1; shift ;;
-    --no-specialisation) SPECIALISATION= SPECIALISATION_GIVEN=1; shift ;;
-    *) rest="$rest $1"; shift ;;
+# others stay in their order, each one whole (a --source= path may have spaces in it): taken from the front, put back
+# at the end.
+SPECIALISATION= SPECIALISATION_GIVEN= SPECIALISATION_ARGS=
+left=$#
+while [ "$left" -gt 0 ]; do
+  arg=$1
+  shift
+  left=$((left - 1))
+  case "$arg" in
+    --specialisation)
+      SPECIALISATION= SPECIALISATION_GIVEN=1
+      if [ "$left" -gt 0 ]; then SPECIALISATION=$1; shift; left=$((left - 1)); fi ;;
+    --specialisation=*) SPECIALISATION=${arg#*=} SPECIALISATION_GIVEN=1 ;;
+    --no-specialisation) SPECIALISATION= SPECIALISATION_GIVEN=1 ;;
+    *) set -- "$@" "$arg" ;;
   esac
 done
-set -- $rest
 BY=${1:-manual}
 MODE=${2:-switch}
 . "$MODDIR/common.sh"
@@ -82,7 +88,7 @@ case "$MODE" in
     export NIXUP_SOURCE NIXUP_CHANNEL
     # An automatic upgrade (system.autoUpgrade) keeps the specialisation in use, as again does: a phone put in
     # another mode by hand stays in it. A run picked up after a restart has it among its arguments already.
-    if [ -n "$OPTIONS" ] && [ "$BY" = timer ] && [ -z "$SPECIALISATION_GIVEN" ] && [ -s "$SPECIALISATION_IN_USE" ]; then
+    if [ -n "$OPTIONS" ] && [ "$BY" = timer ] && [ -z "$SPECIALISATION_GIVEN" ] && [ -s "$SPECIALISATION_IN_USE" ] && system_current; then
       SPECIALISATION=$(head -n 1 "$SPECIALISATION_IN_USE") SPECIALISATION_GIVEN=1
       SPECIALISATION_ARGS="--specialisation $SPECIALISATION"
     fi ;;
@@ -110,7 +116,8 @@ NEW=$PROFILE.new-$$
 at_exit 'rm -f "$NEW"'
 # A restart (or a kill) in the middle: it starts again after (see resume.sh).
 case "$MODE" in
-  switch | update) resumable build build.sh "$MODE" $OPTIONS $SPECIALISATION_ARGS ;;
+  # (Its options as they were given, "$@", each one whole: a --source= path may have spaces in it.)
+  switch | update) resumable build build.sh "$MODE" "$@" $SPECIALISATION_ARGS ;;
   again) resumable build build.sh "$MODE" $SPECIALISATION_ARGS ;;
   generation) resumable build build.sh generation "$3" ${4:+"$4"} $SPECIALISATION_ARGS ;;
 esac
@@ -121,8 +128,12 @@ case "$MODE" in
     [ -f "$PROFILE" ] || fail "there is no build to apply again"
     log "== The last build again"
     # The whole of it (with its specialisations), and the specialisation in use unless another is asked for.
-    if [ -f "$SYSTEM" ]; then cp "$SYSTEM" "$NEW"; else cp "$PROFILE" "$NEW"; fi
-    [ -n "$SPECIALISATION_GIVEN" ] || SPECIALISATION=$(head -n 1 "$SPECIALISATION_IN_USE" 2> /dev/null)
+    if system_current; then
+      cp "$SYSTEM" "$NEW"
+      [ -n "$SPECIALISATION_GIVEN" ] || SPECIALISATION=$(head -n 1 "$SPECIALISATION_IN_USE" 2> /dev/null)
+    else
+      cp "$PROFILE" "$NEW"
+    fi
     switch_to "$NEW" switch
     exit 0 ;;
   generation)
@@ -135,8 +146,9 @@ case "$MODE" in
     # The new generation says what generation n was built from, and keeps its flake's lock.
     GEN_SOURCE=$(head -n 1 "$g/source" 2> /dev/null)
     GEN_BUILT_ON=$(head -n 1 "$g/built-on" 2> /dev/null)
-    GEN_LOCK=
+    GEN_LOCK= GEN_CONFIG=
     [ -f "$g/flake.lock" ] && GEN_LOCK=$g/flake.lock
+    [ -f "$g/configuration.nix" ] && GEN_CONFIG=$g/configuration.nix
     [ -n "$GEN_SOURCE" ] || GEN_SOURCE="generation $n"
     # The specialisation it had, unless another is asked for.
     [ -n "$SPECIALISATION_GIVEN" ] || SPECIALISATION=$(head -n 1 "$g/specialisation" 2> /dev/null)
@@ -146,6 +158,11 @@ case "$MODE" in
   gc)
     # As nix-collect-garbage: what no root keeps goes (the last build's packages, nixpkgs and git stay).
     [ -d "$DATA/nix/nix/store" ] || { log "Nixup's store is empty: nothing to free"; run_end info "Nothing to free up" "Nixup's store is empty"; exit 0; }
+    # Not while a build runs (a timer's, the app's, a PC's): what it fetched has no root until it applies. A build's
+    # own --gc comes from it, once it is done.
+    if running=$(running_of build) && [ "$running" != "$PPID" ]; then
+      fail "a build is running (process $running): free up space once it is done"
+    fi
     nix_env
     before=$(du -sk "$DATA/nix" 2> /dev/null | cut -f1)
     log "== Freeing up space: the Nix packages the last build does not use"
@@ -339,7 +356,7 @@ if [ -n "$FLAKE" ]; then
   else
     # A fetched flake or a clone: the commit it was built at, and the lock its build used, for the
     # generation.
-    meta=$DATA/tmp/flake-metadata.json GEN_LOCK=$DATA/tmp/flake.lock
+    meta=$RUN_TMP/flake-metadata.json GEN_LOCK=$RUN_TMP/flake.lock
     if nix_flake flake metadata --json $REFRESH "$FLAKE" > "$meta" 2> /dev/null; then
       metadata() { "$MODDIR/bin/nix" --store dummy:// eval --raw --impure --expr "let m = builtins.fromJSON (builtins.readFile $meta); in $1"; }
       revision=$(metadata 'm.revision or m.locked.rev or ""' 2> /dev/null)
@@ -364,29 +381,29 @@ fi
 log "== Repositories"
 [ -z "$FLAKE" ] && [ -d "$DATA/channels/nixpkgs/" ] && NIXPKGS=$(readlink -f "$DATA/channels/nixpkgs")
 [ -z "$FLAKE" ] && [ -d "$DATA/channels/home-manager/" ] && HOME_MANAGER=$(readlink -f "$DATA/channels/home-manager")
-if ! eval_repos > "$DATA/tmp/repos.json" 2> "$DATA/tmp/repos.err"; then
-  if [ -z "$FLAKE" ] && grep -q "file 'home-manager[/']" "$DATA/tmp/repos.err"; then
+if ! eval_repos > "$RUN_TMP/repos.json" 2> "$RUN_TMP/repos.err"; then
+  if [ -z "$FLAKE" ] && grep -q "file 'home-manager[/']" "$RUN_TMP/repos.err"; then
     channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
     home_manager_channel "$MODE" || fail "Home Manager could not be fetched (Nix says why above); nothing was changed"
-    eval_repos > "$DATA/tmp/repos.json" \
+    eval_repos > "$RUN_TMP/repos.json" \
       || fail "the config did not build (Nix says why above); nothing was changed"
-  elif [ -z "$FLAKE" ] && grep -q 'nixup:needs-nixpkgs' "$DATA/tmp/repos.err"; then
+  elif [ -z "$FLAKE" ] && grep -q 'nixup:needs-nixpkgs' "$RUN_TMP/repos.err"; then
     channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
-    eval_repos > "$DATA/tmp/repos.json" \
+    eval_repos > "$RUN_TMP/repos.json" \
       || fail "the config did not build (Nix says why above); nothing was changed"
   else
-    cat "$DATA/tmp/repos.err" >&2
+    cat "$RUN_TMP/repos.err" >&2
     fail "the config did not build (Nix says why above); nothing was changed"
   fi
 else
-  cat "$DATA/tmp/repos.err" >&2
+  cat "$RUN_TMP/repos.err" >&2
 fi
-if [ "$MODE" = update ]; then engine index --force "$DATA/tmp/repos.json"; else engine index "$DATA/tmp/repos.json"; fi \
+if [ "$MODE" = update ]; then engine index --force "$RUN_TMP/repos.json"; else engine index "$RUN_TMP/repos.json"; fi \
   || log "Building with the indexes there are (a repository without one: its apps cannot be named)"
 
 # A configuration.nix alone that uses Nix packages needs the phone's copy of nixpkgs (a
 # flake has its own, as an input); with update, the newest, and Home Manager's with it.
-if [ -z "$FLAKE" ] && grep -q '"needsNixpkgs":true' "$DATA/tmp/repos.json"; then
+if [ -z "$FLAKE" ] && grep -q '"needsNixpkgs":true' "$RUN_TMP/repos.json"; then
   channel "$MODE" || fail "nixpkgs could not be fetched (Nix says why above); nothing was changed"
   if [ -n "$HOME_MANAGER" ] && [ "$MODE" = update ]; then
     home_manager_channel update || fail "Home Manager could not be fetched (Nix says why above); nothing was changed"
@@ -394,16 +411,17 @@ if [ -z "$FLAKE" ] && grep -q '"needsNixpkgs":true' "$DATA/tmp/repos.json"; then
 fi
 
 log "== Evaluating $CONFIG"
-profile=$(eval_profile) \
+# Into its file at once: a profile is past what one argument can hold (128 KiB) with a few specialisations or Home
+# Manager users, and Android's printf is a program of its own.
+eval_profile > "$NEW" \
   || fail "the config did not build (Nix says why above); nothing was changed"
-log "Profile: $profile"
-# printf, not echo: Android's echo turns the profile's \\ and \n into other characters.
-printf '%s\n' "$profile" > "$NEW"
+log_file "Profile: " "$NEW"
 
 # The secret files the config's options name (files from its folder, or text): put apart from the
-# profile, in a folder only root can read, for switch_to to put in place, as when a PC sends them.
+# profile, in a folder only root can read, for switch_to to put in place, as when a PC sends them. This
+# run's own (not incoming, where a PC's build arrives meanwhile).
 if grep -q '"secrets":\["' "$NEW"; then
-  IN=$DATA/incoming
+  IN=$RUN_TMP/in
   rm -rf "$IN" && mkdir -p "$IN" && chmod 700 "$IN"
   at_exit 'rm -rf "$IN"'
   (umask 077; eval_secrets > "$IN/secrets.json") \

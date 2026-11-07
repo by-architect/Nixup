@@ -4,6 +4,8 @@
 # Config picks it, and Nixup makes no folder for it.
 [ "$API" -ge 30 ] || abort "! Needs Android 11 or newer (this phone has API $API)."
 [ "$ARCH" = arm64 ] || abort "! Needs a 64-bit ARM phone (this one is $ARCH): Nix is built for it."
+# What it makes is root's to write (Magisk's own umask is 0; see common.sh).
+umask 022
 
 # Nixup was called Seraph, and Andronix before that. An install of either is taken over,
 # so what it kept goes on: the values to give back (original/), the apps it installed,

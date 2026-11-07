@@ -237,6 +237,26 @@ in
 
     # (environment.variables, sessionVariables and the shells' environment are NixOS's own: nix/shells.nix.)
     environment = {
+      corePackages = mkOption {
+        type = types.listOf types.package;
+        defaultText = lib.literalExpression "with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]";
+        example = [ ];
+        description = ''
+          The packages every Nix shell has, as on NixOS, in /run/current-system/sw with environment.systemPackages (with
+          Nix packages only: without them the phone's shell is Android's). NixOS's are some thirty; the phone's are bash,
+          coreutils, findutils, grep, sed and less (Android's own commands are there too), and what NixOS's modules add
+          (programs.ssh: the ssh client). Unlike NixOS, they do not count as environment.systemPackages.
+        '';
+      };
+      defaultPackages = mkOption {
+        type = types.listOf types.package;
+        default = [ ];
+        example = lib.literalExpression "with pkgs; [ perl rsync strace ]";
+        description = ''
+          More packages every Nix shell has, as on NixOS, with environment.corePackages. NixOS's are perl, rsync and
+          strace; the phone's are none (each would be a download for every phone).
+        '';
+      };
       pathsToLink = taken (types.listOf types.str) [ ] "folders of packages linked into the system's profile";
       extraOutputsToInstall = taken (types.listOf types.str) [ ] "more outputs of the packages to install";
     };
@@ -308,7 +328,7 @@ in
         # a priority of its own, so that the first of two with the same file wins, as ignoreCollisions has it.
         default =
           let
-            packages = config.environment.systemPackages ++ (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
+            packages = config.environment.systemPackages ++ config.environment.corePackages ++ config.environment.defaultPackages;
             outputsOf = package: map (output: package.${output}.outPath or package.outPath) (package.meta.outputsToInstall or [ "out" ]);
           in
           derivation {
@@ -320,7 +340,7 @@ in
             preferLocalBuild = true;
             allowSubstitutes = false;
           };
-        defaultText = lib.literalExpression "environment.systemPackages, with bash, coreutils, findutils, grep, sed and less";
+        defaultText = lib.literalExpression "environment.systemPackages, environment.corePackages and environment.defaultPackages";
         description = "The system's packages in one folder, as on NixOS (made on the phone when something uses it).";
       };
       checks = taken (types.listOf types.package) [ ] "builds that check the system";
@@ -433,6 +453,10 @@ in
   };
 
   config = {
+    # The phone's core packages, as NixOS sets its own: a definition, which the modules' own (programs.ssh: the ssh
+    # client) add to (a default they would replace).
+    environment.corePackages = with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ];
+
     # The view's /etc/hosts and /etc/resolv.conf (Etc.kt writes them).
     system.build.network = lib.filterAttrs (_: value: value != null) {
       hosts = if hostsText == "" then null else hostsText;

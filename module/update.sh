@@ -43,7 +43,8 @@ case "$MODE" in
   *) fail "update.sh: no such thing to do: $MODE (check, now, auto)" ;;
 esac
 status=$?
-[ "$MODE" != check ] && [ -f "$PROFILE" ] && new_generation
+# (Not after one that did not run: a build had the apps' lock, and makes its own generation.)
+[ "$MODE" != check ] && [ "$status" = 0 ] && [ -f "$PROFILE" ] && new_generation
 # And Nixup itself; one that cannot be checked now (offline, no release yet) only says so.
 if [ "$MODE" != now ]; then
   log "== Nixup"

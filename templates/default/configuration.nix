@@ -704,11 +704,21 @@
   #     home.stateVersion = "26.05";
   #     programs.git.enable = true;
   #     services.gpg-agent.enable = true;         # runs as niobe's own service (user-niobe-gpg-agent)
+  #     systemd.user.paths.inbox = {              # starts systemd.user.services.inbox when ~/inbox changes
+  #       Path.PathChanged = "%h/inbox";          # %h: niobe's home (systemd's %t, %S, %C, %E work too)
+  #       Install.WantedBy = [ "paths.target" ];
+  #     };
   #   };
 
   environment.etc = { };                          # files in Nixup's /etc, like { "foo/foo.conf".text = "a = 1"; }
   environment.variables = { };                    # variables of every shell session, like { EDITOR = "nano"; }
   environment.shellAliases = { };                 # aliases of every shell, like { ll = "ls -l"; } (with Nix packages, as on NixOS)
+  # Programs, as NixOS's programs.<name> (nixpkgs' own modules, with Nix packages; nix/programs.nix lists them):
+  programs.tmux.enable = false;                   # true: tmux, with /etc/tmux.conf (programs.tmux.extraConfig, ...)
+  programs.git.enable = false;                    # git, with /etc/gitconfig (programs.git.config)
+  programs.direnv.enable = false;                 # direnv's hook in the shells
+  programs.starship.enable = false;               # starship's prompt in the shells
+  # environment.defaultPackages = with pkgs; [ rsync ];   # more packages every Nix shell has (NixOS's: perl rsync strace)
   systemd.tmpfiles.rules = [ ];                   # folders the services need, like [ "d /var/lib/foo 0750 foo foo -" ]
   networking.hosts = { };                         # names in Nixup's /etc/hosts, like { "192.168.1.10" = [ "nas" ]; }
   networking.nameservers = [ ];                   # DNS servers of Nixup's services ([ ]: the network's), like [ "9.9.9.9" ]

@@ -84,9 +84,10 @@ let
       unset __nixup_off
     fi
     if [ -z "''${XDG_RUNTIME_DIR:-}" ]; then
-      __nixup_uid=$(/system/bin/id -u)
+      # (The uid as the kernel has it: Android's id stops at a user only Nixup's /etc/passwd has.)
+      while read -r __nixup_key __nixup_uid __nixup_rest; do [ "$__nixup_key" = Uid: ] && break; done < /proc/self/status
       [ -d "/run/user/$__nixup_uid" ] && export XDG_RUNTIME_DIR="/run/user/$__nixup_uid"
-      unset __nixup_uid
+      unset __nixup_key __nixup_uid __nixup_rest
     fi
     if [ -z "''${NIXUP_HOSTNAME:-}" ] && [ -r /etc/nixup/hostname ]; then
       read -r NIXUP_HOSTNAME < /etc/nixup/hostname && export NIXUP_HOSTNAME
@@ -124,8 +125,9 @@ let
   '';
 in
 {
-  imports = lib.optionals (source != null)
-    (map (file: source + "/nixos/modules/${file}") (environmentModules ++ lib.concatLists (lib.attrValues shells)));
+  # (The ones this nixpkgs has, as nix/nixos.nix takes them: one it dropped leaves its options out.)
+  imports = lib.optionals (source != null) (lib.filter builtins.pathExists
+    (map (file: source + "/nixos/modules/${file}") (environmentModules ++ lib.concatLists (lib.attrValues shells))));
 
   options = lib.optionalAttrs (source == null) {
     programs = lib.mapAttrs (name: _: placeholder "programs.${name}") shells;

@@ -570,7 +570,8 @@ in
         # nix-env's own folder, made the first time a user logs in, as nix-env makes it (its channels), with the
         # config's nixpkgs in it (<nixpkgs>): nix-env -iA nixpkgs.htop works as with a channel of that name.
         if [ ! -e "${defexpr}" ] && mkdir -p "${defexpr}" 2> /dev/null; then
-          if [ "$(/system/bin/id -u)" = 0 ]; then
+          # (root by the kernel's uid: Android's id stops at a user only Nixup's /etc/passwd has.)
+          if grep -q '^Uid:[[:space:]]*0[[:space:]]' /proc/self/status; then
             ln -s /nix/var/nix/profiles/per-user/root/channels "${defexpr}/channels"
           else
             ln -s "''${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/channels" "${defexpr}/channels"

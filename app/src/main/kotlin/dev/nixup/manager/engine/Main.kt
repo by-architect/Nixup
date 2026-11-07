@@ -94,6 +94,9 @@ object Main {
 
     @JvmStatic
     fun main(args: Array<String>) {
+        // What the engine and the units it starts make is root's (or the unit's user's) to write, as with systemd's
+        // default UMask, 0022: Magisk starts the module's scripts with umask 0, which they would keep.
+        android.system.Os.umask("022".toInt(8))
         val status = try {
             moveOldFiles()
             val files = args.drop(1).filter { !it.startsWith("--") }
@@ -121,6 +124,8 @@ object Main {
                     // adb listens on no port after a restart: the profile's again, before the units start.
                     val android = runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull()
                     runCatching { Adb(data).boot(android?.optJSONObject("adb")) }.onFailure { Out.line("✘ adb: ${it.message}") }
+                    // The system settings a ROM put back at its start (the profile's again), before the units start.
+                    runCatching { SystemSettings(data).boot(android?.optJSONObject("system")) }.onFailure { Out.line("✘ System settings: ${it.message}") }
                     // A module installed since the last start is where Magisk moved it now.
                     runCatching { Etc.writeNixCommands(File(data, "etc"), android?.optJSONObject("nix")) }
                     Units(data).start()

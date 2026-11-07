@@ -30,10 +30,11 @@ object Etc {
      */
     fun write(data: File, android: JSONObject? = null): File {
         val etc = File(data, "etc")
+        closeModes(data, etc)
         val certs = File(etc, "ssl/certs").apply { mkdirs() }
         val pems = listOf("/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts")
             .flatMap { File(it).listFiles().orEmpty().sortedBy { file -> file.name } }
-        File(certs, "ca-certificates.crt").writeText(pems.joinToString("") { runCatching { it.readText() }.getOrDefault("").let { text -> if (text.endsWith("\n")) text else "$text\n" } })
+        writeWhole(File(certs, "ca-certificates.crt"), pems.joinToString("") { runCatching { it.readText() }.getOrDefault("").let { text -> if (text.endsWith("\n")) text else "$text\n" } })
         val home = File(data, "home").apply { mkdirs() }
         val profile = android ?: current(data)
         // The view's users and groups (users.users, users.groups), or root and sshd's alone; an app's user with that
@@ -42,8 +43,8 @@ object Etc {
         val uids = Ids(data, users?.string("passwd").orEmpty(), users?.string("group").orEmpty())
         val passwd = users?.string("passwd")?.let { uids.fill(it) }
             ?: "root:x:0:0:root:${home.path}:/etc/nixup/login\nsshd:x:74:74:sshd privilege separation:/var/empty:/system/bin/false\n"
-        File(etc, "passwd").writeText(passwd)
-        File(etc, "group").writeText(users?.string("group")?.let { uids.fill(it) } ?: "root:x:0:\nsshd:x:74:\n")
+        writeWhole(File(etc, "passwd"), passwd)
+        writeWhole(File(etc, "group"), users?.string("group")?.let { uids.fill(it) } ?: "root:x:0:\nsshd:x:74:\n")
         uids.keep()
         writeRuntimeDirs(data, passwd)
         // The home of service users and NixOS's empty folder.
@@ -64,7 +65,8 @@ object Etc {
                     runCatching { Os.chmod(dir.path, (each.string("mode") ?: "700").toInt(8)) }
                 } else if (path.startsWith("/home/") && runCatching { Os.stat(dir.path).st_uid }.getOrNull() != uid) {
                     // A home of Nixup's whose app was installed again, with another uid: what is in it becomes the new one's.
-                    dir.walkTopDown().forEach { runCatching { Os.lchown(it.path, uid, gid) } }
+                    // (Not into a folder a link names: the user may have one to anywhere.)
+                    dir.walkTopDown().onEnter { it == dir || !Files.isSymbolicLink(it.toPath()) }.forEach { runCatching { Os.lchown(it.path, uid, gid) } }
                 }
             }
         }
@@ -85,7 +87,7 @@ object Etc {
         if (proxyVars == null || proxyVars.length() == 0) proxy.delete()
         else {
             proxy.parentFile?.mkdirs()
-            proxy.writeText(proxyVars.keys().asSequence().filter { it.matches(Regex("[a-z_]+")) }
+            writeWhole(proxy, proxyVars.keys().asSequence().filter { it.matches(Regex("[a-z_]+")) }
                 .joinToString("") { "export $it=${quote(proxyVars.getString(it))}\n" })
         }
         // The config's own files (environment.etc), and the phone's time zone unless they have one.
@@ -101,10 +103,10 @@ object Etc {
         writeSystem(data, profile?.optJSONObject("shell"))
         // Android's own commands' folders, which NixOS's /etc/set-environment puts on PATH after the Nix ones
         // (nix/shells.nix).
-        File(etc, "nixup/path").writeText(androidPath().joinToString(":") + "\n")
+        writeWhole(File(etc, "nixup/path"), androidPath().joinToString(":") + "\n")
         writeNixCommands(etc, profile?.optJSONObject("nix"))
         // What every session runs first (environment.extraInit).
-        File(etc, "nixup/environment").writeText(profile?.string("extraInit") ?: "")
+        writeWhole(File(etc, "nixup/environment"), profile?.string("extraInit") ?: "")
         writeVersion(etc, profile?.optJSONObject("version"))
         // The app's terminal: its font and colors (terminal.font, terminal.colors), read by the app when it opens.
         val terminal = File(etc, "nixup/terminal.json")
@@ -116,13 +118,13 @@ object Etc {
             ?: Device.run("settings", "get", "global", "device_name").second.trim().takeIf { it.isNotEmpty() && it != "null" } ?: "phone"
         val hostName = name.replace(Regex("[^A-Za-z0-9._-]"), "-")
         // For NixOS's prompt (NIXUP_HOSTNAME, nix/shells.nix), as the kernel's name is Android's own.
-        File(etc, "nixup/hostname").writeText("$hostName\n")
+        writeWhole(File(etc, "nixup/hostname"), "$hostName\n")
         // Nixup's own shells' files, unless environment.etc has them (NixOS's programs.bash and programs.zsh write theirs:
         // nix/shells.nix); bashrc for every interactive bash (nix shell's too).
         val own = profile?.optJSONArray("etc")?.let { entries -> (0 until entries.length()).map { entries.getJSONObject(it).getString("target").trim('/') } }.orEmpty()
-        if ("profile" !in own) File(etc, "profile").writeText(PROFILE)
-        if ("zshenv" !in own) File(etc, "zshenv").writeText(ZSHENV)
-        if ("bashrc" !in own) File(etc, "bashrc").writeText(BASHRC.replace("@NAME@", hostName))
+        if ("profile" !in own) writeWhole(File(etc, "profile"), PROFILE)
+        if ("zshenv" !in own) writeWhole(File(etc, "zshenv"), ZSHENV)
+        if ("bashrc" !in own) writeWhole(File(etc, "bashrc"), BASHRC.replace("@NAME@", hostName))
         return etc
     }
 
@@ -213,13 +215,35 @@ object Etc {
     }
 
     /**
+     * Nixup's folders and its /etc as a Nixup started by Magisk left them before 2026-11-07 (Magisk runs the module's
+     * scripts with umask 0): writable by every user of the view, who could then change what root reads and runs
+     * (/etc/passwd, /etc/nixup/login). Root's own ones lose that; a shared folder (sticky, like a tmp) keeps it, and
+     * environment.etc's files get their own mode again after this.
+     */
+    private fun closeModes(data: File, etc: File) {
+        val others = "022".toInt(8)
+        fun close(file: File) = runCatching {
+            val stat = Os.lstat(file.path)
+            val mode = stat.st_mode and "7777".toInt(8)
+            if (stat.st_uid != 0 || android.system.OsConstants.S_ISLNK(stat.st_mode) || mode and others == 0) return@runCatching
+            if (android.system.OsConstants.S_ISDIR(stat.st_mode) && mode and "1000".toInt(8) != 0) return@runCatching
+            Os.chmod(file.path, mode and others.inv())
+        }
+        close(data)
+        data.listFiles().orEmpty().forEach { close(it) }
+        etc.walkTopDown().onEnter { !Files.isSymbolicLink(it.toPath()) }.forEach { close(it) }
+    }
+
+    /**
      * The config's files in /etc (environment.etc: a profile's "etc"): its text, a link to its source (in Nix's store,
      * as the view has it) or with a mode a copy of it, owned by its user and group. The ones a build before wrote that
      * this profile has not (listed in .nixup-files) go.
      */
     private fun writeFiles(data: File, etc: File, entries: JSONArray?) {
         val list = File(etc, ".nixup-files")
-        val before = runCatching { list.readLines().filter { it.isNotBlank() } }.getOrDefault(emptyList())
+        // (Only names in /etc, as written below: what else is in the list goes nowhere.)
+        val before = runCatching { list.readLines().filter { it.isNotBlank() && !it.startsWith("/") && it.split('/').none { part -> part == ".." || part == "." } } }
+            .getOrDefault(emptyList())
         val now = mutableListOf<String>()
         val accounts by lazy { accounts(data) }
         for (i in 0 until (entries?.length() ?: 0)) {
@@ -639,8 +663,11 @@ object Etc {
         # by the engine (Etc.kt).
         # SHELL is the shell itself, as on NixOS: a program that starts one (nix shell, tmux) keeps the PATH it made.
         export SHELL=@SHELL@
-        # root's home; another user's is the one sshd gave it, from /etc/passwd.
-        [ "${'$'}(/system/bin/id -u)" = 0 ] && export HOME=@HOME@
+        # root's home; another user's is the one sshd gave it, from /etc/passwd. (The uid as the kernel has it: Android's
+        # id stops at a user that only Nixup's /etc/passwd has, "bad uid".)
+        while read -r key uid rest; do [ "${'$'}key" = Uid: ] && break; done < /proc/self/status
+        [ "${'$'}uid" = 0 ] && export HOME=@HOME@
+        unset key uid rest
         # What every session starts with (PATH, the time zone, environment.extraInit), anew.
         unset __NIXUP_SET_ENVIRONMENT_DONE __NIXOS_SET_ENVIRONMENT_DONE __ETC_PROFILE_DONE
         . /etc/nixup/set-environment

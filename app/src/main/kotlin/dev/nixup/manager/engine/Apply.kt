@@ -178,7 +178,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
             // The activation scripts run with every build, as on NixOS.
             val scriptsFailed = activation.apply(android, dryRun = false)
             finish(profile, ids, fromReleases)
-            return if (scriptsFailed > 0) 1 else 0
+            return if (scriptsFailed > 0) APPLIED_WITH_FAILURES else 0
         }
         if (!installer.roomFor(steps)) return 2
         if (dryRun) {
@@ -189,10 +189,12 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
 
         // The secrets first: what reads them (a service) may start below.
         if (secrets.apply() != 0) return 1
+        // What the installs go by (an app verifier's checks), before them.
+        var failed = system.applyBeforeInstalls()
         val status = installer.fetchAndInstall(steps)
         if (status != 0) return status
         // Their data before their settings and before anything starts them.
-        var failed = backup?.applyRestore() ?: 0
+        failed += backup?.applyRestore() ?: 0
         failed += settings.apply(appSettings, leaving)
         // An app that came with the phone keeps its data while removed: it gets its settings from before back first.
         for (id in debloat.removing) failed += settings.restoreApp(id)
@@ -203,25 +205,34 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         // The activation scripts (and the undo of those that left), with the users, /etc and tmpfiles' folders in place,
         // before the services start or start again, as on NixOS.
         val scriptsFailed = activation.apply(android, dryRun = false)
-        failed += units.apply(android)
-        for (id in removals) {
+        val unitsFailed = units.apply(android)
+        // (One Android does not remove, a device admin, stays on the list: the next build tries again, and the rest of
+        // this one is the phone's all the same.)
+        val removed = removals.filter { id ->
             if (Device.uninstallKeepingData(id)) {
                 installer.writeOwned(installer.readOwned() - id)
                 Out.line("✔ Removed $id (its data is kept: installing it again brings it back)")
+                true
             } else {
                 Out.line("✘ Could not remove $id")
-                return 1
+                false
             }
         }
-        settings.forgetRemoved(removals)
+        val notRemoved = removals.size - removed.size
+        settings.forgetRemoved(removed)
         finish(profile, ids, fromReleases)
         adb.restartLater()
-        if (failed > 0) {
-            Out.line("$failed settings did not take (see above); building again tries them again.")
-            return 1
+        if (failed > 0 || unitsFailed > 0 || notRemoved > 0) {
+            val what = listOfNotNull(
+                failed.takeIf { it > 0 }?.let { if (it == 1) "1 setting did not take" else "$it settings did not take" },
+                unitsFailed.takeIf { it > 0 }?.let { if (it == 1) "1 service failed" else "$it services failed" },
+                notRemoved.takeIf { it > 0 }?.let { if (it == 1) "1 app could not be removed" else "$it apps could not be removed" },
+            )
+            Out.line("${what.joinToString(" and ")} (see above); building again tries again.")
+            return APPLIED_WITH_FAILURES
         }
         // (The rest is done: an activation script that failed is told above, as NixOS's switch tells it.)
-        return if (scriptsFailed > 0) 1 else 0
+        return if (scriptsFailed > 0) APPLIED_WITH_FAILURES else 0
     }
 
     /** The summary of a build's changes, in $DATA/tmp/summary: "2 apps installed, 1 updated, system settings". */
@@ -278,4 +289,12 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
     }
 
     private fun JSONArray.strings() = (0 until length()).map { getString(it) }
+
+    companion object {
+        /**
+         * The engine's status for a build applied whole, in which a setting, a service or an activation script failed:
+         * it is the phone's build all the same (switch_to in common.sh), as NixOS's switch tells of units that failed.
+         */
+        const val APPLIED_WITH_FAILURES = 3
+    }
 }

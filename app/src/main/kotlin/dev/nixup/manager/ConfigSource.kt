@@ -18,7 +18,7 @@ object ConfigSource {
 
     /**
      * The path of a picked file on the phone's storage or an SD card, as its document says it; null when its
-     * document does not say (see [mediaId]) or it is not on the phone (a cloud drive's).
+     * document does not say (see [pathCommand]) or it is not on the phone (a cloud drive's).
      */
     fun pathOf(uri: Uri): String? {
         val id = documentId(uri) ?: return null
@@ -51,19 +51,28 @@ object ConfigSource {
         }
     }
 
-    /** The file's number in Android's media store, when its document names it so (Downloads, Documents); root asks the store for its path. */
-    fun mediaId(uri: Uri): Long? {
+    /**
+     * The root command that prints the path of a picked file whose document names it by a number, as `_data=<path>`;
+     * null for any other. In Downloads, msf:<n> is the file's number in Android's media store (as in Documents), and
+     * a plain number is a download of Android's download manager: a file made there (New) or downloaded there is one.
+     */
+    fun pathCommand(uri: Uri): String? {
         val id = documentId(uri) ?: return null
-        return when (uri.authority) {
-            DOWNLOADS -> id.removePrefix("msf:").toLongOrNull()
-            MEDIA -> id.substringAfter(':').toLongOrNull()
-            else -> null
+        val media = when (uri.authority) {
+            DOWNLOADS -> if (id.startsWith("msf:")) id.removePrefix("msf:") else null
+            MEDIA -> id.substringAfter(':')
+            else -> return null
         }
+        if (media != null) {
+            val number = media.toLongOrNull() ?: return null
+            return "content query --uri content://media/external/file --projection _data --where '_id=$number'"
+        }
+        val download = id.toLongOrNull() ?: return null
+        return "content query --uri content://downloads/all_downloads/$download --projection _data"
     }
 
-    /** The root command that prints the media store's path for [id], and what it prints, as `_data=<path>`. */
-    fun mediaPathCommand(id: Long) = "content query --uri content://media/external/file --projection _data --where '_id=$id'"
-    fun mediaPathIn(said: String): String? = said.substringAfter("_data=", "").trim().ifEmpty { null }
+    /** The path [pathCommand]'s command printed; null when it found none. */
+    fun pathIn(said: String): String? = said.substringAfter("_data=", "").trim().ifEmpty { null }
 
     /**
      * Whether [source] is one a build can read: a .nix file's full path (spaces are fine, quotes and other shell

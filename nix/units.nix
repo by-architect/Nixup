@@ -163,7 +163,35 @@ let
 
   # unitConfig: the keys the engine does something with, and those it takes and leaves (what orders
   # or binds units the engine does with the options below; the rest is systemd's own).
-  unitSupported = [ "RequiresMountsFor" ] ++ lib.attrNames pathChecks ++ lib.attrNames otherChecks;
+  unitSupported = [ "RequiresMountsFor" "ConditionUser" ] ++ lib.attrNames pathChecks ++ lib.attrNames otherChecks;
+  # The [Unit] keys of a unit's order and needs, which unitConfig may give too (as a unit file has them): the same as
+  # the options of their names, as on NixOS (gnupg's gpg-agent has Requires = [ "sockets.target" ]).
+  orderKeys = {
+    After = "after"; Before = "before"; Wants = "wants"; Requires = "requires"; BindsTo = "bindsTo";
+    Requisite = "requisite"; Upholds = "upholds"; PartOf = "partOf"; Conflicts = "conflicts";
+    OnFailure = "onFailure"; OnSuccess = "onSuccess";
+  };
+  withOrderKeys = unit: unit
+    // lib.mapAttrs' (key: option: lib.nameValuePair option (unit.${option} ++ words unit.unitConfig.${key}))
+      (builtins.intersectAttrs unit.unitConfig orderKeys)
+    // { unitConfig = removeAttrs unit.unitConfig (lib.attrNames orderKeys); };
+  # ConditionUser, known when the config is built, as systemd tests it: the user a unit's service manager runs as (a
+  # user's own unit's, that user; the others', root). A unit whose test fails is left out, as systemd skips it. @system
+  # is root and the users that are not normal users (isNormalUser).
+  managerOf = unit: if unit.userManager then toString (unit.serviceConfig.User or "root") else "root";
+  isSystemAccount = user: user == "root" || !(config.users.users.${user}.isNormalUser or false);
+  userTest = user: value:
+    let
+      negated = lib.hasPrefix "!" value;
+      wanted = lib.removePrefix "!" value;
+      uid = if user == "root" then 0 else config.users.users.${user}.uid or null;
+      holds =
+        if wanted == "@system" then isSystemAccount user
+        else if builtins.match "[0-9]+" wanted != null then uid != null && toString uid == wanted
+        else wanted == user;
+    in
+    if negated then !holds else holds;
+  userHolds = unit: lib.all (userTest (managerOf unit)) (strings (unit.unitConfig.ConditionUser or [ ]));
   unitTaken = [
     "Description" "Documentation" "DefaultDependencies" "StartLimitIntervalSec" "StartLimitBurst"
     "StartLimitAction" "StopWhenUnneeded" "RefuseManualStart" "RefuseManualStop" "AllowIsolate"
@@ -514,7 +542,7 @@ let
         type = types.listOf types.str;
         default = [ ];
         description = "As on NixOS.";
-      }) // {
+      }) // takenUnitOptions // {
       enable = mkOption {
         type = types.bool;
         default = true;
@@ -539,6 +567,19 @@ let
     default = [ ];
     description = "As on NixOS.";
   });
+  # NixOS's options of every unit that a socket, timer, path or target takes and leaves, so a module of nixpkgs that
+  # gives them builds (programs.atop's timers have restartTriggers).
+  takenUnitOptions = listOptions [ "upheldBy" "upholds" "requisite" "onFailure" "onSuccess" "aliases" ] // {
+    restartTriggers = mkOption { type = types.listOf types.unspecified; default = [ ]; description = "As on NixOS (taken)."; };
+    reloadTriggers = mkOption { type = types.listOf types.unspecified; default = [ ]; description = "As on NixOS (taken)."; };
+    startLimitBurst = mkOption { type = types.nullOr types.int; default = null; description = "As on NixOS (taken)."; };
+    startLimitIntervalSec = mkOption { type = types.nullOr types.int; default = null; description = "As on NixOS (taken)."; };
+    overrideStrategy = mkOption {
+      type = types.enum [ "asDropinIfExists" "asDropin" ];
+      default = "asDropinIfExists";
+      description = "As on NixOS (taken).";
+    };
+  };
   # Where the config gives a socket, timer or path unit, when not here (see the units' origin).
   originOption = mkOption {
     type = types.nullOr types.str;
@@ -550,7 +591,7 @@ let
   # A socket: the phone opens it and hands it to its service (see the top).
   socketModule = { ... }: {
     options = listOptions [ "wantedBy" "requiredBy" "after" "before" "wants" "requires" "bindsTo" "partOf"
-      "conflicts" "documentation" ] // {
+      "conflicts" "documentation" ] // takenUnitOptions // {
       enable = mkOption {
         type = types.bool;
         default = true;
@@ -591,7 +632,7 @@ let
   # A timer: it starts its unit at the times it says (see the top).
   timerModule = { ... }: {
     options = listOptions [ "wantedBy" "requiredBy" "after" "before" "wants" "requires" "bindsTo" "partOf"
-      "conflicts" "documentation" ] // {
+      "conflicts" "documentation" ] // takenUnitOptions // {
       enable = mkOption {
         type = types.bool;
         default = true;
@@ -623,7 +664,7 @@ let
   # A path unit: it starts its unit when a path is there, or changes (see the top).
   pathModule = { ... }: {
     options = listOptions [ "wantedBy" "requiredBy" "after" "before" "wants" "requires" "bindsTo" "partOf"
-      "conflicts" "documentation" ] // {
+      "conflicts" "documentation" ] // takenUnitOptions // {
       enable = mkOption {
         type = types.bool;
         default = true;
@@ -675,8 +716,10 @@ let
   # unit (wants, requires, after, ...), a target, a timer's or path's Unit, a socket's Service, or
   # systemd.services."foo@bar" itself. A template's own wantedBy starts no instance, as on NixOS.
   templateOf = name: let parts = builtins.match "([^@]+@)(.+)" name; in if parts == null then null else builtins.head parts;
-  templates = lib.filterAttrs (name: unit: unit.enable && isTemplate name) config.systemd.services;
-  plainUnits = lib.filterAttrs (name: unit: unit.enable && !isTemplate name) config.systemd.services;
+  # (With their unitConfig's order keys as the options; one whose ConditionUser fails is left out.)
+  services = lib.mapAttrs (_: withOrderKeys) config.systemd.services;
+  templates = lib.filterAttrs (name: unit: unit.enable && isTemplate name && userHolds unit) services;
+  plainUnits = lib.filterAttrs (name: unit: unit.enable && !isTemplate name && userHolds unit) services;
   isInstance = name: templateOf name != null && templates ? ${templateOf name};
   named = map (entry: nameOf (toString entry)) (lib.concatLists (lib.mapAttrsToList (_: unit: unit.wants ++ unit.requires
       ++ unit.upholds ++ unit.bindsTo ++ unit.requisite ++ unit.after ++ unit.before ++ unit.wantedBy ++ unit.requiredBy
@@ -1163,8 +1206,6 @@ let
       sc = unit.serviceConfig;
       type = sc.Type or "simple";
       starts = if unit.script != "" then 1 else builtins.length (reset (strings (sc.ExecStart or [ ])));
-      other = lib.filter (key: !lib.elem key supported && !lib.elem key taken) (lib.attrNames sc);
-      otherUnit = lib.filter (key: !lib.elem key unitSupported && !isTakenUnitKey key) (lib.attrNames unit.unitConfig);
       mounts = words (unit.unitConfig.RequiresMountsFor or [ ]);
       badCodes = badExitCodes (sc.SuccessExitStatus or [ ]) ++ badExitCodes (sc.RestartForceExitStatus or [ ])
         ++ badExitCodes (sc.RestartPreventExitStatus or [ ]);
@@ -1173,7 +1214,6 @@ let
       them = list: "${lib.concatStringsSep ", " list} ${if builtins.length list == 1 then "is" else "are"}";
     in
     lib.optional (builtins.match "[A-Za-z0-9_.:@\\\\-]+" name == null) "${unit'}: a unit's name is letters, digits and _ . : @ \\ -."
-    ++ lib.optional (other != [ ]) "${unit'}.serviceConfig: ${them other} not on the phone (nix/units.nix lists the keys it takes)."
     ++ lib.optional (unit.script != "" && reset (strings (sc.ExecStart or [ ])) != [ ]) "${unit'}: give script or serviceConfig.ExecStart, not both."
     ++ lib.optional (!lib.elem type types') "${unit'}.serviceConfig.Type: \"${toString type}\" is not on the phone (${lib.concatStringsSep ", " types'})."
     ++ lib.optional (type != "oneshot" && starts != 1) "${unit'}: a ${toString type} unit has one ExecStart (or script)${lib.optionalString (starts > 1) "; several are a oneshot's"}."
@@ -1181,7 +1221,6 @@ let
     ++ lib.optional (!lib.elem (sc.Restart or "no") restarts) "${unit'}.serviceConfig.Restart: \"${toString (sc.Restart or "")}\" is not on the phone (${lib.concatStringsSep ", " restarts})."
     ++ lib.optional (sc ? KillMode && !lib.elem sc.KillMode killModes) "${unit'}.serviceConfig.KillMode: \"${toString sc.KillMode}\" is not systemd's (${lib.concatStringsSep ", " killModes})."
     ++ lib.optional (sc ? Nice && !(builtins.isInt sc.Nice && sc.Nice >= -20 && sc.Nice <= 19)) "${unit'}.serviceConfig.Nice: a number from -20 to 19."
-    ++ lib.optional (otherUnit != [ ]) "${unit'}.unitConfig: ${them otherUnit} not on the phone yet (nix/units.nix lists the keys it takes)."
     ++ lib.optional (lib.any (path: !lib.hasPrefix "/" path) mounts) "${unit'}.unitConfig.RequiresMountsFor: full paths, like /storage/1234-5678/Music."
     ++ lib.optional (badCodes != [ ]) "${unit'}.serviceConfig: ${lib.concatStringsSep ", " badCodes}: an exit status is a number or a signal (${lib.concatStringsSep ", " (lib.attrNames signals)})."
     ++ lib.optional (relativeBinds != [ ]) "${unit'}.serviceConfig.BindPaths: full paths, like /var/lib/foo:/srv/foo."
@@ -1226,7 +1265,9 @@ let
     in
     lib.optional (!(hasUnit unit)) "${path'}: its unit ${unit} is not in systemd.services."
     ++ lib.optional (lib.all (kind: !(pc ? ${kind})) pathKinds) "${path'}.pathConfig: give it a path (PathExists, PathChanged, ...)."
-    ++ lib.optional (lib.any (entry: !lib.hasPrefix "/" entry.path) (toPath name path).checks) "${path'}.pathConfig: full paths, like /var/lib/foo/inbox."
+    # (Or a path under a folder's specifier, %h/inbox, which the engine fills in as the unit it starts has it.)
+    ++ lib.optional (lib.any (entry: !lib.hasPrefix "/" entry.path && builtins.match "%[htSCLETV](/.*)?" entry.path == null)
+      (toPath name path).checks) "${path'}.pathConfig: full paths, like /var/lib/foo/inbox or %h/inbox."
     ++ lib.optional (other != [ ]) "${path'}.pathConfig: ${lib.concatStringsSep ", " other} not on the phone (nix/units.nix lists the keys it takes)."
   ) pathUnits);
 in
@@ -1384,6 +1425,18 @@ in
       let by = lib.filter (lib.hasSuffix ".target") (unit.wantedBy ++ unit.requiredBy); in
       lib.optional (unit.userManager && by != [ ] && !lib.any (target: lib.elem target reached) by)
         "${if unit.origin != null then unit.origin else "systemd.services.${name}"}: not started, as what starts it (${lib.concatStringsSep ", " by}) is not on the phone (a desktop session's)."
-    ) plainUnits);
+    ) plainUnits)
+    # A key the phone does not know is left out, as systemd leaves out (with a warning) one it does not know: a typo in a
+    # module of nixpkgs (solanum's StateDiectoryMode) leaves it running, not stopping the build.
+    ++ lib.concatLists (lib.mapAttrsToList (name: unit:
+      let
+        unit' = if unit.origin != null then unit.origin else "systemd.services.${name}";
+        them = list: "${lib.concatStringsSep ", " list} ${if builtins.length list == 1 then "is" else "are"}";
+        other = lib.filter (key: !lib.elem key supported && !lib.elem key taken) (lib.attrNames unit.serviceConfig);
+        otherUnit = lib.filter (key: !lib.elem key unitSupported && !isTakenUnitKey key) (lib.attrNames unit.unitConfig);
+      in
+      lib.optional (other != [ ]) "${unit'}.serviceConfig: ${them other} not on the phone, so left out (nix/units.nix lists the keys it takes)."
+      ++ lib.optional (otherUnit != [ ]) "${unit'}.unitConfig: ${them otherUnit} not on the phone yet, so left out (nix/units.nix lists the keys it takes)."
+    ) (units // acceptUnits));
   };
 }

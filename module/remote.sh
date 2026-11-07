@@ -60,7 +60,7 @@ run_open build "Build from ${GEN_BUILT_ON:-a PC}"
 if [ "$MODE" = dry ]; then event build start "Dry run of a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURCE"
 else event build start "Applying a build from ${GEN_BUILT_ON:-a PC}" "$GEN_SOURCE"; fi
 log "== Built on ${GEN_BUILT_ON:-a PC}: $GEN_SOURCE"
-log "Profile: $(cat "$IN/profile.json")"
+log_file "Profile: " "$IN/profile.json"
 SECRETS_IN=$IN/secrets
 # The derivations of the files the config makes, which this phone builds, and the config's
 # nixpkgs when the phone had not got it (common.sh); compressed by a newer nixup-rebuild.

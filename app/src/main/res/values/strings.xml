@@ -67,7 +67,7 @@
     <string name="generations">Generations</string>
     <string name="no_generations">No generations yet: the first build makes the first.</string>
     <string name="generation_item">%1$s  ·  %2$s%3$s\n%4$s</string>
-    <string name="generation_current">  (current)</string>
+    <string name="generation_current">"  (current)"</string>
     <string name="generation_title">Generation %1$s</string>
     <string name="generation_message">Built %1$s, from %2$s.\n\nSwitching to it applies its settings, apps and services again (its apps at their newest versions); it becomes the newest generation. A dry run says first what would change.</string>
     <string name="generation_label">Version: %1$s</string>
@@ -156,7 +156,7 @@
     <string name="restored_suffix">restored %1$s</string>
     <string name="snapshot_item">%1$s  ·  %2$s</string>
     <string name="snapshot_version">version %1$s</string>
-    <string name="snapshot_newer">  ·  newer than the installed one</string>
+    <string name="snapshot_newer">"  ·  newer than the installed one"</string>
     <string name="part_apk">The app (its APK)</string>
     <string name="part_apk_from">The app (its APK, from the backup of %1$s)</string>
     <string name="part_data">Its data</string>
