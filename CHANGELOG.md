@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.2 (2026-11-07)
 
 - `nixup-rebuild` on the phone, as `nixos-rebuild` on NixOS (as root, in adb's shell, the app's terminal or ssh):
   `nixup-rebuild switch` builds the config the app picked, `dry-activate` says what would change, `switch --upgrade`
