@@ -210,6 +210,9 @@ object Main {
         }
         Notify.flush()
         System.out.flush()
+        // That it ran at all, for the script that started it (common.sh's engine): app_process exits 0 also when
+        // Android's runtime could not start, having run nothing.
+        System.getenv("NIXUP_ENGINE_STATUS")?.let { file -> runCatching { File(file).writeText("$status\n") } }
         // The package manager's system context leaves threads behind that would keep the process alive.
         exitProcess(status)
     }

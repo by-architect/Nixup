@@ -680,6 +680,7 @@
       ExecStart = "${pkgs.python3}/bin/python3 -m http.server 8081 --bind 127.0.0.1 --directory /var/lib/notes";
       UMask = "0027";                             # its files' mode
       LimitNOFILE = 4096;                         # its limits (Limit*)
+      PrivateTmp = false;                         # true: a /tmp of its own (the others share one, as on NixOS)
       ProtectSystem = "strict";                   # what only hardens it on NixOS: taken, and nothing done
     };
     unitConfig.ConditionPathExists = "/data/adb/nixup/secrets/notes-token";   # starts only when this is there

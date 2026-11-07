@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
  * The config's services: its systemd.services units (Nixup's own services, and NixOS's service modules, make them; see
  * nix/units.nix), run as systemd runs them on NixOS. Each runs in Nixup's view of the phone ([VIEW]): the phone as it
  * is, with /nix (Nixup's store, where the build fetched the units' packages), Nixup's /etc (see [Etc]), /var and /run
- * (the units' state, in /data/adb/nixup/var and /data/adb/nixup/run) and a /tmp of its own; as root, or as its user
+ * (the units' state, in /data/adb/nixup/var and /data/adb/nixup/run) and /tmp (one for all, its own with PrivateTmp); as root, or as its user
  * (serviceConfig.User, DynamicUser), through setpriv, with its folders its own ([prepareDirectories]). A simple unit
  * runs under a shell loop ([SUPERVISOR]) that starts it again as its Restart says; a oneshot runs to its end, and what
  * it says is shown. Like the settings, they are planned and checked first ([plan]) and changed after ([apply]): the
@@ -681,6 +681,8 @@ class Units(private val data: File) {
             // "notify": that is the app's notify.sh, above, which the loop tells the app with.)
             "notifylog" to if (unit.optBoolean("notify")) File(runDir, "nixup-notify/${notifyName(unitDir.name)}.log").path else "",
             "watchdog" to if (unit.optBoolean("notify")) unit.string("watchdog")?.let { seconds(it).toDouble().toInt().coerceAtLeast(1).toString() }.orEmpty() else "",
+            // PrivateTmp: a /tmp of its own in its view (VIEW), not everyone's.
+            "privatetmp" to if (unit.optBoolean("privateTmp")) "1" else "",
         )
         return "# The loop's settings for this unit (written by the engine; see Units.kt).\n" +
             values.entries.joinToString("") { (key, value) -> "$key=${quote(value)}\n" }
@@ -749,7 +751,8 @@ class Units(private val data: File) {
         val group = File(script.parentFile, ".run.pid").apply { delete() }
         val process = ProcessBuilder(busybox(), "setsid", "/system/bin/sh", "-c", "echo \$\$ > \"\$0\"; exec \"\$@\"", group.path,
             busybox(), "sh", background.path, busybox(), nice(unit), busybox(), "sh", view.path, script.path)
-            .directory(script.parentFile).redirectErrorStream(true).redirectInput(File("/dev/null")).apply { unitEnvironment(environment()) }.start()
+            .directory(script.parentFile).redirectErrorStream(true).redirectInput(File("/dev/null"))
+            .apply { unitEnvironment(environment()); environment()["NIXUP_PRIVATE_TMP"] = if (unit.optBoolean("privateTmp")) "1" else "" }.start()
         val reader = Thread {
             runCatching {
                 log.appendText("${Out.date(System.currentTimeMillis())} $name\n")
@@ -1661,7 +1664,8 @@ class Units(private val data: File) {
         /**
          * Runs a unit's script ($1) as root in Nixup's view of the phone: a root of its own, in a mount namespace of
          * its own, with Android's own folders as they are, /nix (Nixup's store), Nixup's /etc, /var and /run (the
-         * units' state, which stays), /home (the normal users' homes, Nixup's users folder) and a /tmp of its own;
+         * units' state, which stays), /home (the normal users' homes, Nixup's users folder) and /tmp (one for all, as
+         * on NixOS: Nixup's run/tmp; its own with PrivateTmp, NIXUP_PRIVATE_TMP);
          * Android's time zone is Nixup's /etc/localtime (see Etc), else TZ, its offset from UTC ("<+0300>-03:00").
          * /proc/sys/kernel/modprobe and poweroff_cmd are empty there: Nix's garbage collector reads them with a read
          * Android's 4.x kernels may refuse ("Out of memory"), which stops it.
@@ -1690,8 +1694,13 @@ class Units(private val data: File) {
                 mkdir -p "${'$'}v/${'$'}{d%%:*}" "${'$'}{d#*:}"
                 "${'$'}b" mount --bind "${'$'}{d#*:}" "${'$'}v/${'$'}{d%%:*}"
               done
+              # /tmp: one for every unit and every session, as NixOS has it (a tmux server of a user and its sessions):
+              # run/tmp in the data folder, emptied at each start with /run. A unit with PrivateTmp gets one of its own.
+              # (No apostrophe in these lines: this is all one quoted argument of sh -c.)
               mkdir -p "${'$'}v/tmp"
-              "${'$'}b" mount -t tmpfs -o mode=1777 tmp "${'$'}v/tmp"
+              if [ -n "${'$'}NIXUP_PRIVATE_TMP" ]; then "${'$'}b" mount -t tmpfs -o mode=1777 tmp "${'$'}v/tmp"
+              else mkdir -p "${'$'}data/run/tmp" && chmod 1777 "${'$'}data/run/tmp" && "${'$'}b" mount --bind "${'$'}data/run/tmp" "${'$'}v/tmp"
+              fi
               # Kernel files the garbage collector of Nix reads (for store paths in them), of which an Android kernel
               # may refuse a big read (Out of memory), which stops it: empty ones here, as containers have them.
               for k in modprobe fbsplash poweroff_cmd; do
@@ -1745,6 +1754,7 @@ class Units(private val data: File) {
         private val SUPERVISOR = """
             b=${'$'}1 view=${'$'}2 log=${'$'}3 unit=${'$'}4 name=${'$'}5
             . "${'$'}unit/run.conf"
+            export NIXUP_PRIVATE_TMP=${'$'}privatetmp
             echo ${'$'}${'$'} > "${'$'}unit/supervisor.pid"
             child= watcher= main=
             tell() { [ -n "${'$'}notify" ] && "${'$'}b" sh "${'$'}notify" service "${'$'}@" "service:${'$'}name" < /dev/null > /dev/null 2>&1; }

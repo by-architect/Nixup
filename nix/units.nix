@@ -112,7 +112,7 @@ let
     "KillMode" "KillSignal" "SendSIGKILL" "TimeoutStopSec" "TimeoutStartSec" "TimeoutSec"
     "Environment" "EnvironmentFile" "UnsetEnvironment" "WorkingDirectory"
     "User" "Group" "SupplementaryGroups" "DynamicUser" "PermissionsStartOnly"
-    "AmbientCapabilities" "NoNewPrivileges" "UMask" "Nice" "OOMScoreAdjust"
+    "AmbientCapabilities" "NoNewPrivileges" "UMask" "Nice" "OOMScoreAdjust" "PrivateTmp"
     "StateDirectory" "RuntimeDirectory" "CacheDirectory" "LogsDirectory" "ConfigurationDirectory"
     "StateDirectoryMode" "RuntimeDirectoryMode" "CacheDirectoryMode" "LogsDirectoryMode" "ConfigurationDirectoryMode"
     "RuntimeDirectoryPreserve" "BindPaths" "BindReadOnlyPaths"
@@ -123,11 +123,11 @@ let
   limits = [ "CPU" "FSIZE" "DATA" "STACK" "CORE" "RSS" "NOFILE" "AS" "NPROC" "MEMLOCK" "LOCKS" "SIGPENDING" "MSGQUEUE" "NICE" "RTPRIO" "RTTIME" ];
 
   # The serviceConfig keys that only harden a service, limit what it may use or say how systemd
-  # logs and accounts for it: on the phone a unit runs in a view of its own (its mount namespace,
-  # its /tmp), as its own user, and logs into its own log, so these are taken and nothing is done.
+  # logs and accounts for it: on the phone a unit runs in a view of its own (its mount namespace),
+  # as its own user, and logs into its own log, so these are taken and nothing is done.
   taken = [
     # Sandboxing.
-    "CapabilityBoundingSet" "SecureBits" "DevicePolicy" "DeviceAllow" "PrivateDevices" "PrivateTmp"
+    "CapabilityBoundingSet" "SecureBits" "DevicePolicy" "DeviceAllow" "PrivateDevices"
     "PrivateMounts" "PrivateNetwork" "PrivateUsers" "PrivateIPC" "PrivatePIDs" "ProtectSystem" "ProtectHome"
     "ProtectKernelTunables" "ProtectKernelModules" "ProtectKernelLogs" "ProtectControlGroups" "ProtectClock"
     "ProtectHostname" "ProtectProc" "ProcSubset" "RestrictAddressFamilies" "RestrictNamespaces"
@@ -997,6 +997,8 @@ let
        // lib.optionalAttrs rootSteps { rootSteps = true; }
        // lib.optionalAttrs (sc ? AmbientCapabilities) { ambientCapabilities = words sc.AmbientCapabilities; }
        // lib.optionalAttrs (boolean (sc.NoNewPrivileges or false)) { noNewPrivileges = true; })
+    # PrivateTmp, and DynamicUser, which implies it in systemd: a /tmp of its own; every other unit shares one.
+    // lib.optionalAttrs (boolean (sc.PrivateTmp or false) || dynamic) { privateTmp = true; }
     // lib.optionalAttrs (sc ? UMask) { umask = toString sc.UMask; }
     // lib.optionalAttrs (sc ? OOMScoreAdjust) { oomScoreAdjust = sc.OOMScoreAdjust; }
     // lib.optionalAttrs (limitsSet != [ ]) { limits = lib.genAttrs limitsSet (key: toString sc."Limit${key}"); }

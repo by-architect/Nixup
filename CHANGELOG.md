@@ -18,6 +18,14 @@ section after the version, and its text is what the Magisk app shows as the upda
 - `nixup-version` is the system's version command now; `nixos-version` stays, the same command, for tools written
   for NixOS.
 - A dry run takes another config (`build.sh dry --source=…`): before, it dry-ran the picked config instead.
+- A build from a PC over ssh (`nixup-rebuild --target-host <phone>`, as a Matrix-style flake does) works: from Nixup's
+  sshd the engine got none of Android's runtime variables, ran nothing and still "succeeded", so the build was kept
+  as a generation without its packages, `/etc` or services (the shells then said "set-environment: No such file"),
+  and the store's roots were emptied for the next clean-up to take what the phone used. The scripts now take those
+  variables from Android itself, a build stops when the engine did not run, and the roots stay as they were then.
+  A phone built that way builds again once to put it right.
+- One `/tmp` for every service and every session, as on NixOS: a user's tmux server started by a service is the one
+  their ssh sessions reach. `serviceConfig.PrivateTmp = true` (and `DynamicUser`) gives a service its own.
 
 ## 0.1.1 (2026-11-07)
 

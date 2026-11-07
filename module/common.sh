@@ -22,6 +22,22 @@ unset NIXUP_RESUMED
 # /etc writable by every user of its view (see Etc.closeModes).
 umask 022
 
+# Android's runtime variables (BOOTCLASSPATH, ANDROID_ROOT, ...), which app_process needs to start the engine. A shell
+# outside adb's and Magisk's has none of them (ssh into Nixup's view, su there: nixup-rebuild from a PC over ssh, the
+# app's terminal), and app_process then exits 0 having run nothing: a build went on as if the engine had applied it.
+# They are zygote's, which every Android has.
+android_env() {
+  [ -n "$BOOTCLASSPATH" ] && return 0
+  for pid in $(/system/bin/pidof zygote64 zygote 2> /dev/null); do
+    [ -r "/proc/$pid/environ" ] || continue
+    eval "$(tr '\0' '\n' < "/proc/$pid/environ" | grep -E '^(BOOTCLASSPATH|DEX2OATBOOTCLASSPATH|SYSTEMSERVERCLASSPATH|STANDALONE_SYSTEMSERVER_JARS|ANDROID_[A-Z0-9_]+|EXTERNAL_STORAGE|ASEC_MOUNTPOINT|DOWNLOAD_CACHE)=' \
+      | sed "s/'/'\\\\''/g; s/^\([^=]*\)=\(.*\)$/export \1='\2'/")"
+    break
+  done
+  [ -n "$BOOTCLASSPATH" ]
+}
+android_env
+
 mkdir -p "$DATA/tmp"
 # This script's own temporary files: a run of another at the same time (a backup by its timer, a dry run from the app
 # while a build runs) has its own, so neither reads what the other wrote (the engine's status, a command for Nix). The
@@ -226,9 +242,17 @@ readable_path() {
 # The engine, from the app's APK, run as root; what it says is shown and logged (and goes to the
 # run's log with the rest of what the script says).
 engine() {
-  { CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.nixup.manager.engine.Main "$@" 2>&1
+  android_env || { log "The engine cannot start: Android's runtime variables (BOOTCLASSPATH) are not here, and zygote's could not be read"; return 1; }
+  rm -f "$RUN_TMP/engine.ran"
+  { NIXUP_ENGINE_STATUS=$RUN_TMP/engine.ran CLASSPATH="$MODDIR/app.apk" /system/bin/app_process /system/bin dev.nixup.manager.engine.Main "$@" 2>&1
     echo $? > "$RUN_TMP/engine.status"; } | tee -a "$LOG"
-  return "$(cat "$RUN_TMP/engine.status")"
+  engine_status=$(cat "$RUN_TMP/engine.status")
+  # (The engine says it ran, in engine.ran: app_process exits 0 also when Android's runtime could not start.)
+  if [ "$engine_status" = 0 ] && [ ! -s "$RUN_TMP/engine.ran" ]; then
+    log "The engine did not run: Android's runtime did not start it (app_process; its reason is in logcat)"
+    return 1
+  fi
+  return "$engine_status"
 }
 
 # A new generation, as nixos-rebuild makes one when the system changed: the
@@ -352,8 +376,11 @@ nix_view() {
 # nix.distributedBuilds), which build it over ssh (nixpkgs' openssh, fetched first) and
 # send it back.
 fetch_packages() {
-  paths=$(engine paths "$1" | grep '^/nix/store/') || paths=
-  drvs=$(engine paths "$1" --derivations | grep '^/nix/store/') || drvs=
+  # (The engine's answer first, then its paths: through a pipe, an engine that failed looked like nothing to fetch.)
+  engine paths "$1" > "$RUN_TMP/paths" && engine paths "$1" --derivations > "$RUN_TMP/derivations" \
+    || { grep -hv '^/nix/store/' "$RUN_TMP/paths" "$RUN_TMP/derivations" >&2 2> /dev/null; return 1; }
+  paths=$(grep '^/nix/store/' "$RUN_TMP/paths")
+  drvs=$(grep '^/nix/store/' "$RUN_TMP/derivations")
   [ -n "$paths$drvs" ] || return 0
   log "== Packages"
   nix_env
@@ -445,6 +472,9 @@ keep_packages() {
   # in use).
   needed=$(engine paths "$PROFILE") || return 1
   kept=$(engine paths "$PROFILE" --kept) || return 1
+  # (No paths for a profile that has some: the engine did not say them, and emptying the roots would let a gc take
+  # what the phone uses, its shells' set-environment among it.)
+  [ -n "$needed" ] || grep -q '"storePaths":\[\]' "$PROFILE" || grep -qv '"storePaths"' "$PROFILE" || return 1
   rm -rf "$roots" && mkdir -p "$roots"
   i=0
   for path in $(printf '%s\n' "$needed" | grep '^/nix/store/'); do
