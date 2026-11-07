@@ -91,6 +91,7 @@
           <li><a href="#syncthing">Syncthing</a></li>
           <li><a href="#ssh">SSH</a></li>
           <li><a href="#snapcast">Snapcast</a></li>
+          <li><a href="#davx5">DAVx⁵</a></li>
           <li><a href="#adb">adb</a></li>
           <li><a href="#networking">Networking</a></li>
           <li><a href="#etc">Files in /etc and folders</a></li>
@@ -442,7 +443,7 @@ systemd.services.hello.script = ''
           <li><strong>Plan and check.</strong> The engine plans every app (is it in its repository? signed with the right key? is Google Play signed in?), every setting, secret, service and user, runs your <a href="#scripts"><code>system.preSwitchChecks</code></a>, and checks free space. All problems are listed together. <strong>A dry run ends here</strong>, with the list of what would change.</li>
           <li class="gate"><span>Nothing has changed up to this line</span></li>
           <li class="changes"><strong>Install and update apps.</strong> Each download is checked (size, SHA-256 and signing key) before it is installed.</li>
-          <li class="changes"><strong>Apply settings:</strong> app settings, apps that came with the phone, system settings and adb. Each is read back after it is changed.</li>
+          <li class="changes"><strong>Apply settings:</strong> app settings, apps that came with the phone, system settings and adb. Each is read back after it is changed. Then <a href="#davx5">DAVx⁵'s accounts</a>: new ones added, passwords given.</li>
           <li class="changes"><strong>Prepare Nixup's view:</strong> users, <code>/etc</code>, hosts, DNS, folders (<code>systemd.tmpfiles</code>).</li>
           <li class="changes"><strong>Run activation scripts, then services:</strong> what left the config or changed is stopped, the rest started in order, then timers and path units.</li>
           <li class="changes"><strong>Remove apps</strong> that left the config. Their data is kept.</li>
@@ -557,6 +558,7 @@ android.settings.display.fontScale = 1.3;
           <li><strong>Apps that came with the phone</strong> and were removed with <code>debloat</code> come back when the line goes.</li>
           <li><strong>Scripts</strong> can carry an <code>undo</code>, run once when the script leaves the config (see <a href="#scripts">Activation scripts</a>).</li>
           <li><strong>Services</strong> that leave the config are stopped and their files removed (their data in <code>/var/lib</code> stays).</li>
+          <li><strong>DAVx⁵ accounts</strong> stay in DAVx⁵ when they leave the config (they hold the phone's copy of your calendars and contacts); DAVx⁵'s setting of what it selects for syncing goes back as it was.</li>
           <li><strong>Removing Nixup</strong> undoes all of it at once (see <a href="#uninstall">Uninstall</a>).</li>
         </ul>
         <p>
@@ -1900,6 +1902,40 @@ sftp root@phone                 # file transfers work too (file managers, sshfs)
         </ul>
       </section>
 
+      <section id="davx5">
+        <h2>DAVx⁵</h2>
+        <p>Calendar and contacts accounts for DAVx⁵, the app that syncs a CalDAV/CardDAV server (Nextcloud, Radicale, Baïkal, Fastmail, &hellip;) into Android's own Calendar and Contacts. <code>services.davx5</code> is Nixup's own: NixOS has no DAVx⁵, an Android app.</p>
+<pre><code>{ pkgs, ... }: {
+  android.packages.fdroid = with pkgs.fdroid; [ at.bitfire.davdroid ];   # DAVx⁵ itself
+
+  services.davx5 = {
+    enable = true;
+    accounts.home = {
+      url = "https://dav.example.org/";          # DAVx⁵ finds the calendars from here
+      userName = "neo";
+      passwordFile = ./dav-password;             # a secret, root-only on the phone
+    };
+    accounts.work = {
+      url = "https://cloud.example.com/remote.php/dav";
+      userName = "neo@example.com";
+      passwordFile = ./work-dav-password;
+      automatic = true;                          # added with no taps
+    };
+  };
+}</code></pre>
+        <ul>
+          <li><strong>A new account</strong> opens DAVx⁵'s login screen on the phone, already filled in with the server, the user name and the password. Tap <em>Login</em>, then <em>Finish</em>: DAVx⁵ finds the calendars and address books and starts syncing them. One login screen opens per build; the next build opens the next account's. On a locked phone it is there once you unlock.</li>
+          <li><strong>With <code>automatic = true</code></strong> the account is added with no taps: the build asks the server for its calendars and address books itself, as DAVx⁵'s login does, writes them into DAVx⁵'s database, adds the account as DAVx⁵ and starts its first sync. DAVx⁵ plans the syncs after that (every 4 hours, its default). This needs DAVx⁵ 4.5.17 to 4.5.21, whose database Nixup knows; any other version gets the login screen instead, because DAVx⁵ removes all of its accounts when it finds a database it cannot read. It logs in with Basic authentication: a server that wants Digest needs the login screen.</li>
+          <li><strong>An account that is there already</strong> gets the config's user name and password at each build, as DAVx⁵'s account settings would change them, so a new password in <code>passwordFile</code> reaches the phone with the next build.</li>
+          <li><strong>How Nixup finds an account:</strong> by its <code>accountName</code> when you give one (type that name at the login screen), or else by its user name on its server. DAVx⁵ names a new account after the email address the server has for you, else after the user name.</li>
+          <li>An account that leaves the config stays in DAVx⁵, and so do accounts you add by hand. To remove one, use DAVx⁵ (the account, &#8942;, Delete account).</li>
+          <li><code>syncCollections</code> is what DAVx⁵ selects for syncing as it finds it, at a login and when the server has new calendars later: <code>"all"</code> (the default) or <code>"none"</code> (pick each one in DAVx⁵). It is DAVx⁵'s own setting, given back as it was when <code>services.davx5</code> leaves the config.</li>
+          <li>DAVx⁵ gets the contacts, calendar and notifications permissions and unrestricted battery use, and it is never paused for being unused (which would take its permissions away). Each of these can be set otherwise in <code>android.apps."at.bitfire.davdroid"</code>.</li>
+          <li><code>passwordFile</code> takes a file next to your config, a <code>pkgs.writeText</code> file, or the full path of a file already on the phone; each becomes a root-only <a href="#secrets">secret</a>. A password written into the config as text is refused: it would be in the Nix store.</li>
+          <li><code>install = "fdroid"</code> (or another repository's name) installs DAVx⁵ too; leave it out when DAVx⁵ is in a list of <code>android.packages</code> already. No service runs for DAVx⁵: the build sets it up, so a config needs no Nix packages for it.</li>
+        </ul>
+      </section>
+
       <section id="adb">
         <h2>adb</h2>
         <p>Android's debugging bridge. NixOS has nothing like it, so the option is Android's own:</p>
@@ -1976,9 +2012,9 @@ sftp root@phone                 # file transfers work too (file managers, sshfs)
         <p>
           Some options point to secret files: keys, passwords, tokens. Nixup never puts them in the Nix store or
           in the profile. They are: <code>services.tailscale.authKeyFile</code>, <code>services.syncthing.cert</code>,
-          <code>key</code> and <code>guiPasswordFile</code>, <code>users.users.&lt;name&gt;.hashedPasswordFile</code>,
-          <code>android.backup.passwordFile</code> and <code>environmentFile</code>, and
-          <code>android.playstore.tokenFile</code>.
+          <code>key</code> and <code>guiPasswordFile</code>, <code>services.davx5.accounts.&lt;name&gt;.passwordFile</code>,
+          <code>users.users.&lt;name&gt;.hashedPasswordFile</code>, <code>android.backup.passwordFile</code> and
+          <code>environmentFile</code>, and <code>android.playstore.tokenFile</code>.
         </p>
 <pre><code>{
   # A file next to your config: the build copies it to the phone, readable by root only
@@ -2040,7 +2076,7 @@ sftp root@phone                 # file transfers work too (file managers, sshfs)
     defaults = {
       apk = true;                                 # its APK too: installable from the backup
       data = true;                                # false: the APK alone
-      include = [ "data" "deviceData" "storage" ];   # also "media", "obb"
+      include = [ "data" "deviceData" "storage" "accounts" ];   # also "media", "obb"
       when = "auto";                              # "auto": after use; "schedule"; "manual"
       autoRestore = false;                        # true on a new phone: see below
     };
@@ -2065,10 +2101,11 @@ sftp root@phone                 # file transfers work too (file managers, sshfs)
               <tr><td><code>storage</code></td><td>Its files in <code>Android/data</code></td></tr>
               <tr><td><code>media</code></td><td>Its files in <code>Android/media</code></td></tr>
               <tr><td><code>obb</code></td><td>Its files in <code>Android/obb</code> (game data)</td></tr>
+              <tr><td><code>accounts</code></td><td>The accounts it adds to Android's settings, with their passwords and sync settings (DAVx&#8309;'s calendar and contacts accounts, a mail app's). Android keeps them outside the app's folders and deletes them when the app is removed, so without this part a restored app has nothing to sync with</td></tr>
             </tbody>
           </table>
         </div>
-        <p>Caches and compiled code are left out; Android makes them again.</p>
+        <p>Caches and compiled code are left out; Android makes them again. Each backup also keeps which permissions the app was granted.</p>
 
         <h3>When backups run</h3>
         <ul>
@@ -2083,7 +2120,8 @@ sftp root@phone                 # file transfers work too (file managers, sshfs)
         <ul>
           <li><strong>Always by hand:</strong> the <strong>Backups</strong> screen (pick the backup, then the parts: APK, data, &hellip;), or <code>su -c "nixup-backup restore org.example.app"</code>.</li>
           <li>An app that is not on the phone comes back whole: its APK first (from that backup, or another backup of the app), then its data. If no backup has its APK, the restore says &ldquo;app not found&rdquo;: install the app first, then restore its data.</li>
-          <li>Restoring stops the app, replaces its data, and sets the files' owner and security labels right. An older APK is not installed over a newer one, and data from a newer version than the installed app is refused.</li>
+          <li>Restoring stops the app and takes its files out of the backup into a folder of their own first: only when all of them are out do they replace the app's data, so a restore that fails (or a restart in the middle) leaves the app as it was. The files get the app's owner and security labels; links stay links. An older APK is not installed over a newer one, and data from a newer version than the installed app is refused.</li>
+          <li>Its accounts that are not on the phone come back, with their passwords and sync settings (an account that is there stays as it is), and it is granted again the permissions it had. A restart in the middle of a restore picks it up again.</li>
           <li>A folder comes back into itself (the backup's files replace those there; others stay), or into a new folder.</li>
         </ul>
 
