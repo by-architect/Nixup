@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.1 (2026-11-07)
 
 - Password logins over SSH work: with `services.openssh.settings.PasswordAuthentication = true` sshd checks a
   user's password through PAM, as on NixOS (`UsePAM` is on by itself then; pam_unix reads the view's `/etc/shadow`).
