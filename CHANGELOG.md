@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.3 (2026-11-07)
 
 - Backups keep an app's accounts too (the new `accounts` part, on by default): the accounts it adds to Android's
   settings, with their passwords, user data, auth tokens, which apps see them and their sync settings. Android keeps
