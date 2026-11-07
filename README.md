@@ -37,14 +37,28 @@ Adding something is one name in a list. An app's package name is in its store pa
 
 ```nix
 { pkgs, ... }: {
-  # F-Droid: the package name as it is, after "with pkgs.fdroid;"
-  android.packages.fdroid = with pkgs.fdroid; [ <package name> ];         # [ com.termux ]
+  # F-Droid: package names as they are, after "with pkgs.fdroid;"
+  android.packages.fdroid = with pkgs.fdroid; [
+    com.termux                    # Termux
+    org.schabi.newpipe            # NewPipe
+    de.danoeh.antennapod          # AntennaPod
+    org.videolan.vlc              # VLC
+    org.mozilla.fennec_fdroid     # Fennec (Firefox)
+    com.aurora.store              # Aurora Store
+  ];
 
-  # Google Play: the package name in quotes
-  android.packages.playstore = [ "<package name>" ];                      # [ "com.whatsapp" ]
+  # Google Play: package names in quotes
+  android.packages.playstore = [
+    "com.whatsapp"                # WhatsApp
+    "org.telegram.messenger"      # Telegram
+    "com.spotify.music"           # Spotify
+    "com.instagram.android"       # Instagram
+    "com.discord"                 # Discord
+    "com.duolingo"                # Duolingo
+  ];
 
   # Linux programs from nixpkgs, for the terminal and services
-  environment.systemPackages = with pkgs; [ <package name> ];             # [ htop git ]
+  environment.systemPackages = with pkgs; [ htop git vim rsync python3 ffmpeg ];
 }
 ```
 
