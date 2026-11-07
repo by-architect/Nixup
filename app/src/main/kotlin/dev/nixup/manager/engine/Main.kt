@@ -87,6 +87,8 @@ import kotlin.system.exitProcess
  *   audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]
  *                                 plays raw sound from its input with Android's audio, as music (services.snapclient's
  *                                 snapclient writes it), and writes the time Android's audio takes (ms) to the file
+ *   davx5-accounts                sets or adds the DAVx⁵ accounts it reads (JSON) through Android's account service:
+ *                                 what a build runs as DAVx⁵ itself, which alone may (services.davx5; see Davx5)
  * Exit status: 0 done, 2 stopped before changing anything, 1 stopped partway.
  */
 object Main {
@@ -120,6 +122,8 @@ object Main {
                     0
                 }
                 "audio-out" -> AudioOut.play(option(args, "format") ?: "48000:16:2", option(args, "latency-file")?.let { File(it) }, System.`in`)
+                // (Run by a build, as DAVx⁵ itself: see Davx5.)
+                "davx5-accounts" -> Davx5.asApp()
                 "services" -> {
                     // adb listens on no port after a restart: the profile's again, before the units start.
                     val android = runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull()

@@ -7,9 +7,9 @@ import java.io.File
 /**
  * Makes the phone match the profile: its apps (android.packages: a list for each repository, the apps from releases,
  * and those from Google Play), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
- * phone's own settings (android.system), the secrets (android.secrets) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
+ * phone's own settings (android.system), the secrets (android.secrets), DAVx⁵'s accounts (android.davx5) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
  * nothing changes (the config's own system.preSwitchChecks among them); then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
- * the system settings (see SystemSettings), the activation scripts (see Activation), the services (see Units), and the apps that left the config removed, their data kept.
+ * the system settings (see SystemSettings), DAVx⁵'s accounts (see Davx5), the activation scripts (see Activation), the services (see Units), and the apps that left the config removed, their data kept.
  */
 class Apply(private val repos: Map<String, FDroid>, private val data: File, private val incoming: File? = null) {
     private val installer = Installer(data)
@@ -134,6 +134,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         system.plan(android.optJSONObject("system"), toInstall.map { it.id }.toSet(), problems)
         val secrets = Secrets(data, incoming)
         secrets.plan(android.optJSONArray("secrets"), problems)
+        // (Its passwords are secrets: those changing are told to it.)
+        val davx5 = Davx5(data)
+        davx5.plan(android.optJSONObject("davx5"), toInstall.map { it.id }.toSet() - leaving, secrets.changing, problems)
         val units = Units(data)
         units.plan(android.optJSONObject("units"), problems, secrets.changing, android.optJSONObject("timers"), android.optJSONObject("paths"))
         val adb = Adb(data)
@@ -164,10 +167,10 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         val parts = listOfNotNull(
             "app settings".takeIf { settings.changes }, "apps that came with the phone".takeIf { debloat.changes },
             "system settings".takeIf { system.changes }, "secrets".takeIf { secrets.changes }, "services".takeIf { units.changes },
-            "adb".takeIf { adb.changes }, "data from backups".takeIf { backup?.changes == true },
+            "adb".takeIf { adb.changes }, "data from backups".takeIf { backup?.changes == true }, "DAVx⁵ accounts".takeIf { davx5.changes },
         )
         writeSummary(dryRun, toInstall.size, toUpdate.size, removals.size, parts)
-        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes && backup?.changes != true) {
+        if (steps.isEmpty() && removals.isEmpty() && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes && backup?.changes != true && !davx5.changes) {
             Out.line("Nothing to change")
             if (dryRun) {
                 activation.apply(android, dryRun = true)
@@ -201,6 +204,8 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         failed += debloat.apply()
         failed += system.apply()
         failed += adb.apply()
+        // With DAVx⁵ installed, its battery setting made and the secrets in place.
+        failed += davx5.apply()
         units.prepare(android)
         // The activation scripts (and the undo of those that left), with the users, /etc and tmpfiles' folders in place,
         // before the services start or start again, as on NixOS.
@@ -276,6 +281,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         var failed = Debloat(data).restoreAll()
         failed += AppSettings(data).restoreAll()
         failed += SystemSettings(data).restoreAll()
+        failed += Davx5(data).restore()
         // The activation scripts' undos, in Nixup's view, before the services and the view go.
         failed += Activation(data).undoAll()
         failed += Units(data).removeAll()

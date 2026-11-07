@@ -4,6 +4,18 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- DAVx⁵'s accounts in the config: `services.davx5` (Nixup's own; NixOS has no DAVx⁵, an Android app). Each build
+  sets them up: an account the phone has not got opens DAVx⁵'s login screen on the phone, already filled in with the
+  server, the user name and the password (`passwordFile`, sent to the phone root-only like every secret), so a tap on
+  Login and one on Finish add it; with `automatic = true` it is added with no taps (the build asks the server
+  for the calendars and address books itself, writes them into DAVx⁵'s database, adds the account as DAVx⁵ and starts
+  its first sync), on DAVx⁵ 4.5.17 to 4.5.21, whose database Nixup knows; any other DAVx⁵ gets the login screen.
+  An account there gets the config's user name and password at each build. `syncCollections` (`all` by
+  default, or `none`) is DAVx⁵'s own setting of what it selects for syncing as it finds it, given back when
+  `services.davx5` leaves the config. `install = "fdroid"` installs DAVx⁵ too; it gets the contacts, calendar and notifications permissions, unrestricted battery use, and is never paused for being unused (which takes an app's permissions away).
+
 ## 0.1.2 (2026-11-07)
 
 - `nixup-rebuild` on the phone, as `nixos-rebuild` on NixOS (as root, in adb's shell, the app's terminal or ssh):

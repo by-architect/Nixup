@@ -495,6 +495,23 @@
     relay.enable = false;                         # relay server: not on a phone (its other options, as on NixOS, are taken unused)
   };
 
+  # DAVx⁵'s calendar and contacts accounts (DAVx⁵ is in the apps above), Nixup's own: NixOS has no DAVx⁵, an Android
+  # app. A new account gets DAVx⁵'s login screen, opened on the phone filled in: tap Login, then Finish.
+  services.davx5 = {
+    enable = false;                               # true: the accounts below, set at each build (no service runs)
+    install = null;                               # a repository to install DAVx⁵ from, like "fdroid"; null: android.packages lists it
+    syncCollections = "all";                      # what DAVx⁵ selects for syncing as it finds it: "all" or "none"
+    accounts = {
+      # home = {
+      #   url = "https://dav.example.org/";       # the server (DAVx⁵ finds its calendars and address books)
+      #   userName = "neo";
+      #   passwordFile = ./dav-password;          # secret: a file next to this one, put on the phone root-only
+      #   accountName = null;                     # its name in DAVx⁵; null: as its login names it (the email address)
+      #   automatic = false;                      # true: added with no taps (DAVx⁵ 4.5.17 to 4.5.21; else the login screen)
+      # };
+    };
+  };
+
   # Snapcast, multi-room audio in sync. snapserver as NixOS's; snapclient (NixOS has none) plays a
   # server's stream through Android's audio, as music. nixpkgs' snapcast comes with PipeWire,
   # PulseAudio and Avahi: about 780 MB on the phone.

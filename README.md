@@ -112,6 +112,17 @@ Services, with NixOS's own options:
     };
   };
 
+  # DAVx⁵'s calendar and contacts accounts: its login screen opens on the phone filled in (two taps),
+  # or with automatic = true, no taps
+  services.davx5 = {
+    enable = true;
+    accounts.home = {
+      url = "https://dav.example.org/";
+      userName = "neo";
+      passwordFile = ./dav-password;
+    };
+  };
+
   # SSH: logins get root's shell with your Nix packages; 127.0.0.1 keeps it to the tailnet
   services.openssh = {
     enable = true;
