@@ -8,6 +8,8 @@ backups, all from one `configuration.nix`.
 
 **[Read the documentation →](https://by-architect.github.io/Nixup/docs.html)**
 
+**FASTEST WAY to learn: https://github.com/by-architect/Nixup/blob/main/templates/default/configuration.nix, template includes all options**
+
 ## Aim Of The Project
 
 This project aims to close the gap between Android and Nix. You can install NixOS on a phone, but it does
