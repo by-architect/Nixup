@@ -1,7 +1,7 @@
 # OpenSSH's server, as NixOS's services.openssh: sshd, a unit run by root in Nixup's view of the phone (see
 # nix/units.nix), so a session is a shell there, the one the app's terminal and nixup-shell open:
 # environment.systemPackages on PATH, /nix, and Android's own commands. Logins are root's or those of the users in
-# users.users (nix/users.nix), with keys only: users.users.<name>.openssh.authorizedKeys, as on NixOS,
+# users.users (nix/users.nix), with keys (or a password, see below): users.users.<name>.openssh.authorizedKeys, as on NixOS,
 # ~/.ssh/authorized_keys in the user's home, or authorizedKeysFiles. Its host keys are made on its first start, in
 # /etc/ssh (/data/adb/nixup/etc/ssh on the phone itself), and kept, also when it is turned off; a hostKeys path
 # that is there already (a secret the build puts on the phone) is used as it is.
@@ -9,6 +9,11 @@
 # Its options are NixOS's, with the same names, types and meanings; one the phone cannot do is there too, and setting
 # it stops the build and says why. Two defaults differ, as a phone's root has no password: PasswordAuthentication and
 # KbdInteractiveAuthentication are false (NixOS: true).
+#
+# Passwords (users.users.<name>.hashedPassword, ...) are checked by PAM, as on NixOS: with password logins on, UsePAM is
+# too, sshd reads /etc/pam.d/sshd (pam_unix: /etc/shadow, see nix/users.nix) and pam_unix's helper is where nixpkgs'
+# PAM looks for it (/run/wrappers/bin/unix_chkpwd). nixpkgs' OpenSSH without PAM checks a password with DES_crypt
+# alone, which no $6$ or yescrypt hash matches.
 { config, lib, pkgs, ... }:
 let
   inherit (lib) mkOption types;
@@ -58,7 +63,6 @@ let
   notHere = [
     { name = "startWhenNeeded"; unused = !cfg.startWhenNeeded; why = "sshd starts with each build and at boot; one started for each connection (a socket with Accept) is not on the phone."; }
     { name = "authorizedKeysCommand"; unused = cfg.authorizedKeysCommand == "none"; why = "not on the phone yet."; }
-    { name = "settings.UsePAM"; unused = cfg.settings.UsePAM == false; why = "a phone has no PAM."; }
   ];
 in
 {
@@ -236,7 +240,10 @@ in
           UsePAM = mkOption {
             type = types.nullOr types.bool;
             default = false;
-            description = "Logins through PAM (NixOS: true). A phone has no PAM, so it must stay false.";
+            description = ''
+              Logins through PAM (pam_unix, with the view's /etc/shadow), which passwords need: on by itself with
+              PasswordAuthentication or KbdInteractiveAuthentication (NixOS: true).
+            '';
           };
           Ciphers = mkOption {
             type = types.nullOr (types.listOf types.str);
@@ -291,6 +298,21 @@ in
     # ssh, scp and ssh-keygen in sessions too, as on NixOS.
     environment.systemPackages = [ cfg.package ];
 
+    # Password logins go through PAM (see the top), as on NixOS: pam_unix with the view's users and /etc/shadow.
+    services.openssh.settings.UsePAM = lib.mkDefault (cfg.settings.PasswordAuthentication == true
+      || cfg.settings.KbdInteractiveAuthentication == true);
+    environment.etc."pam.d/sshd" = lib.mkIf (cfg.settings.UsePAM == true) {
+      text = ''
+        # sshd's PAM (nix/openssh.nix): the view's users and their passwords (/etc/shadow), through pam_unix.
+        auth     sufficient ${pkgs.pam}/lib/security/pam_unix.so likeauth try_first_pass
+        auth     required   ${pkgs.pam}/lib/security/pam_deny.so
+        account  required   ${pkgs.pam}/lib/security/pam_unix.so
+        password sufficient ${pkgs.pam}/lib/security/pam_unix.so nullok yescrypt
+        password required   ${pkgs.pam}/lib/security/pam_deny.so
+        session  required   ${pkgs.pam}/lib/security/pam_unix.so
+      '';
+    };
+
     systemd.services.sshd = {
       description = "SSH daemon";
       wantedBy = [ "multi-user.target" ];
@@ -301,6 +323,11 @@ in
       preStart = ''
         mkdir -p /etc/ssh/authorized_keys.d /var/empty
         chmod 0755 /etc/ssh /etc/ssh/authorized_keys.d /var/empty
+        ${lib.optionalString (cfg.settings.UsePAM == true) ''
+          # pam_unix's helper, where nixpkgs' PAM looks for it (NixOS's security wrapper; sshd runs it as root).
+          mkdir -p /run/wrappers/bin
+          ln -sfn ${pkgs.pam}/bin/unix_chkpwd /run/wrappers/bin/unix_chkpwd
+        ''}
         ${lib.concatMapStrings (key: ''
           if ! [ -s ${q key.path} ]; then
             mkdir -p "$(dirname ${q key.path})"

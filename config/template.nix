@@ -554,7 +554,7 @@
     moduliFile = "${pkgs.openssh}/etc/ssh/moduli";   # Diffie-Hellman groups
     startWhenNeeded = false;                      # start on a first connection: not on the phone
     settings = {                                  # sshd_config's settings, by their names there
-      PasswordAuthentication = false;             # passwords (root has none on a phone)
+      PasswordAuthentication = false;             # true: users with a password (users.users.<name>.hashedPassword) log in with it, through PAM
       KbdInteractiveAuthentication = false;
       PermitRootLogin = "prohibit-password";      # root with keys only
       X11Forwarding = false;
@@ -563,7 +563,7 @@
       LogLevel = "INFO";                          # its log: /data/adb/nixup/units/sshd/log
       GatewayPorts = "no";
       PrintMotd = false;
-      UsePAM = false;                             # a phone has no PAM
+      # UsePAM: on by itself with password logins (pam_unix, the view's /etc/shadow)
       Ciphers = null;                             # null: OpenSSH's own lists
       KexAlgorithms = null;
       Macs = null;

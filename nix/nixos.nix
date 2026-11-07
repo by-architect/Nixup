@@ -104,7 +104,10 @@ let
   };
 in
 {
-  imports = lib.optionals (source != null) (map (file: source + "/nixos/modules/${file}") (support ++ lib.attrValues services));
+  # The ones this nixpkgs has: a module it dropped leaves its options out (a config setting one is told they do not
+  # exist), instead of stopping every build (nixos-unstable dropped security/dhparams.nix in 2026-11).
+  imports = lib.optionals (source != null)
+    (lib.filter builtins.pathExists (map (file: source + "/nixos/modules/${file}") (support ++ lib.attrValues services)));
 
   options = lib.optionalAttrs (source == null) {
     services = lib.mapAttrs (name: _: placeholder name) services;

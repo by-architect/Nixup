@@ -6,6 +6,9 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- Password logins over SSH work: with `services.openssh.settings.PasswordAuthentication = true` sshd checks a
+  user's password through PAM, as on NixOS (`UsePAM` is on by itself then; pam_unix reads the view's `/etc/shadow`).
+  Without PAM, nixpkgs' OpenSSH could only check DES passwords, so no NixOS-style hash ever matched.
 - Users' passwords, as on NixOS: `users.users.<name>.hashedPassword`, `password` (hashed on the phone),
   `hashedPasswordFile` (a file from the config's folder, put on the phone readable by root alone, or one already
   there), `initialPassword` and `initialHashedPassword`, in the view's `/etc/shadow`, which sshd takes for a

@@ -258,7 +258,7 @@ let
       pamMount = mkOption {
         type = types.attrsOf types.str;
         default = { };
-        description = "As on NixOS, pam_mount's settings for the user. Taken; the phone has no PAM.";
+        description = "As on NixOS, pam_mount's settings for the user. Taken: sshd's PAM (nix/openssh.nix) has pam_unix alone.";
       };
       openssh = {
         authorizedKeys = {
