@@ -8,7 +8,7 @@ backups, all from one `configuration.nix`.
 
 **[Read the documentation →](https://by-architect.github.io/Nixup/docs.html)**
 
-**FASTEST WAY to learn: https://github.com/by-architect/Nixup/blob/main/templates/default/configuration.nix, template includes all options**
+**ALL OPTIONS: https://github.com/by-architect/Nixup/blob/main/templates/default/configuration.nix**
 
 ## Aim Of The Project
 
