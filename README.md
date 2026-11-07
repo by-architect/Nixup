@@ -30,13 +30,82 @@ is built to cover all of these.
 - [Generations](https://by-architect.github.io/Nixup/docs.html#building) you can roll back to, built on the
   phone or [from a PC](https://by-architect.github.io/Nixup/docs.html#from-a-pc)
 
+## Examples
+
+Apps from F-Droid and other F-Droid-style repositories, by package name:
+
 ```nix
 { pkgs, ... }: {
+  # f-droid.org is always there, as "fdroid"
   android.packages.fdroid = with pkgs.fdroid; [ com.termux ];
-  android.settings.display.darkMode = true;
-  services.tailscale.enable = true;
+
+  # Another repository: a name you choose, and its address with its key
+  android.repos.izzyondroid.url =
+    "https://apt.izzysoft.de/fdroid/repo?fingerprint=3BF0D6ABFEAE2F401707B6D966BE743BF0EEE49C2561B9BA39073711F628937A";
+  android.packages.izzyondroid = with pkgs.izzyondroid; [ at.bitfire.davdroid ];
+
+  # Updates installed by themselves (every 6 hours, on Wi-Fi); false only notifies
+  android.settings.repo.fdroid.autoupdatePackages = true;
 }
 ```
+
+Apps from Google Play, downloaded by the phone itself (no Play Store or GApps needed; sign in once in the app:
+⋮ → Google Play account):
+
+```nix
+{
+  android.packages.playstore = [ "com.whatsapp" "org.telegram.messenger" ];
+
+  android.playstore.account = "you@gmail.com";        # optional: builds stop if another account is signed in
+  android.playstore.tokenFile = ./google-play.token;  # optional: no sign-in on the phone needed
+  android.settings.repo.playstore.autoupdatePackages = true;
+}
+```
+
+Services, with NixOS's own options:
+
+```nix
+{
+  # Tailscale, run by root in userspace mode (no VPN slot; the Tailscale app can stay)
+  services.tailscale = {
+    enable = true;
+    authKeyFile = ./tailscale.key;                    # logs in by itself
+  };
+
+  # Syncthing, set up from the config
+  services.syncthing = {
+    enable = true;
+    settings.devices.laptop.id = "7CFNTQM-IMTJBHJ-3UWRDIU-ZGQJFR6-VCXZ3NB-XUH3KZO-N52ITXR-LAIYUAU";
+    settings.folders.documents = {
+      path = "/storage/emulated/0/Documents";
+      devices = [ "laptop" ];
+    };
+  };
+
+  # SSH: logins get root's shell with your Nix packages; 127.0.0.1 keeps it to the tailnet
+  services.openssh = {
+    enable = true;
+    listenAddresses = [ { addr = "127.0.0.1"; port = 22; } ];
+  };
+  users.users.root.openssh.authorizedKeys.keys = [ "ssh-ed25519 AAAA… you@laptop" ];
+}
+```
+
+App and system settings:
+
+```nix
+{
+  android.apps."org.thoughtcrime.securesms" = {
+    permissions.camera = true;
+    battery = "unrestricted";
+  };
+  networking.hostName = "phone";
+  time.timeZone = "Europe/Istanbul";
+  android.settings.display.darkMode = true;
+}
+```
+
+More, with every option: [the documentation](https://by-architect.github.io/Nixup/docs.html).
 
 ## Requirements
 
