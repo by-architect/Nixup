@@ -1,7 +1,7 @@
 id=nixup
 name=Nixup
-version=0.1.5
-versionCode=7
+version=0.1.6
+versionCode=8
 author=neo
 description=Makes the phone match its configuration.nix, as NixOS does.
 updateJson=https://github.com/by-architect/Nixup/releases/latest/download/update.json
