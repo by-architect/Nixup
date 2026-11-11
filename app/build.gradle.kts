@@ -11,8 +11,8 @@ android {
         applicationId = "dev.nixup.manager"
         minSdk = 30
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.1.6"
+        versionCode = 9
+        versionName = "0.1.7"
     }
 }
 

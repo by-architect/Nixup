@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.7 (2026-11-11)
 
 - An app of the config installed with another signing key than its source's builds (from another store, or the
   developer's build where F-Droid builds its own) no longer stops the build: it is reinstalled as the source's build,
