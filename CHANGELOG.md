@@ -4,6 +4,13 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- A build from a PC over SSH (`nixup-rebuild --target-host` through the phone's sshd) no longer starts the
+  services it restarts without the SD card: it applies the build from Android's own view of the phone, as a build
+  over adb does, instead of the SSH session's, which has no card mounted after sshd started. sshd restarted that way
+  showed SSH sessions and file managers an empty, locked folder for the card.
+
 ## 0.1.7 (2026-11-11)
 
 - An app of the config installed with another signing key than its source's builds (from another store, or the
