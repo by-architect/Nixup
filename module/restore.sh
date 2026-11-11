@@ -38,6 +38,31 @@ restore_debloat() {
   rm -f "$journal"
 }
 
+# The apps strict removed (android.strict) come back from the copies of their APKs,
+# with the data the phone kept (the engine does this, with their installer, state
+# and permissions; this is for when it could not run). Each APK goes into pm
+# through a pipe: Android may not read /data/adb.
+restore_strict() {
+  for dir in /data/adb/nixup/strict/*/; do
+    [ -f "${dir}base.apk" ] || continue
+    app=${dir%/}
+    app=${app##*/}
+    size=0
+    for apk in "$dir"*.apk; do size=$((size + $(stat -c %s "$apk"))); done
+    session=$(pm install-create -r --user 0 -S "$size" < /dev/null 2> /dev/null | sed -n 's/.*\[\([0-9]*\)\].*/\1/p')
+    [ -n "$session" ] || continue
+    written=1
+    for apk in "$dir"*.apk; do
+      cat "$apk" | pm install-write -S "$(stat -c %s "$apk")" "$session" "${apk##*/}" - > /dev/null 2>&1 || written=0
+    done
+    if [ "$written" = 1 ] && pm install-commit "$session" < /dev/null 2>&1 | grep -q Success; then
+      echo "Brought $app back"
+    else
+      pm install-abandon "$session" < /dev/null > /dev/null 2>&1
+    fi
+  done
+}
+
 # The apps the module put in Obtainium's list go out of it again (the engine does
 # this; this is for when it could not run). Only the files the module wrote.
 restore_obtainium() {
@@ -78,6 +103,7 @@ if [ "${0##*/}" = nixup-restore.sh ]; then
   fi
   restore_apps
   restore_debloat
+  restore_strict
   restore_obtainium
   restore_services
   # What did not go back (the engine says so) is tried again at the next start, 3 times: until then its records of

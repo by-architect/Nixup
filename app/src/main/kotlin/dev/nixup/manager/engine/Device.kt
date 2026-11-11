@@ -1,5 +1,6 @@
 package dev.nixup.manager.engine
 
+import android.app.admin.DevicePolicyManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -750,6 +751,43 @@ object Device {
     /** Installs again, for the main user, an app the phone still has (one that came with it), with the data it kept. */
     fun installExisting(id: String): Boolean =
         run("cmd", "package", "install-existing", "--user", "0", id).let { (status, said) -> status == 0 && said.contains("installed") }
+
+    // --- The main user's own apps (android.strict).
+
+    /** The main user's apps that are not the system's: installed by hand, from a store, sideloaded, or by Nixup. */
+    fun userApps(): Set<String> = run("pm", "list", "packages", "-3", "--user", "0").second.lineSequence()
+        .map { it.trim() }.filter { it.startsWith("package:") }.map { it.removePrefix("package:") }
+        .filter { PACKAGE_NAME.matches(it) }.toSet()
+
+    /** Whether the app is installed for the main user (one another user alone has is not). */
+    fun installedForUser(id: String): Boolean =
+        run("pm", "list", "packages", "--user", "0", id).second.lineSequence().any { it.trim() == "package:$id" }
+
+    /** An installed app's APKs, its base APK first, then its splits; none when the main user has not got it. */
+    fun apkFiles(id: String): List<File> = run("pm", "path", "--user", "0", id).second.lineSequence()
+        .map { it.trim() }.filter { it.startsWith("package:") && it.endsWith(".apk") }.map { File(it.removePrefix("package:")) }
+        .sortedBy { it.name != "base.apk" }.toList()
+
+    /** The app that installed it, its installer of record (which updates it, and which some apps check), or null. */
+    fun installerOf(id: String): String? = run("pm", "list", "packages", "-i", "--user", "0", id).second.lineSequence()
+        .firstOrNull { it.startsWith("package:$id ") }?.substringAfter("installer=", "")?.trim()
+        ?.takeIf { it.isNotEmpty() && it != "null" }
+
+    /** The apps that are device admin apps of the main user: Android does not uninstall one while it is. */
+    fun deviceAdmins(): Set<String> = try {
+        context?.getSystemService(DevicePolicyManager::class.java)?.activeAdmins?.map { it.packageName }?.toSet() ?: emptySet()
+    } catch (e: Throwable) {
+        emptySet()
+    }
+
+    /** The Magisk app's name while it is hidden under another one (Magisk keeps it as its "requester"), or null. */
+    fun hiddenMagiskApp(): String? = try {
+        run("magisk", "--sqlite", "SELECT value FROM strings WHERE key='requester'").second.lineSequence()
+            .map { it.trim() }.firstOrNull { it.startsWith("value=") }?.removePrefix("value=")?.takeIf { PACKAGE_NAME.matches(it) }
+    } catch (e: Exception) {
+        // (No magisk here: KernelSU or APatch.)
+        null
+    }
 
     /** Runs one of Android's commands with no input (it would hand that to Android, which may not read /data/adb); its exit status and what it said. */
     fun run(vararg command: String): Pair<Int, String> {

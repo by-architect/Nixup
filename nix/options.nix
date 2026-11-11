@@ -147,6 +147,7 @@ let
 
   apps = config.android.apps;
   appsNotNames = lib.filter (id: !isPackageName id) (lib.attrNames apps);
+  keepNotNames = lib.filter (id: !isPackageName id) config.android.strict.keep;
   # Each default (browser, dialer, ...) can belong to one app only.
   claims = lib.concatLists (lib.mapAttrsToList (id: app: map (role: { inherit id role; }) app.defaultFor) apps);
   roleClash = lib.filter (role: lib.length (lib.filter (c: c.role == role) claims) > 1) (lib.unique (map (c: c.role) claims));
@@ -209,9 +210,39 @@ in
         android.packages.playstore apps from Google Play, as Aurora Store does, by their
         package names as strings (android.playstore has the account). An app can come
         from one source only. An app that came with the phone is removed with
-        android.apps.<app>.debloat = true. Nix packages (from nixpkgs) are
-        environment.systemPackages, as on NixOS.
+        android.apps.<app>.debloat = true, and the apps installed by hand that no list has
+        with android.strict. Nix packages (from nixpkgs) are environment.systemPackages, as
+        on NixOS.
       '';
+    };
+
+    android.strict = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Only the config's apps on the phone: each build removes every app of the phone's main user
+          that is not one of the system's (installed by hand, from a store, or sideloaded) when no list
+          of android.packages has it, nor keep. Its data stays, and a copy of its APKs
+          (/data/adb/nixup/strict), so it comes back as it was, with its data, its installer and its
+          permissions, when strict is off again, when keep or a list names it, and when the module is
+          removed. Nixup's app, the root solution's (Magisk, also hidden under another name; KernelSU;
+          APatch) and the apps the config needs (a user's androidApp, DAVx⁵ with services.davx5)
+          always stay, and a build stops rather than remove the launcher or the keyboard in use. The
+          apps that came with the phone are debloat's (android.apps.<app>.debloat).
+        '';
+      };
+
+      keep = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = [ "com.example.bank" ];
+        description = ''
+          Apps strict leaves on the phone though no list of android.packages has them, by package
+          name: ones no repository here has (a bank's from Google Play, a build of your own),
+          installed by hand.
+        '';
+      };
     };
 
     android.settings.repo = mkOption {
@@ -292,6 +323,7 @@ in
       "android.apps.\"${id}\".debloat: ${id} is also in android.packages, to install; pick one."
     ) debloatInstalled))
     (check (appsNotNames == [ ]) "android.apps: ${lib.concatStringsSep ", " appsNotNames} is not a package name (like \"org.example.app\").")
+    (check (keepNotNames == [ ]) "android.strict.keep: ${lib.concatStringsSep ", " keepNotNames} is not a package name (like \"org.example.app\").")
     (check (roleClash == [ ]) (lib.concatMapStringsSep "\n" (role:
       "android.apps: more than one app is the default for ${role} ("
       + lib.concatStringsSep ", " (map (c: c.id) (lib.filter (c: c.role == role) claims)) + "): pick one."

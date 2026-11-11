@@ -179,6 +179,8 @@ in
         )) config.android.packages;
         settings = lib.mapAttrs (name: _: { autoupdatePackages = settings.repo.${name}.autoupdatePackages or false; })
           (repos // { obtainium = { }; playstore = { }; });
+        # android.strict: the apps it keeps besides the lists'; null while it is off, when the apps it removed come back.
+        strict = if config.android.strict.enable then { inherit (config.android.strict) keep; } else null;
         # The Google account Google Play's apps come with, and where its token is (nix/playstore.nix).
         playstore = config.system.build.playstore;
         # debloat only when true: false is the same as not managed; backup goes in backup.

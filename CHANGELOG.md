@@ -4,6 +4,17 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- Strict mode: `android.strict.enable = true` keeps the phone to the config's apps. Each build removes every app
+  installed by hand (from a store, sideloaded) that no list of `android.packages` has, nor `android.strict.keep`
+  (for apps no repository has: a bank's app, a build of your own). Its data stays and a copy of its APKs is kept,
+  so it comes back as it was (with its data, installer of record, enabled state and permissions) when strict is
+  turned off, when `keep` or a list names it, and when Nixup is removed. Nixup's app, the root solution's app
+  (Magisk, also when hidden under another name, KernelSU, APatch) and the apps the config needs (a user's
+  `androidApp`, DAVx⁵ with `services.davx5`) always stay; a build stops rather than remove the launcher or the
+  keyboard in use, leaves device admin apps, and with backups, no longer reinstalls an app strict would remove.
+
 ## 0.1.6 (2026-11-08)
 
 - Request APK certificate collection on affected Android 13 builds, which otherwise return no signing

@@ -97,6 +97,15 @@
   # Tailscale, KDE Connect, LocalSend, Organic Maps, Proton VPN and addy.io, signed with another
   # key than the ones installed: moving to them means reinstalling (the app's data goes).
 
+  # Or strict: the phone has the apps of the lists above and no others. Each build removes the apps
+  # installed by hand that no list has, nor keep, keeping their data and a copy of their APKs, so
+  # enable = false again (or keep, or a list) brings one back as it was. Nixup's app, the root
+  # solution's (Magisk, KernelSU, APatch) and the apps the config needs (users', DAVx5) stay.
+  android.strict = {
+    enable = false;                               # true: remove the apps no list has
+    keep = [ ];                                   # apps to keep all the same, like "com.example.bank"
+  };
+
   # ==== 2. App settings ========================================================================
   # By package name; an app that is not installed is told while building and left out.
 
