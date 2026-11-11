@@ -24,6 +24,13 @@ section after the version, and its text is what the Magisk app shows as the upda
   setting the earlier builds changed ("preselect collections") is given back; DAVx⁵ itself, and the accounts it has,
   are left alone (a build warns that its calendars would show twice beside Nixup's).
 
+## 0.1.8 (2026-11-11)
+
+- A build from a PC over SSH (`nixup-rebuild --target-host` through the phone's sshd) no longer starts the
+  services it restarts without the SD card: it applies the build from Android's own view of the phone, as a build
+  over adb does, instead of the SSH session's, which has no card mounted after sshd started. sshd restarted that way
+  showed SSH sessions and file managers an empty, locked folder for the card.
+
 ## 0.1.7 (2026-11-11)
 
 - An app of the config installed with another signing key than its source's builds (from another store, or the

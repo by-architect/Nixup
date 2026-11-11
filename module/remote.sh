@@ -16,6 +16,14 @@
 #                           paths.nar) is what it sent of Nix's store; with --specialisation
 #                           <name>, the build's specialisation of that name instead of the
 #                           config itself (see build.sh)
+# Over ssh, su's root shell is in the SSH session's view (sshd's mount namespace), which has no SD card mounted after
+# sshd started: the services this restarts would start in a copy of it, without the card. This goes on in init's view
+# of the phone instead, as adb's root shell has it (and nixup-rebuild on the phone).
+if [ "$(readlink /proc/1/ns/mnt)" != "$(readlink /proc/self/ns/mnt)" ]; then
+  for n in "/data/adb/magisk/busybox nsenter" "/data/adb/ksu/bin/busybox nsenter" "/data/adb/ap/bin/busybox nsenter" /system/bin/nsenter; do
+    $n -t 1 -m -- true 2> /dev/null && exec $n -t 1 -m -- /system/bin/sh "$0" "$@"
+  done
+fi
 MODDIR=${0%/*}
 SPECIALISATION= rest=
 while [ $# -gt 0 ]; do
