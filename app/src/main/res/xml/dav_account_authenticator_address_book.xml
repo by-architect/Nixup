@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Their address books: an account for each, as DAVx⁵'s account_authenticator_address_book.xml. -->
+<account-authenticator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accountType="dev.nixup.manager.dav.address_book"
+    android:icon="@mipmap/ic_launcher"
+    android:label="@string/dav_address_book_label"
+    android:smallIcon="@mipmap/ic_launcher" />

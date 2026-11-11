@@ -18,6 +18,9 @@ object Notifications {
     private const val PROGRESS = "progress"
     private const val INSTALL_ID = 1
 
+    /** The calendar and contacts sync's own problems (services.caldav, see dav.sync.SyncNotificationManager). */
+    const val SYNC_CHANNEL = "sync"
+
     /** Each kind of event's channel, and its name. */
     private val CHANNELS = linkedMapOf(
         "builds" to R.string.channel_builds,
@@ -25,6 +28,7 @@ object Notifications {
         "backups" to R.string.channel_backups,
         "services" to R.string.channel_services,
         "connections" to R.string.channel_connections,
+        SYNC_CHANNEL to R.string.channel_sync,
     )
 
     private fun channelOf(kind: String) = when (kind) {

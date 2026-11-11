@@ -6,7 +6,7 @@ import java.io.File
 /**
  * The engine run as an app's own uid (with its group alone), for what Android lets only that app do: add the accounts
  * of its account types and change their passwords (Android checks the caller's uid and signing key, which root has
- * not; see Davx5). Busybox's setuidgid takes Android's name for the uid; the engine's APK is copied where that uid can
+ * not; see Caldav). Busybox's setuidgid takes Android's name for the uid; the engine's APK is copied where that uid can
  * read it first (Nixup's own folder is root's alone). What it is to do comes on its input, so passwords stay off
  * command lines and files.
  */

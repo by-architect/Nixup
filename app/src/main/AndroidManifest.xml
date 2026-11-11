@@ -14,8 +14,26 @@
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
-    <!-- Google's sign-in page, for the Google Play account (the engine, as root, reaches the network by itself). -->
+    <!-- Google's sign-in page, for the Google Play account (the engine, as root, reaches the network by itself), and
+         the CalDAV/CardDAV sync (services.caldav). -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- The CalDAV/CardDAV sync (services.caldav), as DAVx⁵'s: Android's calendar and contacts, which the build grants
+         when services.caldav is on; the sync framework's settings of Nixup's own accounts; and the tasks apps it syncs
+         with (Tasks.org, OpenTasks, jtx Board), whose permissions the build grants when they are installed. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.READ_SYNC_STATS" />
+    <uses-permission android:name="org.dmfs.permission.READ_TASKS" />
+    <uses-permission android:name="org.dmfs.permission.WRITE_TASKS" />
+    <uses-permission android:name="org.tasks.permission.READ_TASKS" />
+    <uses-permission android:name="org.tasks.permission.WRITE_TASKS" />
+    <uses-permission android:name="at.techbee.jtx.permission.READ" />
+    <uses-permission android:name="at.techbee.jtx.permission.WRITE" />
 
     <!-- The apps that open a folder (the Files app, file managers), for Open config folder. -->
     <queries>
@@ -23,11 +41,16 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="vnd.android.document/directory" />
         </intent>
+        <!-- The tasks apps the sync writes tasks into (their content providers). -->
+        <provider android:authorities="org.dmfs.tasks" />
+        <provider android:authorities="org.tasks.opentasks" />
+        <provider android:authorities="at.techbee.jtx.provider" />
     </queries>
 
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.DeviceDefault.DayNight">
         <activity
@@ -81,5 +104,88 @@
             android:name=".BackupJob"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- The CalDAV/CardDAV sync (services.caldav), as DAVx⁵'s: Nixup's account type, with Android's sync adapters
+             for the calendars and the tasks apps; and the address books' account type, with the contacts' adapter. -->
+        <service
+            android:name=".dav.sync.account.AccountAuthenticatorService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accounts.AccountAuthenticator"
+                android:resource="@xml/dav_account_authenticator" />
+        </service>
+        <service
+            android:name=".dav.sync.adapter.CalendarsSyncAdapterService"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/dav_sync_calendars" />
+        </service>
+        <service
+            android:name=".dav.sync.adapter.OpenTasksSyncAdapterService"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/dav_sync_opentasks" />
+        </service>
+        <service
+            android:name=".dav.sync.adapter.TasksOrgSyncAdapterService"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/dav_sync_tasks_org" />
+        </service>
+        <service
+            android:name=".dav.sync.adapter.JtxSyncAdapterService"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/dav_sync_jtx" />
+        </service>
+        <!-- (Exported, as in DAVx⁵: Google Contacts shows the address books only then, since Android 11.) -->
+        <service
+            android:name=".dav.sync.account.AddressBookAuthenticatorService"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accounts.AccountAuthenticator"
+                android:resource="@xml/dav_account_authenticator_address_book" />
+        </service>
+        <service
+            android:name=".dav.sync.adapter.ContactsSyncAdapterService"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/dav_sync_contacts" />
+            <meta-data
+                android:name="android.provider.CONTACTS_STRUCTURE"
+                android:resource="@xml/dav_contacts" />
+        </service>
     </application>
 </manifest>

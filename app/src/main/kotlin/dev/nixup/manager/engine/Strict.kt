@@ -6,7 +6,7 @@ import java.io.File
 /**
  * android.strict: the phone has the config's apps and no others. A build removes each app of the main user that is not
  * one of the system's (installed by hand, from a store, sideloaded) when no list of android.packages has it, nor
- * android.strict.keep, nor the config needs it otherwise (a user's androidApp, DAVx⁵ for services.davx5). It is hidden
+ * android.strict.keep, nor the config needs it otherwise (a user's androidApp). It is hidden
  * from the user (`pm hide`), as Android's device policies remove an app: gone for the user (no icon, it cannot run or be
  * found by other apps), but kept on the phone as it was, with its data and all Android keeps of it (permissions, special
  * access, notification settings, accounts, its installer of record). An uninstall would lose those, and a reinstall can be

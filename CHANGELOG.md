@@ -6,6 +6,23 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- Calendars, contacts and tasks from CalDAV/CardDAV servers are synced by Nixup's app itself, with no DAVx⁵ app:
+  `services.caldav` (its accounts: `url`, `userName`, `passwordFile`, `accountName`, as `services.davx5` had them).
+  The app has DAVx⁵'s sync inside it (its synctools and dav4jvm, and its sync code, from davx5-ose 4.5.21): each
+  account is an Android account of Nixup's app, which a build adds with no taps, its calendars in every calendar app,
+  its address books in the contacts (each one an account of its own, as DAVx⁵ has them) and its task lists in
+  Tasks.org, OpenTasks or jtx Board (`tasksApp`), synced both ways on each change made on the phone and every
+  `syncInterval` minutes. DAVx⁵'s settings are options: which collections sync (`syncCollections`, or each account's
+  `collections` and `exclude`), `wifiOnly`, `pastDays`, `defaultAlarm`, `manageCalendarColors`, `eventColors`,
+  `contactGroupMethod`. The build asks the server first (a refused password, or an address with no CalDAV nor CardDAV,
+  stops that account with the reason), waits for an account's first sync and says what came (its calendars and
+  events, address books and contacts, task lists and tasks). An account that leaves the config goes with what it put
+  on the phone (the server keeps it); changes made on the phone and not synced yet are synced first. Android's
+  Settings → Accounts lists each, and its Sync now syncs it.
+- `services.davx5` is `services.caldav`'s old name: a config that still has it builds as before, as `services.caldav`,
+  and each build warns with what to write instead (and that `install` and `automatic` do nothing now). The DAVx⁵
+  setting the earlier builds changed ("preselect collections") is given back; DAVx⁵ itself, and the accounts it has,
+  are left alone (a build warns that its calendars would show twice beside Nixup's).
 - An app from a developer's own server: in `android.packages.obtainium`, an app's `url` may be the link of one APK
   (ending in `.apk`), as Obtainium's "Direct APK link", besides a repository on GitHub, GitLab or Forgejo. That APK is
   installed and no newer one is looked for: a new link in the config is the update. Its version is read once it is
