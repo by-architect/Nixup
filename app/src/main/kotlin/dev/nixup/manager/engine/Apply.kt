@@ -10,7 +10,7 @@ import java.io.File
  * phone's own settings (android.system), the secrets (android.secrets), DAVx⁵'s accounts (android.davx5) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
  * nothing changes (the config's own system.preSwitchChecks among them); then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
  * the system settings (see SystemSettings), DAVx⁵'s accounts (see Davx5), the activation scripts (see Activation), the services (see Units), and the apps that left the config removed, their data kept.
- * With android.strict the apps on no list go too, last, and the ones it removed before that come back go first, before the installs (see Strict).
+ * With android.strict the apps on no list go too (hidden), last, and the ones it hid that come back go first, before the installs (see Strict).
  */
 class Apply(private val repos: Map<String, FDroid>, private val data: File, private val incoming: File? = null) {
     private val installer = Installer(data)
@@ -60,8 +60,8 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                 problems += "$id is not in $name (its index from ${repo.date}; if the app is new there, build with an update of the index)"
                 continue
             }
-            // (One strict removed comes back from its copy first: its update is planned from that.)
-            val installed = Device.installed(id) ?: strict.copyOf(id)
+            // (One strict hid comes back first: its update is planned from what it is.)
+            val installed = Device.installed(id) ?: strict.hidden(id)
             when (val choice = repo.suggested(app, installed)) {
                 is FDroid.Choice.Problem -> problems += choice.text
                 is FDroid.Choice.Pick -> when {
@@ -77,7 +77,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                 problems += "${app.id}: ${e.message}"
                 continue
             }
-            when (val plan = releases.plan(app, Device.installed(app.id) ?: strict.copyOf(app.id))) {
+            when (val plan = releases.plan(app, Device.installed(app.id) ?: strict.hidden(app.id))) {
                 is Releases.Plan.Install -> steps += plan.step
                 is Releases.Plan.Current -> upToDate += "${app.id} ${plan.version}"
                 is Releases.Plan.Problem -> problems += plan.text
@@ -93,7 +93,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
             } else try {
                 play.refresh(fromPlay, force)
                 for (id in fromPlay) {
-                    when (val plan = play.plan(id, Device.installed(id) ?: strict.copyOf(id))) {
+                    when (val plan = play.plan(id, Device.installed(id) ?: strict.hidden(id))) {
                         is PlayStore.Plan.Install -> steps += plan.steps
                         is PlayStore.Plan.Current -> upToDate += "$id ${plan.version}"
                         is PlayStore.Plan.Problem -> problems += plan.text
@@ -166,7 +166,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         // The data of the apps it installs, and the apps backed up with their APK that are not here, from backups (with
         // strict, only those it keeps: the rest would go again).
         val backup = Backup.of(data, android)
-        backup?.planRestore(toInstall.associate { it.id to it.code }, ids.toSet() + debloated + strict.bringingBack, strict.keep)
+        backup?.planRestore(toInstall.associate { it.id to it.code }, ids.toSet() + debloated, strict.keep, strict.bringingBack)
         // The config's own checks (system.preSwitchChecks), before anything changes: one that fails stops the build.
         val activation = Activation(data)
         activation.check(android, profile, dryRun, problems)
@@ -206,8 +206,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         if (secrets.apply() != 0) return 1
         // What the installs go by (an app verifier's checks), before them.
         var failed = system.applyBeforeInstalls()
-        // The apps strict removed that come back, from their copies with the data Android kept: before the installs, as
-        // a list that has one now may update it.
+        // The apps strict hid that come back, as they were: before the installs, as a list that has one now may update it.
         failed += strict.bringBack()
         val status = installer.fetchAndInstall(steps)
         if (status != 0) return status
@@ -291,7 +290,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         Out.size(steps.filter { it.size >= 0 }.sumOf { it.size }) + if (steps.any { it.size < 0 }) " and some of unknown size" else ""
 
     /**
-     * Brings back the apps it removed (strict's, from their copies, and debloat's), gives back every app setting and
+     * Brings back the apps it removed (strict's and debloat's), gives back every app setting and
      * system setting the module changed, takes the apps it put in Obtainium's list out again and removes the apps it
      * installed, keeping their data: the module is being removed.
      */

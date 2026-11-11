@@ -69,21 +69,23 @@ object Device {
 
     class Installed(val versionCode: Long, val versionName: String, val signers: Set<String>)
 
-    fun installed(id: String): Installed? {
+    /** The app installed for the main user, or with [hidden], the app hidden from it (pm hide: on the phone, but not the user's until unhidden). */
+    fun installed(id: String, hidden: Boolean = false): Installed? {
         packageManager?.let { pm ->
             return try {
-                val info = pm.getPackageInfo(id, PackageManager.GET_SIGNING_CERTIFICATES)
+                val flags = PackageManager.GET_SIGNING_CERTIFICATES or if (hidden) PackageManager.MATCH_UNINSTALLED_PACKAGES else 0
+                val info = pm.getPackageInfo(id, flags)
                 Installed(info.longVersionCode, info.versionName ?: "", signers(info.signingInfo))
             } catch (e: PackageManager.NameNotFoundException) {
                 null
             }
         }
-        val code = versionCode(id) ?: return null
+        val code = (if (hidden) versionCode(id, "-u", "--user", "0") else versionCode(id)) ?: return null
         return Installed(code, code.toString(), emptySet())
     }
 
-    /** The installed version, asked of pm itself (no cache in between), or null when the app is not installed. */
-    fun versionCode(id: String): Long? = run("pm", "list", "packages", "--show-versioncode", id).second
+    /** The installed version, asked of pm itself (no cache in between), or null when the app is not installed; [options] go to pm list packages. */
+    fun versionCode(id: String, vararg options: String): Long? = run("pm", "list", "packages", "--show-versioncode", *options, id).second
         .lineSequence().firstOrNull { it.startsWith("package:$id ") }
         ?.substringAfter("versionCode:")?.trim()?.toLongOrNull()
 
@@ -222,6 +224,7 @@ object Device {
         var enabled = 0
         var suspended = false
         var installed = false
+        var hidden = false
         var apk = true
         var user = -1
         var section: String? = null
@@ -252,6 +255,7 @@ object Device {
                         // Later sections (app links, ...) have "User 0:" lines too, without the package state.
                         if (user == 0 && text.contains(" installed=")) {
                             installed = Regex("""\binstalled=(true|false)""").find(text)?.groupValues?.get(1) == "true"
+                            hidden = Regex("""\bhidden=(true|false)""").find(text)?.groupValues?.get(1) == "true"
                             enabled = Regex("""\benabled=(\d+)""").find(text)?.groupValues?.get(1)?.toInt() ?: 0
                             suspended = Regex("""\bsuspended=(true|false)""").find(text)?.groupValues?.get(1) == "true"
                         }
@@ -260,8 +264,8 @@ object Device {
             }
         }
         // Uninstalled with its data kept, an app is still listed: not installed for the main user, or (One UI after a
-        // restart) said to be installed with no APK left (pkg=null).
-        return if (installed && apk) Dump(requested, runtime, enabled, suspended) else null
+        // restart) said to be installed with no APK left (pkg=null). A hidden one (android.strict's) is not the user's either.
+        return if (installed && apk && !hidden) Dump(requested, runtime, enabled, suspended) else null
     }
 
     /** Grants or revokes a runtime permission, with the user-set and user-fixed flags of the state wanted. */
@@ -759,19 +763,23 @@ object Device {
         .map { it.trim() }.filter { it.startsWith("package:") }.map { it.removePrefix("package:") }
         .filter { PACKAGE_NAME.matches(it) }.toSet()
 
-    /** Whether the app is installed for the main user (one another user alone has is not). */
+    /** Whether the app is installed for the main user (one another user alone has, or a hidden one, is not). */
     fun installedForUser(id: String): Boolean =
         run("pm", "list", "packages", "--user", "0", id).second.lineSequence().any { it.trim() == "package:$id" }
 
-    /** An installed app's APKs, its base APK first, then its splits; none when the main user has not got it. */
-    fun apkFiles(id: String): List<File> = run("pm", "path", "--user", "0", id).second.lineSequence()
-        .map { it.trim() }.filter { it.startsWith("package:") && it.endsWith(".apk") }.map { File(it.removePrefix("package:")) }
-        .sortedBy { it.name != "base.apk" }.toList()
+    /**
+     * Hides the app from the main user, as device policies do: gone for the user (no icon, it cannot run, other apps do
+     * not find it), but kept on the phone as it is, with its data and all Android keeps of it, until [unhide].
+     */
+    fun hide(id: String): Boolean = run("pm", "hide", "--user", "0", id).second.contains("new hidden state: true")
 
-    /** The app that installed it, its installer of record (which updates it, and which some apps check), or null. */
-    fun installerOf(id: String): String? = run("pm", "list", "packages", "-i", "--user", "0", id).second.lineSequence()
-        .firstOrNull { it.startsWith("package:$id ") }?.substringAfter("installer=", "")?.trim()
-        ?.takeIf { it.isNotEmpty() && it != "null" }
+    fun unhide(id: String): Boolean = run("pm", "unhide", "--user", "0", id).second.contains("new hidden state: false")
+
+    /** Whether the app is on the phone, hidden from the main user. */
+    fun hiddenForUser(id: String): Boolean =
+        run("dumpsys", "package", id).second.lineSequence().any { line ->
+            line.trimStart().startsWith("User 0:") && Regex("""\binstalled=true\b""").containsMatchIn(line) && Regex("""\bhidden=true\b""").containsMatchIn(line)
+        }
 
     /** The apps that are device admin apps of the main user: Android does not uninstall one while it is. */
     fun deviceAdmins(): Set<String> = try {

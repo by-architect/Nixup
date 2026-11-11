@@ -223,13 +223,14 @@ in
         description = ''
           Only the config's apps on the phone: each build removes every app of the phone's main user
           that is not one of the system's (installed by hand, from a store, or sideloaded) when no list
-          of android.packages has it, nor keep. Its data stays, and a copy of its APKs
-          (/data/adb/nixup/strict), so it comes back as it was, with its data, its installer and its
-          permissions, when strict is off again, when keep or a list names it, and when the module is
-          removed. Nixup's app, the root solution's (Magisk, also hidden under another name; KernelSU;
-          APatch) and the apps the config needs (a user's androidApp, DAVx⁵ with services.davx5)
-          always stay, and a build stops rather than remove the launcher or the keyboard in use. The
-          apps that came with the phone are debloat's (android.apps.<app>.debloat).
+          of android.packages has it, nor keep. It is hidden from the user, as Android's device
+          policies remove an app: gone for the user (no icon, it cannot run), but kept on the phone as
+          it is, with its data, permissions and settings, so it comes back exactly as it was when
+          strict is off again, when keep or a list names it, and when the module is removed. Nixup's
+          app, the root solution's (Magisk, also hidden under another name; KernelSU; APatch) and the
+          apps the config needs (a user's androidApp, DAVx⁵ with services.davx5) always stay, and a
+          build stops rather than remove the launcher or the keyboard in use. The apps that came with
+          the phone are debloat's (android.apps.<app>.debloat).
         '';
       };
 

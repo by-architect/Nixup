@@ -633,18 +633,20 @@ class Backup private constructor(
     /**
      * What a build restores: the data of the apps it installs ([installing]: each one's version code, when known),
      * and the apps backed up with their APK that are neither on the phone nor in the config's lists ([listed]), from
-     * their backups; with android.strict, only the ones it keeps ([allowed]: any other would go again). A repository
-     * that cannot be read keeps nothing from building: the apps come without their data.
+     * their backups; with android.strict, only the ones it keeps ([allowed]: any other would go again), and none it
+     * brings back itself with the data they kept ([back]). A repository that cannot be read keeps nothing from
+     * building: the apps come without their data.
      */
-    fun planRestore(installing: Map<String, Long?>, listed: Set<String>, allowed: Set<String>? = null) {
-        val candidates = apps.filter { it.value.autoRestore }
+    fun planRestore(installing: Map<String, Long?>, listed: Set<String>, allowed: Set<String>? = null, back: Set<String> = emptySet()) {
+        // (An app strict removes, on no list nor in its keep, is strict's: backups leave it.)
+        val candidates = apps.filter { (id, settings) ->
+            settings.autoRestore && id !in back && (allowed == null || id in allowed || id in listed || id in installing)
+        }
         // An app this phone backed up and that is not on it now was removed: it comes back only by hand.
         val removed = candidates.keys.filter { state().has(it) && Device.versionCode(it) == null }.toSet()
         if (removed.isNotEmpty()) Out.line("Backups: not brought back by themselves, as they were removed since this phone backed them up (the Backups tab restores them): ${removed.joinToString(", ")}")
         val fresh = candidates.filterKeys { it in installing && it !in removed }
-        val missing = candidates.filter { (id, settings) ->
-            id !in removed && id !in listed && id !in installing && (allowed == null || id in allowed) && settings.apk && Device.versionCode(id) == null
-        }
+        val missing = candidates.filter { (id, settings) -> id !in removed && id !in listed && id !in installing && settings.apk && Device.versionCode(id) == null }
         if (fresh.isEmpty() && missing.isEmpty()) return
         val all = try {
             snapshots()

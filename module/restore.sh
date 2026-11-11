@@ -38,29 +38,24 @@ restore_debloat() {
   rm -f "$journal"
 }
 
-# The apps strict removed (android.strict) come back from the copies of their APKs,
-# with the data the phone kept (the engine does this, with their installer, state
-# and permissions; this is for when it could not run). Each APK goes into pm
-# through a pipe: Android may not read /data/adb.
+# The apps strict hid (android.strict) come back, as they were: they stayed on the
+# phone with their data (the engine does this; this is for when it could not run).
 restore_strict() {
-  for dir in /data/adb/nixup/strict/*/; do
-    [ -f "${dir}base.apk" ] || continue
-    app=${dir%/}
-    app=${app##*/}
-    size=0
-    for apk in "$dir"*.apk; do size=$((size + $(stat -c %s "$apk"))); done
-    session=$(pm install-create -r --user 0 -S "$size" < /dev/null 2> /dev/null | sed -n 's/.*\[\([0-9]*\)\].*/\1/p')
-    [ -n "$session" ] || continue
-    written=1
-    for apk in "$dir"*.apk; do
-      cat "$apk" | pm install-write -S "$(stat -c %s "$apk")" "$session" "${apk##*/}" - > /dev/null 2>&1 || written=0
-    done
-    if [ "$written" = 1 ] && pm install-commit "$session" < /dev/null 2>&1 | grep -q Success; then
+  hidden=/data/adb/nixup/hidden
+  [ -f "$hidden" ] || return 0
+  # (One that did not come back stays listed, for the next try at a start.)
+  left=
+  while read -r app; do
+    [ -n "$app" ] || continue
+    if pm unhide --user 0 "$app" < /dev/null 2> /dev/null | grep -q 'hidden state: false'; then
       echo "Brought $app back"
     else
-      pm install-abandon "$session" < /dev/null > /dev/null 2>&1
+      left="$left$app
+"
     fi
-  done
+  done < "$hidden"
+  printf '%s' "$left" > "$hidden"
+  [ -s "$hidden" ] || rm -f "$hidden"
 }
 
 # The apps the module put in Obtainium's list go out of it again (the engine does

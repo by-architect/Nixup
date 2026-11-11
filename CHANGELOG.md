@@ -8,12 +8,14 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 - Strict mode: `android.strict.enable = true` keeps the phone to the config's apps. Each build removes every app
   installed by hand (from a store, sideloaded) that no list of `android.packages` has, nor `android.strict.keep`
-  (for apps no repository has: a bank's app, a build of your own). Its data stays and a copy of its APKs is kept,
-  so it comes back as it was (with its data, installer of record, enabled state and permissions) when strict is
-  turned off, when `keep` or a list names it, and when Nixup is removed. Nixup's app, the root solution's app
-  (Magisk, also when hidden under another name, KernelSU, APatch) and the apps the config needs (a user's
-  `androidApp`, DAVx⁵ with `services.davx5`) always stay; a build stops rather than remove the launcher or the
-  keyboard in use, leaves device admin apps, and with backups, no longer reinstalls an app strict would remove.
+  (for apps no repository has: a bank's app, a build of your own). It is hidden from the user, as Android's device
+  policies remove an app: gone for the user, but kept on the phone with its data, permissions and settings, so it
+  comes back exactly as it was when strict is turned off, when `keep` or a list names it, and when Nixup is removed
+  (an uninstall would lose its settings, and a phone maker can refuse to install its own apps again: One UI's Tips).
+  Nixup's app, the root solution's app (Magisk, also when hidden under another name, KernelSU, APatch) and the apps
+  the config needs (a user's `androidApp`, DAVx⁵ with `services.davx5`) always stay; a build stops rather than
+  remove the launcher or the keyboard in use, leaves device admin apps, and with backups, no longer reinstalls an
+  app strict would remove.
 
 ## 0.1.6 (2026-11-08)
 
