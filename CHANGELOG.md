@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.9 (2026-11-11)
 
 - Calendars, contacts and tasks from CalDAV/CardDAV servers are synced by Nixup's app itself, with no DAVx⁵ app:
   `services.caldav` (its accounts: `url`, `userName`, `passwordFile`, `accountName`, as `services.davx5` had them).

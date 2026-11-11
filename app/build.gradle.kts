@@ -11,8 +11,8 @@ android {
         applicationId = "dev.nixup.manager"
         minSdk = 30
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.1.8"
+        versionCode = 11
+        versionName = "0.1.9"
     }
 
     // DAVx⁵'s synctools needs it (ical4j uses java.time and java.nio beyond what every Android has).
