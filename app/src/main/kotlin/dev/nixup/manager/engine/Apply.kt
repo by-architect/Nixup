@@ -90,7 +90,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
             }
         }
         if (fromPlay.isNotEmpty()) {
-            val play = PlayStore(data, android)
+            val play = PlayStore(data, android, Secrets(data, incoming)::staged)
             // The account first: without one Google takes, no app of the list can come.
             val signIn = play.signInProblem()
             if (signIn != null) {

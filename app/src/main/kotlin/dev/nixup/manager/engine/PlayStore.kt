@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit
  * matching the SHA-256 Play lists, and its signing key for being one Play lists for it (Android then holds updates to
  * it), as Aurora Store trusts them.
  */
-class PlayStore(private val data: File, android: JSONObject?) {
+class PlayStore(private val data: File, android: JSONObject?, private val staged: (File) -> File? = { null }) {
     private val dir = File(data, "repos/$NAME")
     private val appsFile = File(dir, "apps.json")
     private val sessionFile = File(dir, "session.json")
@@ -68,7 +68,8 @@ class PlayStore(private val data: File, android: JSONObject?) {
 
     private fun credential(): Credential? {
         tokenFile?.let { file ->
-            val token = runCatching { file.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() }
+            // A token this build sends (new, or changed) is checked as it will be: the secrets go in place after the checks.
+            val token = runCatching { (staged(file) ?: file).readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() }
                 ?: throw Stop("android.playstore.tokenFile: there is no token in $file")
             val email = account ?: throw Stop("android.playstore.tokenFile: the config names no account for it (android.playstore.account)")
             return Credential(email, token)

@@ -12,6 +12,10 @@ section after the version, and its text is what the Magisk app shows as the upda
   downloaded and remembered, so the next builds leave it be; one installed newer (by the app's own updater) is not
   taken back. Pin its `signer`, as nothing else vouches for the APK. `apkFilter` and `prerelease` have nothing to pick
   between there, and a build stops when they are set.
+- A Google Play token given in the config (`android.playstore.tokenFile`) works on the first build that sends it, and on
+  the one that changes it: the build checked the account before it put its secrets in place, so it found no token
+  there (or the old one) and stopped with "there is no token in /data/adb/nixup/secrets/android.playstore.tokenFile".
+  It now checks the token the build brings.
 
 ## 0.1.8 (2026-11-11)
 
