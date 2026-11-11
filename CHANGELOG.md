@@ -23,6 +23,12 @@ section after the version, and its text is what the Magisk app shows as the upda
   and each build warns with what to write instead (and that `install` and `automatic` do nothing now). The DAVx⁵
   setting the earlier builds changed ("preselect collections") is given back; DAVx⁵ itself, and the accounts it has,
   are left alone (a build warns that its calendars would show twice beside Nixup's).
+- An app from a developer's own server: in `android.packages.obtainium`, an app's `url` may be the link of one APK
+  (ending in `.apk`), as Obtainium's "Direct APK link", besides a repository on GitHub, GitLab or Forgejo. That APK is
+  installed and no newer one is looked for: a new link in the config is the update. Its version is read once it is
+  downloaded and remembered, so the next builds leave it be; one installed newer (by the app's own updater) is not
+  taken back. Pin its `signer`, as nothing else vouches for the APK. `apkFilter` and `prerelease` have nothing to pick
+  between there, and a build stops when they are set.
 
 ## 0.1.8 (2026-11-11)
 

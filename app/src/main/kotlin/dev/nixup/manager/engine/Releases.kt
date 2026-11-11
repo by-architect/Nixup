@@ -22,6 +22,10 @@ import java.util.regex.PatternSyntaxException
  *
  * When Obtainium is on the phone, the apps are put in its own list too, so it shows them and can update them
  * (see [tellObtainium]).
+ *
+ * An app's url may instead be the link of one APK (its path ends in .apk), as Obtainium's "Direct APK link": for a
+ * developer who puts APKs on a server of their own. That APK is the app's only release, and no newer one is looked
+ * for: a new link in the config is the update. Its version is known once it is downloaded, and kept for the next builds.
  */
 class Releases(data: File) {
     private val dir = File(data, "repos/$NAME")
@@ -30,7 +34,10 @@ class Releases(data: File) {
     private val toldFile = File(dir, "told")
 
     /** One of the config's apps from releases: an entry of android.packages.obtainium. */
-    class App(val id: String, val url: String, val apkFilter: String?, val signer: String?, val prerelease: Boolean)
+    class App(val id: String, val url: String, val apkFilter: String?, val signer: String?, val prerelease: Boolean) {
+        /** Its url is the link of one APK, not a repository's. */
+        val direct: Boolean get() = isDirect(url)
+    }
 
     class Asset(val name: String, val url: String, val size: Long, val sha256: String?) {
         /** What tells this APK from another: its checksum, else its address and size. */
@@ -96,6 +103,17 @@ class Releases(data: File) {
     fun refresh(app: App, force: Boolean) {
         val old = saved(app)
         val now = System.currentTimeMillis()
+        if (app.direct) {
+            // Nothing to ask a server: the link is the release. (Its version code, once learned, stays with it.)
+            if (old != null && !force) return
+            if (old == null) {
+                val name = linkName(app.url)
+                val release = Release(name.substring(0, name.length - ".apk".length), false, listOf(Asset(name, app.url, -1, null)))
+                save(app, JSONObject().put("url", app.url).put("kind", DIRECT).put("checked", now).put("releases", toJson(listOf(release))).put("codes", JSONObject()))
+            }
+            Out.line("$NAME: ${app.id}: the APK at its link, ${linkName(app.url)} (a new link in the config is its update)")
+            return
+        }
         if (old != null && !force && now - old.getLong("checked") < FDroid.MAX_AGE) return
         val place = place(app.url)
         var why = "no list of releases there"
@@ -240,6 +258,11 @@ class Releases(data: File) {
      * matching apkFilter; of its APKs, the one for this phone.
      */
     private fun choose(app: App, releases: List<Release>): Choice {
+        // A link's APK is the one the config named: no other to pick between.
+        if (app.direct) {
+            val release = releases.firstOrNull() ?: return Choice.Problem("${app.id}: no APK at ${app.url}")
+            return Choice.Pick(release, release.assets.single())
+        }
         val filter = try {
             app.apkFilter?.let { Regex(it) }
         } catch (e: PatternSyntaxException) {
@@ -292,12 +315,14 @@ class Releases(data: File) {
             // Before its APK was ever downloaded: a release named for the version installed (v1.2.3 for 1.2.3) is that version.
             if (known == null && sameVersion(installed.versionName, pick.release.tag)) return Plan.Current(installed.versionName)
         }
-        val place = place(app.url)
+        val host = URI(app.url).host?.lowercase()?.removePrefix("www.")
+        val name = if (app.direct) pick.release.tag else place(app.url).name
         val pinned = app.signer != null
         return Plan.Install(
             Installer.Step(
-                repo = NAME, id = app.id, name = Device.label(app.id) ?: place.name, version = pick.release.tag, code = known,
-                size = pick.asset.size, url = pick.asset.url, sha256 = pick.asset.sha256, listedBy = "the release on ${place.host}",
+                repo = NAME, id = app.id, name = Device.label(app.id) ?: name, version = pick.release.tag, code = known,
+                size = pick.asset.size, url = pick.asset.url, sha256 = pick.asset.sha256,
+                listedBy = if (app.direct) "its link on $host" else "the release on $host",
                 keys = if (pinned) setOf(app.signer!!) else installed?.signers?.takeIf { it.isNotEmpty() },
                 keysFrom = if (pinned) {
                     "pinned in its signer (an APK with another key may not be the developer's; or is the pin wrong?)"
@@ -355,6 +380,8 @@ class Releases(data: File) {
                 Out.line("Obtainium: its list does not have the apps yet: open it once (it makes its storage then), then build again")
             } else {
                 for (app in apps) {
+                    // An APK at a link has no newer release Obtainium could find: the config updates it.
+                    if (app.direct) continue
                     val file = File(folder, "${app.id}.json")
                     wanted += file.path
                     // There already: put there by the module, or by the user (theirs is left alone, and stays theirs).
@@ -438,7 +465,14 @@ class Releases(data: File) {
         private const val GITHUB = "github"
         private const val GITLAB = "gitlab"
         private const val GITEA = "gitea"
+        private const val DIRECT = "direct"
         private const val TEMP = ".nixup"
+
+        /** Whether [url] is the link of one APK (its path ends in .apk), not a repository's address. */
+        fun isDirect(url: String): Boolean = runCatching { URI(url).path.orEmpty().endsWith(".apk", ignoreCase = true) }.getOrDefault(false)
+
+        /** The APK's file name in a link, as the server names it. */
+        private fun linkName(url: String): String = URI(url).path.substringAfterLast('/')
 
         /** The servers Obtainium knows by themselves (others it needs told which kind they are). */
         private val OBTAINIUM_HOSTS = listOf("github.com", "gitlab.com", "codeberg.org")
@@ -462,7 +496,7 @@ class Releases(data: File) {
                 val id = app.getString("id")
                 val url = app.getString("url").trimEnd('/')
                 if (!PACKAGE_NAME.matches(id) || !url.startsWith("https://")) {
-                    throw Stop("android.packages.$NAME: each app needs its package name as id, and the https:// address of its repository as url")
+                    throw Stop("android.packages.$NAME: each app needs its package name as id, and the https:// address of its repository (or of its APK) as url")
                 }
                 App(id, url, app.text("apkFilter"), app.text("signer")?.lowercase()?.replace(":", ""), app.optBoolean("prerelease"))
             }
