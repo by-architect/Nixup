@@ -106,12 +106,15 @@ class FDroid(private val dir: File, val name: String, val url: String, private v
 
     sealed class Choice {
         class Pick(val version: Version) : Choice()
+        /** The app installed has another key than every build here: the one to reinstall it as, its data kept (see Reinstall). */
+        class Reinstall(val version: Version) : Choice()
         class Problem(val text: String) : Choice()
     }
 
     /**
      * The version F-Droid itself would suggest: the newest stable one this phone can run (Android version, ABIs),
-     * signed with the key of the app already installed, else with the app's preferred key.
+     * signed with the key of the app already installed, else with the app's preferred key. An app installed with another
+     * key than every build here gets the one a new install would, to be reinstalled as ([Choice.Reinstall]).
      */
     fun suggested(app: App, installed: Device.Installed?): Choice {
         val runs = app.versions.filter { v ->
@@ -127,20 +130,19 @@ class FDroid(private val dir: File, val name: String, val url: String, private v
             else -> runs
         }
         if (signed.isEmpty()) {
-            return Choice.Problem(
-                "${app.id} is installed with another signing key than the builds in $name, so they cannot update it: " +
-                    "uninstall it first (its data goes with it), or take it out of the config",
-            )
+            // (Installed with another key than every build here: the one a new install would get.)
+            val fresh = app.preferredSigner?.let { preferred -> runs.filter { preferred in it.signers }.ifEmpty { runs } } ?: runs
+            return Choice.Reinstall(fresh.maxBy { it.code })
         }
         return Choice.Pick(signed.maxBy { it.code })
     }
 
-    /** Installing or updating [app] to [version]: its APK's checksum and keys are those in the signed index. */
-    fun step(app: App, version: Version, installed: Device.Installed?) = Installer.Step(
+    /** Installing or updating [app] to [version] (or with [reinstall], see Installer.Step): its APK's checksum and keys are those in the signed index. */
+    fun step(app: App, version: Version, installed: Device.Installed?, reinstall: Boolean = false) = Installer.Step(
         repo = name, id = app.id, name = app.name, version = version.name, code = version.code, size = version.size,
         url = address + version.file, sha256 = version.sha256, listedBy = "the signed index of $name",
         keys = version.signers.toSet(), keysFrom = "listed for it in the signed index of $name",
-        installed = installed, installers = Device.FDROID,
+        installed = installed, installers = Device.FDROID, reinstall = reinstall,
     )
 
     /** entry.json, from entry.jar once its signature is checked against the repository's pinned key. */

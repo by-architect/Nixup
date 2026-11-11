@@ -775,6 +775,19 @@ object Device {
 
     fun unhide(id: String): Boolean = run("pm", "unhide", "--user", "0", id).second.contains("new hidden state: false")
 
+    /** The app that installed it, its installer of record (which updates it, and which some apps check), or null. */
+    fun installerOf(id: String): String? = run("pm", "list", "packages", "-i", "--user", "0", id).second.lineSequence()
+        .firstOrNull { it.startsWith("package:$id ") }?.substringAfter("installer=", "")?.trim()
+        ?.takeIf { it.isNotEmpty() && it != "null" }
+
+    /** The phone's other users that have the app installed (an app clone's, a work profile's), by their numbers. */
+    fun otherUsers(id: String): List<Int> = run("dumpsys", "package", id).second.lineSequence()
+        .mapNotNull { Regex("""^\s*User (\d+): .*\binstalled=true\b""").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+        .filter { it != 0 }.distinct().toList()
+
+    /** Whether Android knows the app at all: installed, hidden, or uninstalled with its data (and its key) kept. */
+    fun known(id: String): Boolean = run("pm", "list", "packages", "-u", id).second.lineSequence().any { it.trim() == "package:$id" }
+
     /** Whether the app is on the phone, hidden from the main user. */
     fun hiddenForUser(id: String): Boolean =
         run("dumpsys", "package", id).second.lineSequence().any { line ->

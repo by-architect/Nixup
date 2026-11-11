@@ -68,6 +68,10 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                     installed == null || installed.versionCode < choice.version.code -> steps += repo.step(app, choice.version, installed)
                     else -> upToDate += "$id ${installed.versionName}"
                 }
+                // Installed with another key than every build there: reinstalled as theirs, its data kept, when it can be.
+                is FDroid.Choice.Reinstall -> if (installer.reinstall.check(id, installed!!, choice.version.code, name, problems)) {
+                    steps += repo.step(app, choice.version, installed, reinstall = true)
+                }
             }
         }
         for (app in fromReleases) {
@@ -78,7 +82,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                 continue
             }
             when (val plan = releases.plan(app, Device.installed(app.id) ?: strict.hidden(app.id))) {
-                is Releases.Plan.Install -> steps += plan.step
+                is Releases.Plan.Install -> if (!plan.step.reinstall || installer.reinstall.check(app.id, plan.step.installed!!, plan.step.code, Releases.NAME, problems)) {
+                    steps += plan.step
+                }
                 is Releases.Plan.Current -> upToDate += "${app.id} ${plan.version}"
                 is Releases.Plan.Problem -> problems += plan.text
             }
@@ -94,7 +100,11 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                 play.refresh(fromPlay, force)
                 for (id in fromPlay) {
                     when (val plan = play.plan(id, Device.installed(id) ?: strict.hidden(id))) {
-                        is PlayStore.Plan.Install -> steps += plan.steps
+                        is PlayStore.Plan.Install -> {
+                            // (The app is the last of its steps, after the libraries it needs.)
+                            val app = plan.steps.last()
+                            if (!app.reinstall || installer.reinstall.check(id, app.installed!!, app.code, PlayStore.NAME, problems)) steps += plan.steps
+                        }
                         is PlayStore.Plan.Current -> upToDate += "$id ${plan.version}"
                         is PlayStore.Plan.Problem -> problems += plan.text
                     }
@@ -110,7 +120,8 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         // (One strict keeps stays, if the module installed it too.)
         val removals = owned.filter { it !in ids && it !in strict.keep.orEmpty() }
         val toInstall = steps.filter { it.installed == null }
-        val toUpdate = steps.filter { it.installed != null }
+        val toUpdate = steps.filter { it.installed != null && !it.reinstall }
+        val toReinstall = steps.filter { it.reinstall }
 
         val sources = wanted.map { it.second }.distinct()
         Out.line("Apps in the config: ${wanted.size}" + if (sources.size > 1) " (from ${sources.joinToString(", ")})" else "")
@@ -125,6 +136,13 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                 val check = if (it.code == null) ", if its APK is newer" else ""
                 Out.line("  ${it.id}  ${it.installed!!.versionName} -> ${it.version}  ${Out.size(it.size)}  (from ${it.repo}$check)")
             }
+        }
+        if (toReinstall.isNotEmpty()) {
+            Out.line(
+                "To reinstall (${toReinstall.size}, ${download(toReinstall)} to download; installed with another key than their source's builds: " +
+                    "each comes back as theirs with its data, but for what it locked in Android's keystore, so it may ask to sign in again):",
+            )
+            toReinstall.forEach { Out.line("  ${it.id}  ${it.installed!!.versionName} (another key) -> ${it.version}  ${Out.size(it.size)}  (from ${it.repo})") }
         }
         if (removals.isNotEmpty()) {
             Out.line("To remove (${removals.size}, they left the config; their data is kept):")
@@ -181,7 +199,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
             "system settings".takeIf { system.changes }, "secrets".takeIf { secrets.changes }, "services".takeIf { units.changes },
             "adb".takeIf { adb.changes }, "data from backups".takeIf { backup?.changes == true }, "DAVx⁵ accounts".takeIf { davx5.changes },
         )
-        writeSummary(dryRun, toInstall.size, toUpdate.size, removals.size + strict.removing.size, strict.bringingBack.size, parts)
+        writeSummary(dryRun, toInstall.size, toUpdate.size, toReinstall.size, removals.size + strict.removing.size, strict.bringingBack.size, parts)
         if (steps.isEmpty() && removals.isEmpty() && !strict.changes && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes && backup?.changes != true && !davx5.changes) {
             Out.line("Nothing to change")
             if (dryRun) {
@@ -258,12 +276,12 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
     }
 
     /** The summary of a build's changes, in $DATA/tmp/summary: "2 apps installed, 1 updated, system settings". */
-    private fun writeSummary(dryRun: Boolean, installs: Int, updates: Int, removals: Int, comebacks: Int, parts: List<String>) {
+    private fun writeSummary(dryRun: Boolean, installs: Int, updates: Int, reinstalls: Int, removals: Int, comebacks: Int, parts: List<String>) {
         val apps = { n: Int -> if (n == 1) "1 app" else "$n apps" }
         val counts = if (dryRun) {
-            listOfNotNull(installs.takeIf { it > 0 }?.let { "${apps(it)} to install" }, updates.takeIf { it > 0 }?.let { "${apps(it)} to update" }, removals.takeIf { it > 0 }?.let { "${apps(it)} to remove" }, comebacks.takeIf { it > 0 }?.let { "${apps(it)} to bring back" })
+            listOfNotNull(installs.takeIf { it > 0 }?.let { "${apps(it)} to install" }, updates.takeIf { it > 0 }?.let { "${apps(it)} to update" }, reinstalls.takeIf { it > 0 }?.let { "${apps(it)} to reinstall" }, removals.takeIf { it > 0 }?.let { "${apps(it)} to remove" }, comebacks.takeIf { it > 0 }?.let { "${apps(it)} to bring back" })
         } else {
-            listOfNotNull(installs.takeIf { it > 0 }?.let { "${apps(it)} installed" }, updates.takeIf { it > 0 }?.let { "${apps(it)} updated" }, removals.takeIf { it > 0 }?.let { "${apps(it)} removed" }, comebacks.takeIf { it > 0 }?.let { "${apps(it)} brought back" })
+            listOfNotNull(installs.takeIf { it > 0 }?.let { "${apps(it)} installed" }, updates.takeIf { it > 0 }?.let { "${apps(it)} updated" }, reinstalls.takeIf { it > 0 }?.let { "${apps(it)} reinstalled" }, removals.takeIf { it > 0 }?.let { "${apps(it)} removed" }, comebacks.takeIf { it > 0 }?.let { "${apps(it)} brought back" })
         }
         val all = counts + parts
         val text = when {

@@ -37,8 +37,9 @@
     byarchitect.url = "https://fdroid.byarchitect.org/fdroid/repo?fingerprint=50941BDAC56B056A520ABFA3FC7DAAB789DEE5B83B295DA54A1961C7BC8A91C9";
   };
 
-  # Apps to install and keep up to date, each from one repository. An app installed already must
-  # be signed with the key the repository's builds have (the build says so when it is not).
+  # Apps to install and keep up to date, each from one repository. An app installed already with
+  # another key than the repository's builds (from another store) is reinstalled as theirs, its data
+  # kept (but what it locked in Android's keystore: it may ask to sign in again).
   android.packages.fdroid = with pkgs.fdroid; [
     com.termux                                    # Termux: terminal
   ];
@@ -95,7 +96,7 @@
   # The phone's other apps (sideloaded, debug builds, and Google Play apps not listed above) come
   # from no repository here, so Nixup leaves them as they are. F-Droid has its own builds of
   # Tailscale, KDE Connect, LocalSend, Organic Maps, Proton VPN and addy.io, signed with another
-  # key than the ones installed: moving to them means reinstalling (the app's data goes).
+  # key than the ones installed: listing one here reinstalls it as F-Droid's build, its data kept.
 
   # Or strict: the phone has the apps of the lists above and no others. Each build removes the apps
   # installed by hand that no list has, nor keep: hidden from you, they stay on the phone as they

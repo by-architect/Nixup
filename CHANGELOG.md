@@ -6,6 +6,17 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- An app of the config installed with another signing key than its source's builds (from another store, or the
+  developer's build where F-Droid builds its own) no longer stops the build: it is reinstalled as the source's build,
+  with its data. Android lets no build with another key update an app, nor install over the data an uninstall keeps,
+  so each build sets the app's data aside first (its folders and APKs, with its runtime permissions, accounts,
+  default-app roles, keyboard, battery setting and enabled state), uninstalls it, installs the source's build and
+  puts it all back as the new install's own; when the new build does not install, the app comes back as it was. It
+  stays your app (removing Nixup leaves it). What an app locked in Android's keystore does not come with it, so such
+  an app may ask to sign in again. A build checks first that the source's version is not older than the one
+  installed (its data could be newer than it reads), that the app did not come with the phone, and that no other user
+  (an app clone, a work profile) has it. The same goes for Google Play's builds, and for an app from its releases whose
+  `signer` is pinned.
 - Strict mode: `android.strict.enable = true` keeps the phone to the config's apps. Each build removes every app
   installed by hand (from a store, sideloaded) that no list of `android.packages` has, nor `android.strict.keep`
   (for apps no repository has: a bank's app, a build of your own). It is hidden from the user, as Android's device

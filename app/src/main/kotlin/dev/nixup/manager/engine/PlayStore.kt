@@ -299,13 +299,10 @@ class PlayStore(private val data: File, android: JSONObject?) {
             return Plan.Problem("$id needs files besides its APKs (expansion files, OBB), which Nixup does not put in place yet: install it with Aurora Store, or take it out of the config")
         }
         if (app.versionCode <= 0) return Plan.Problem("$id: Google Play names no version of it for this phone")
-        if (installed != null && installed.signers.isNotEmpty() && app.signers.isNotEmpty() && app.signers.none { it in installed.signers }) {
-            return Plan.Problem(
-                "$id is installed with another signing key than Google Play's builds (an F-Droid build?), so they cannot update it: " +
-                    "uninstall it first (its data goes with it), or take it out of the config",
-            )
-        }
-        if (installed != null && installed.versionCode >= app.versionCode) return Plan.Current(installed.versionName)
+        // Installed with another key than Google Play's builds (an F-Droid build?): reinstalled as Google Play's, its data kept
+        // (see Reinstall), at the same version too.
+        val reinstall = installed != null && installed.signers.isNotEmpty() && app.signers.isNotEmpty() && app.signers.none { it in installed.signers }
+        if (installed != null && !reinstall && installed.versionCode >= app.versionCode) return Plan.Current(installed.versionName)
         val steps = ArrayList<Installer.Step>()
         for (library in app.libraries) {
             if (Device.hasLibrary(library.id, library.versionCode) || !plannedLibraries.add("${library.id}:${library.versionCode}")) continue
@@ -328,8 +325,10 @@ class PlayStore(private val data: File, android: JSONObject?) {
                 "of the app installed: Android takes an update only with the same key, so uninstall it first (its data goes with it), or take it out of the config"
             },
             installed = installed, installers = Device.PLAYSTORE,
-            // An update names the installed app's key, so Play gives the files that install over it after a key rotation.
-            parts = { files(id, app.versionCode, app.offerType, installed?.let { certificate(id) }) },
+            // An update names the installed app's key, so Play gives the files that install over it after a key rotation (a
+            // reinstall's is another key altogether).
+            parts = { files(id, app.versionCode, app.offerType, installed?.takeIf { !reinstall }?.let { certificate(id) }) },
+            reinstall = reinstall,
         )
         return Plan.Install(steps)
     }
@@ -486,7 +485,11 @@ class PlayStore(private val data: File, android: JSONObject?) {
                     app.libraries.joinToString("") { ", needs the library ${it.id} ${it.versionCode}" })
                 if (app.signers.isNotEmpty()) Out.line("  signed with (SHA-256): ${app.signers.joinToString(", ")}")
                 Out.line("  " + when (val plan = store.plan(id, installed)) {
-                    is Plan.Install -> if (installed == null) "a build would install it" else "a build would update it from ${installed.versionName}"
+                    is Plan.Install -> when {
+                        installed == null -> "a build would install it"
+                        plan.steps.any { it.reinstall } -> "a build would reinstall it as Google Play's build (the one installed has another key), its data kept"
+                        else -> "a build would update it from ${installed.versionName}"
+                    }
                     is Plan.Current -> "installed, up to date (${plan.version})"
                     is Plan.Problem -> "✘ ${plan.text.removePrefix("$id: ")}"
                 })

@@ -284,10 +284,10 @@ class Releases(data: File) {
             is Choice.Pick -> choice
         }
         val known = saved.optJSONObject("codes")?.optLong(pick.asset.key, -1)?.takeIf { it >= 0 }
-        if (installed != null) {
-            if (app.signer != null && installed.signers.isNotEmpty() && app.signer !in installed.signers) {
-                return Plan.Problem("${app.id} is installed with another signing key than the one in its signer: uninstall it first (its data goes with it), or fix signer")
-            }
+        // Installed with another key than the one in its signer: reinstalled as the release, its data kept (see Reinstall),
+        // at the same version too.
+        val reinstall = installed != null && app.signer != null && installed.signers.isNotEmpty() && app.signer !in installed.signers
+        if (installed != null && !reinstall) {
             if (known != null && known <= installed.versionCode) return Plan.Current(installed.versionName)
             // Before its APK was ever downloaded: a release named for the version installed (v1.2.3 for 1.2.3) is that version.
             if (known == null && sameVersion(installed.versionName, pick.release.tag)) return Plan.Current(installed.versionName)
@@ -302,10 +302,11 @@ class Releases(data: File) {
                 keysFrom = if (pinned) {
                     "pinned in its signer (an APK with another key may not be the developer's; or is the pin wrong?)"
                 } else {
-                    "of the app installed: Android takes an update only with the same key, so uninstall it first (its data goes with it), or take it out of the config"
+                    "of the app installed: Android takes an update only with the same key, so pin the release's key (signer = \"…\") to have it " +
+                        "reinstalled with its data, or take it out of the config"
                 },
                 installed = installed, installers = Device.OBTAINIUM, fromRelease = true,
-                learn = { code -> learn(app, pick.asset.key, code) },
+                learn = { code -> learn(app, pick.asset.key, code) }, reinstall = reinstall,
             ),
         )
     }
