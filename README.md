@@ -29,6 +29,7 @@ is built to cover all of these.
 - [Services](https://by-architect.github.io/Nixup/docs.html#services) and
   [NixOS's own service modules](https://by-architect.github.io/Nixup/docs.html#nixos-modules)
 - Encrypted [backups](https://by-architect.github.io/Nixup/docs.html#backups) of apps and folders
+- Calendars, contacts and tasks from CalDAV/CardDAV servers, synced by Nixup's app itself with DAVx⁵'s sync
 - [Generations](https://by-architect.github.io/Nixup/docs.html#building) you can roll back to, built on the
   phone or [from a PC](https://by-architect.github.io/Nixup/docs.html#from-a-pc)
 
@@ -114,9 +115,8 @@ Services, with NixOS's own options:
     };
   };
 
-  # DAVx⁵'s calendar and contacts accounts: its login screen opens on the phone filled in (two taps),
-  # or with automatic = true, no taps
-  services.davx5 = {
+  # Calendars and contacts from a CalDAV/CardDAV server, synced by Nixup's app itself (DAVx⁵'s sync)
+  services.caldav = {
     enable = true;
     accounts.home = {
       url = "https://dav.example.org/";
@@ -166,4 +166,5 @@ Then follow [Your first build](https://by-architect.github.io/Nixup/docs.html#fi
 ## License
 
 [GPL-3.0](LICENSE). Nixup includes Termux's terminal code (Apache 2.0) and Nix-on-Droid's terminal options
-(MIT), ships Nix (LGPL 2.1) and uses Aurora OSS's gplayapi (GPL-3.0) for Google Play; see [NOTICE](NOTICE).
+(MIT), DAVx⁵'s synctools (GPL-3.0) and dav4jvm (MPL 2.0) for the calendar and contacts sync, ships Nix
+(LGPL 2.1) and uses Aurora OSS's gplayapi (GPL-3.0) for Google Play; see [NOTICE](NOTICE).

@@ -12,6 +12,14 @@ license:
   termux-app (https://github.com/termux/termux-app, commit 8629e63).
   Apache License 2.0: terminal-emulator/LICENSE, terminal-view/LICENSE.
 
+- synctools/ and app/src/main/kotlin/dev/nixup/manager/dav/: DAVx⁵'s synctools, copied from
+  davx5-ose (https://github.com/bitfireAT/davx5-ose, 4.5.21, commit f07633b), and its sync code,
+  adapted for Nixup's calendar and contacts sync (services.caldav). GNU General Public License 3.0,
+  Copyright © DAVx⁵'s contributors (see davx5-ose's AUTHORS): synctools/LICENSE.
+
+- dav4jvm/: DAVx⁵'s dav4jvm, copied from https://github.com/bitfireAT/dav4jvm (4.1.0, commit
+  2527df1). Mozilla Public License 2.0: dav4jvm/LICENSE (its files keep their own notices).
+
 - nix/terminal.nix: the terminal's options (terminal.font, terminal.colors) and their meaning, from
   Nix-on-Droid's modules/terminal.nix (https://github.com/nix-community/nix-on-droid).
   MIT License, Copyright (c) 2019-2020 Alexander Sosedkin and other contributors:
@@ -33,6 +41,21 @@ license:
   - Protocol Buffers' Java runtime (protobuf-javalite 4.34.1) by Google
     (https://github.com/protocolbuffers/protobuf). BSD 3-Clause License:
     licenses/protobuf-BSD-3-Clause.txt.
+  - For the calendar and contacts sync: Ktor 3.5.2 and kotlinx-io 0.9.1 by JetBrains
+    (https://ktor.io), Guava 33.7.2 by Google (https://github.com/google/guava), Apache Commons
+    Codec 1.17.1 and Lang 3.15.0, Apache FreeMarker 2.3.34 and Jackson Core 2.21.0
+    (https://github.com/FasterXML/jackson-core). Apache License 2.0: licenses/Apache-2.0.txt.
+  - iCal4j 4.3.0 by Ben Fortuna (https://github.com/ical4j/ical4j). BSD 3-Clause License:
+    licenses/ical4j-BSD-3-Clause.txt.
+  - ez-vcard 0.12.2 and vinnie 2.0.2 by Michael Angstadt (https://github.com/mangstadt). BSD
+    2-Clause License: licenses/ez-vcard-BSD-2-Clause.txt; MIT License: licenses/vinnie-MIT.txt.
+  - ThreeTen-Extra 1.8.0 (https://www.threeten.org/threeten-extra/). BSD 3-Clause License:
+    licenses/threeten-extra-BSD-3-Clause.txt.
+  - jsoup 1.22.1 by Jonathan Hedley (https://jsoup.org) and SLF4J 2.0.20 by QOS.ch
+    (https://www.slf4j.org). MIT License: licenses/jsoup-MIT.txt, licenses/slf4j-MIT.txt.
+  - Android's library of newer Java APIs (desugar_jdk_libs_nio 2.1.5) by Google
+    (https://github.com/google/desugar_jdk_libs). GNU General Public License 2.0 with the
+    Classpath Exception.
 
 The Nix packages a config names (Tailscale, Syncthing, restic, ...) are not part of Nixup: the
 phone fetches them from cache.nixos.org, each under its own license.

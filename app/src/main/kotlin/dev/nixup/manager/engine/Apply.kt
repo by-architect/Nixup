@@ -7,9 +7,9 @@ import java.io.File
 /**
  * Makes the phone match the profile: its apps (android.packages: a list for each repository, the apps from releases,
  * and those from Google Play), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
- * phone's own settings (android.system), the secrets (android.secrets), DAVx⁵'s accounts (android.davx5) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
+ * phone's own settings (android.system), the secrets (android.secrets), the calendar and contacts accounts (android.caldav) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
  * nothing changes (the config's own system.preSwitchChecks among them); then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
- * the system settings (see SystemSettings), DAVx⁵'s accounts (see Davx5), the activation scripts (see Activation), the services (see Units), and the apps that left the config removed, their data kept.
+ * the system settings (see SystemSettings), the calendar and contacts accounts (see Caldav), the activation scripts (see Activation), the services (see Units), and the apps that left the config removed, their data kept.
  * With android.strict the apps on no list go too (hidden), last, and the ones it hid that come back go first, before the installs (see Strict).
  */
 class Apply(private val repos: Map<String, FDroid>, private val data: File, private val incoming: File? = null) {
@@ -41,9 +41,9 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         // The ones removed by hand since the last build are no longer the module's.
         val owned = installer.readOwned().filter { Device.versionCode(it) != null }
         // android.strict: the apps on no list go, but for keep's and those the config needs otherwise: a user's app
-        // (users.users.<name>.androidApp) and DAVx⁵ for services.davx5.
+        // (users.users.<name>.androidApp).
         val appsOfUsers = android.optJSONObject("users")?.optJSONArray("apps")?.let { list -> (0 until list.length()).map { list.getJSONObject(it).getString("app") } }.orEmpty()
-        val strict = Strict(data, android.optJSONObject("strict"), (appsOfUsers + listOfNotNull(Davx5.APP.takeIf { android.optJSONObject("davx5") != null })).toSet())
+        val strict = Strict(data, android.optJSONObject("strict"), appsOfUsers.toSet())
 
         val steps = ArrayList<Installer.Step>()
         val upToDate = ArrayList<String>()
@@ -164,8 +164,11 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         val secrets = Secrets(data, incoming)
         secrets.plan(android.optJSONArray("secrets"), problems)
         // (Its passwords are secrets: those changing are told to it.)
+        val caldav = Caldav(data)
+        caldav.plan(android.optJSONObject("caldav"), secrets.changing, installing - leaving, problems)
+        // What the earlier services.davx5 set in DAVx⁵, given back.
         val davx5 = Davx5(data)
-        davx5.plan(android.optJSONObject("davx5"), installing - leaving, secrets.changing, problems)
+        davx5.plan()
         val units = Units(data)
         units.plan(android.optJSONObject("units"), problems, secrets.changing, android.optJSONObject("timers"), android.optJSONObject("paths"))
         val adb = Adb(data)
@@ -197,10 +200,11 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         val parts = listOfNotNull(
             "app settings".takeIf { settings.changes }, "apps that came with the phone".takeIf { debloat.changes },
             "system settings".takeIf { system.changes }, "secrets".takeIf { secrets.changes }, "services".takeIf { units.changes },
-            "adb".takeIf { adb.changes }, "data from backups".takeIf { backup?.changes == true }, "DAVx⁵ accounts".takeIf { davx5.changes },
+            "adb".takeIf { adb.changes }, "data from backups".takeIf { backup?.changes == true }, "calendar and contacts accounts".takeIf { caldav.changes },
+            "DAVx⁵'s setting".takeIf { davx5.changes },
         )
         writeSummary(dryRun, toInstall.size, toUpdate.size, toReinstall.size, removals.size + strict.removing.size, strict.bringingBack.size, parts)
-        if (steps.isEmpty() && removals.isEmpty() && !strict.changes && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes && backup?.changes != true && !davx5.changes) {
+        if (steps.isEmpty() && removals.isEmpty() && !strict.changes && !settings.changes && !debloat.changes && !system.changes && !secrets.changes && !units.changes && !adb.changes && backup?.changes != true && !caldav.changes && !davx5.changes) {
             Out.line("Nothing to change")
             if (dryRun) {
                 activation.apply(android, dryRun = true)
@@ -230,13 +234,17 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         if (status != 0) return status
         // Their data before their settings and before anything starts them.
         failed += backup?.applyRestore() ?: 0
+        // The calendar and contacts accounts that go, with what they have not synced yet synced first: before the app
+        // settings take Nixup's calendar and contacts permissions back.
+        failed += caldav.applyRemovals()
         failed += settings.apply(appSettings, leaving)
         // An app that came with the phone keeps its data while removed: it gets its settings from before back first.
         for (id in debloat.removing) failed += settings.restoreApp(id)
         failed += debloat.apply()
         failed += system.apply()
         failed += adb.apply()
-        // With DAVx⁵ installed, its battery setting made and the secrets in place.
+        // With Nixup's app given the calendar and contacts (its settings) and the secrets in place.
+        failed += caldav.apply()
         failed += davx5.apply()
         units.prepare(android)
         // The activation scripts (and the undo of those that left), with the users, /etc and tmpfiles' folders in place,

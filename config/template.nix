@@ -45,7 +45,7 @@
   ];
 
   android.packages.izzyondroid = with pkgs.izzyondroid; [
-    at.bitfire.davdroid                           # DAVx5: calendar and contacts sync
+    at.bitfire.davdroid                           # DAVx5: calendar and contacts sync (services.caldav syncs without it)
     "in.sunilpaulmathew.izzyondroid"              # IzzyOnDroid client (in quotes: "in" is a Nix word)
     moe.shizuku.privileged.api                    # Shizuku: system access for apps
     org.wisso.newpipematerial                     # WizeStream: NewPipe-based player
@@ -101,7 +101,7 @@
   # Or strict: the phone has the apps of the lists above and no others. Each build removes the apps
   # installed by hand that no list has, nor keep: hidden from you, they stay on the phone as they
   # are, so enable = false again (or keep, or a list) brings one back exactly as it was. Nixup's app,
-  # the root solution's (Magisk, KernelSU, APatch) and the apps the config needs (users', DAVx5) stay.
+  # the root solution's (Magisk, KernelSU, APatch) and the apps the config needs (users') stay.
   android.strict = {
     enable = false;                               # true: remove the apps no list has
     keep = [ ];                                   # apps to keep all the same, like "com.example.bank"
@@ -424,7 +424,7 @@
     defaults = {
       apk = true;                                 # its APK too: installable from the backup
       data = true;                                # false: the APK alone
-      include = [ "data" "deviceData" "storage" "accounts" ];   # also "media", "obb"; "accounts": the ones it adds to Android (DAVx5's)
+      include = [ "data" "deviceData" "storage" "accounts" ];   # also "media", "obb"; "accounts": the ones it adds to Android (a mail app's)
       when = "auto";                              # "auto": after use; "schedule"; "manual"
       autoRestore = false;                        # true (a new phone): data back when a build installs it, and backed-up apps reinstalled; never an app removed here
     };
@@ -505,21 +505,29 @@
     relay.enable = false;                         # relay server: not on a phone (its other options, as on NixOS, are taken unused)
   };
 
-  # DAVx⁵'s calendar and contacts accounts (DAVx⁵ is in the apps above), Nixup's own: NixOS has no DAVx⁵, an Android
-  # app. A new account gets DAVx⁵'s login screen, opened on the phone filled in: tap Login, then Finish.
-  services.davx5 = {
-    enable = false;                               # true: the accounts below, set at each build (no service runs)
-    install = null;                               # a repository to install DAVx⁵ from, like "fdroid"; null: android.packages lists it
-    syncCollections = "all";                      # what DAVx⁵ selects for syncing as it finds it: "all" or "none"
+  # Calendars, contacts and tasks from CalDAV/CardDAV servers, synced by Nixup's app itself into Android's Calendar and
+  # Contacts (DAVx⁵'s sync, no DAVx⁵ app; services.davx5 is its old name). Each account is added with no taps.
+  services.caldav = {
+    enable = false;                               # true: the accounts below, synced both ways
     accounts = {
       # home = {
-      #   url = "https://dav.example.org/";       # the server (DAVx⁵ finds its calendars and address books)
+      #   url = "https://dav.example.org/";       # the server (its calendars and address books are found there)
       #   userName = "neo";
       #   passwordFile = ./dav-password;          # secret: a file next to this one, put on the phone root-only
-      #   accountName = null;                     # its name in DAVx⁵; null: as its login names it (the email address)
-      #   automatic = false;                      # true: added with no taps (DAVx⁵ 4.5.17 to 4.5.21; else the login screen)
+      #   accountName = null;                     # its name in Android's accounts; null: the email address the server has
+      #   collections = null;                     # [ "Personal" "Contacts" ]: those alone; null: as syncCollections says
+      #   exclude = [ ];                          # collections never synced
       # };
     };
+    syncCollections = "all";                      # "all", "personal" (the user's own) or "none"
+    syncInterval = 240;                           # minutes (15 at least), besides each change; null: only when asked
+    wifiOnly = false;                             # true: no syncs over mobile data
+    pastDays = 90;                                # events older than this are not synced; null: all
+    defaultAlarm = null;                          # 15: a reminder 15 minutes before events that have none
+    manageCalendarColors = true;                  # the calendars' colors are the server's
+    eventColors = false;                          # events may have colors of their own
+    contactGroupMethod = "groupVCards";           # contact groups: "groupVCards" (vCard 4) or "categories"
+    tasksApp = null;                              # "org.tasks", "org.dmfs.tasks", "at.techbee.jtx"; null: the one installed
   };
 
   # Snapcast, multi-room audio in sync. snapserver as NixOS's; snapclient (NixOS has none) plays a

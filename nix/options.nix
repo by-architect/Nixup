@@ -158,7 +158,7 @@ let
   check = assertion: message: { inherit assertion message; };
 in
 {
-  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./etc.nix ./tmpfiles.nix ./nixos-compat.nix ./shells.nix ./programs.nix ./nix.nix ./nixos.nix ./home-manager.nix ./services.nix ./syncthing.nix ./snapcast.nix ./davx5.nix ./users.nix ./terminal.nix ./openssh.nix ./adb.nix ./backup.nix ./playstore.nix ./auto-upgrade.nix ./secrets.nix ./specialisation.nix ./version.nix ./renamed.nix ./activation.nix ./build.nix ];
+  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./etc.nix ./tmpfiles.nix ./nixos-compat.nix ./shells.nix ./programs.nix ./nix.nix ./nixos.nix ./home-manager.nix ./services.nix ./syncthing.nix ./snapcast.nix ./caldav.nix ./davx5.nix ./users.nix ./terminal.nix ./openssh.nix ./adb.nix ./backup.nix ./playstore.nix ./auto-upgrade.nix ./secrets.nix ./specialisation.nix ./version.nix ./renamed.nix ./activation.nix ./build.nix ];
 
   options = {
     assertions = mkOption {
@@ -228,9 +228,9 @@ in
           it is, with its data, permissions and settings, so it comes back exactly as it was when
           strict is off again, when keep or a list names it, and when the module is removed. Nixup's
           app, the root solution's (Magisk, also hidden under another name; KernelSU; APatch) and the
-          apps the config needs (a user's androidApp, DAVx⁵ with services.davx5) always stay, and a
-          build stops rather than remove the launcher or the keyboard in use. The apps that came with
-          the phone are debloat's (android.apps.<app>.debloat).
+          apps the config needs (a user's androidApp) always stay, and a build stops rather than remove
+          the launcher or the keyboard in use. The apps that came with the phone are debloat's
+          (android.apps.<app>.debloat).
         '';
       };
 

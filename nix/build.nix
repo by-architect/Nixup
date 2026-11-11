@@ -189,8 +189,8 @@ in
         ) config.android.apps);
         # The backups (nix/backup.nix): the repository, and each app and folder backed up.
         backup = config.system.build.backup;
-        # DAVx⁵'s accounts and its setting (nix/davx5.nix); null without services.davx5.
-        davx5 = config.system.build.davx5;
+        # The calendar and contacts accounts and their settings (nix/caldav.nix); null without services.caldav.
+        caldav = config.system.build.caldav;
         inherit system;
         # The view's users and groups (nix/users.nix), and what each session runs first.
         users = config.system.build.users;
