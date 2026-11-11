@@ -66,7 +66,10 @@ let
         description = ''
           Where its releases are: https://github.com/<owner>/<repo>,
           https://gitlab.com/<group>/<project>, https://codeberg.org/<owner>/<repo>, or
-          another Forgejo or Gitea server.
+          another Forgejo or Gitea server. Or the link of one APK (ending in .apk), as
+          Obtainium's "Direct APK link", for a developer who puts APKs on a server of their
+          own: that APK is installed, and no newer one is looked for (a new link is the
+          update; pin its signer, as nothing else vouches for it).
         '';
       };
       apkFilter = mkOption {
@@ -120,7 +123,13 @@ let
   misplacedReleasesApps = lib.concatLists (lib.mapAttrsToList (repo: list:
     map (app: { inherit repo; inherit (app) id; }) (lib.filter isReleasesApp list)
   ) (removeAttrs packages builtinSources));
-  badReleaseUrls = map (app: app.id) (lib.filter (app: isReleasesApp app && builtins.match "https://[^/]+/[^/]+/[^/]+.*" app.url == null) releasesApps);
+  # An app's url is the link of one APK (Obtainium's "Direct APK link"), as the engine tells it (Releases.isDirect).
+  isApkLink = url: builtins.match "https://[^/?#]+/[^?#]*\\.[aA][pP][kK]([?#].*)?" url != null;
+  badReleaseUrls = map (app: app.id) (lib.filter (app: isReleasesApp app && !isApkLink app.url
+    && builtins.match "https://[^/]+/[^/]+/[^/]+.*" app.url == null) releasesApps);
+  # An APK at a link is the only one: nothing for apkFilter or prerelease to pick between.
+  apkLinksPicking = map (app: app.id) (lib.filter (app: isReleasesApp app && isApkLink app.url
+    && (app.apkFilter != null || app.prerelease)) releasesApps);
   badSigners = map (app: app.id) (lib.filter (app: isReleasesApp app && app.signer != null
     && builtins.match "[0-9a-fA-F]{64}|([0-9a-fA-F]{2}:){31}[0-9a-fA-F]{2}" app.signer == null) releasesApps);
   twice = lib.concatLists (lib.mapAttrsToList (repo: list:
@@ -308,7 +317,8 @@ in
     (check (misplacedReleasesApps == [ ]) (lib.concatMapStringsSep "\n" (m:
       "android.packages.${m.repo}: ${m.id} comes with a url; list it under android.packages.obtainium."
     ) misplacedReleasesApps))
-    (check (badReleaseUrls == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " badReleaseUrls} needs an https:// url of its repository, like https://github.com/<owner>/<repo>.")
+    (check (badReleaseUrls == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " badReleaseUrls} needs an https:// url of its repository, like https://github.com/<owner>/<repo>, or of its APK (ending in .apk).")
+    (check (apkLinksPicking == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " apkLinksPicking}: its url is the link of one APK, so apkFilter and prerelease have nothing to pick between: leave them out.")
     (check (badSigners == [ ]) "android.packages.obtainium: the signer of ${lib.concatStringsSep ", " badSigners} is not a SHA-256 (64 hex digits).")
     (check (lib.elem "obtainium" (lib.attrNames repos) == false) "android.repos.obtainium: that name is taken by android.packages.obtainium (apps from their own releases); name the repository otherwise.")
     (check (lib.elem "playstore" (lib.attrNames repos) == false) "android.repos.playstore: that name is taken by android.packages.playstore (apps from Google Play); name the repository otherwise.")

@@ -4,6 +4,15 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- An app from a developer's own server: in `android.packages.obtainium`, an app's `url` may be the link of one APK
+  (ending in `.apk`), as Obtainium's "Direct APK link", besides a repository on GitHub, GitLab or Forgejo. That APK is
+  installed and no newer one is looked for: a new link in the config is the update. Its version is read once it is
+  downloaded and remembered, so the next builds leave it be; one installed newer (by the app's own updater) is not
+  taken back. Pin its `signer`, as nothing else vouches for the APK. `apkFilter` and `prerelease` have nothing to pick
+  between there, and a build stops when they are set.
+
 ## 0.1.8 (2026-11-11)
 
 - A build from a PC over SSH (`nixup-rebuild --target-host` through the phone's sshd) no longer starts the
