@@ -18,6 +18,15 @@ Android itself. What I found missing: a native app backup system driven by the c
 F-Droid-like repositories from a config, stable background services and scripts, app settings, and more. Nixup
 is built to cover all of these.
 
+## FEATURES
+- Smart Backup: if new version of apk exist, it backups apk. Checks data changes of apps, if data changes, auto backups.
+- Smart app install: Installs from play store, fdroid, obtanium and other fdroid stores. With option, it installs apks from backup with data in build, if only new version of that app exist, it installs from store.
+- Backup Options: You can backup to remote device and restore from there. Imagine that, you don't have any data in your phone, just building nix system from github, and all your data comes from your server and being built. 
+- Background services those run stable in background and start automaticly on boot: Tailscale, ssh, adb, caldav, snapcast, snapclient and custom services like nixos does. Best way is that, option syntax is same with nixos. So one service file will run in both device. But careful about arm based packages. 
+- Packages of nixos: Run nix-shell commands, install packages via config, use the terminal with your way just like nix-on-droid.
+- App Settings: Change any app settings via config. No need to setup everything from stratch.
+- Generations: Roll back, built on the phone or in pc. 
+
 ## What It Manages
 
 - [Apps](https://by-architect.github.io/Nixup/docs.html#apps) from F-Droid-style repositories, developers'
