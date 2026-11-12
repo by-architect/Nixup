@@ -4,6 +4,16 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- The calendar and contacts sync (`services.caldav`) no longer rings with an error for every calendar and address book
+  when the server cannot be reached for a moment (no network, Tailscale reconnecting, a name that does not resolve):
+  those network errors go to a channel of their own, "Calendar and contacts sync: network errors", with no sound and
+  no status bar icon, as DAVx⁵ shows them, and the next sync that reaches the server takes them away. Items the server
+  has that cannot be read go to "Calendar and contacts sync: items passed over", with no sound. What needs something
+  done (a refused password, an address with nothing to sync) stays in "Calendar and contacts sync". Before, all three
+  rang the same way.
+
 ## 0.1.9 (2026-11-11)
 
 - Calendars, contacts and tasks from CalDAV/CardDAV servers are synced by Nixup's app itself, with no DAVx⁵ app:

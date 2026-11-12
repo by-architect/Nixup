@@ -332,4 +332,6 @@
     <string name="dav_account_label">Nixup calendars and contacts</string>
     <string name="dav_address_book_label">Nixup address book</string>
     <string name="channel_sync">Calendar and contacts sync</string>
+    <string name="channel_sync_warnings">Calendar and contacts sync: items passed over</string>
+    <string name="channel_sync_network">Calendar and contacts sync: network errors</string>
 </resources>

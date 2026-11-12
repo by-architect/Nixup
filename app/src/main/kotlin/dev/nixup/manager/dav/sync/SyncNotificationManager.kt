@@ -54,7 +54,7 @@ class SyncNotificationManager(
 
     /**
      * Tells the user that an exception stopped the sync of a collection ([title]): [message]. Network errors go quietly,
-     * as DAVx⁵ shows them (they mostly pass by themselves).
+     * in a channel of their own as DAVx⁵ shows them (they mostly pass by themselves).
      */
     fun notifyException(
         syncDataType: SyncDataType,
@@ -72,7 +72,8 @@ class SyncNotificationManager(
             remote?.let { append("\n$it") }
             local?.let { append("\n(${it.javaClass.simpleName} #${it.id})") }
         }
-        notify(buildTag(collectionId), "$accountLabel: $title", text, error = true, quiet = e is IOException)
+        notify(buildTag(collectionId), "$accountLabel: $title", text, error = true,
+            channel = if (e is IOException) Notifications.SYNC_NETWORK_CHANNEL else Notifications.SYNC_CHANNEL)
     }
 
     /** Tells the user that a resource could not be read and was passed over. */
@@ -85,12 +86,15 @@ class SyncNotificationManager(
     ) {
         notify("invalid-" + buildTag(collectionId), "$accountLabel: $title",
             "Passed over one or more items the server has that cannot be read (${e.message ?: e.javaClass.simpleName})" +
-                (remote?.let { ": $it" } ?: ""), error = false, quiet = true)
+                (remote?.let { ": $it" } ?: ""), error = false, channel = Notifications.SYNC_WARNINGS_CHANNEL)
     }
 
-    /** Tells the user that syncs keep failing with a passing error (no network, a server away). */
+    /**
+     * Tells the user that the account's syncs fail until something is done (a refused password, an address with nothing
+     * to sync, a tasks app too old, collections that could not be looked up).
+     */
     fun notifyRetriesFailed(dataType: SyncDataType, message: String) =
-        notify("retries-$dataType", "$accountLabel: cannot sync", message, error = true, quiet = true)
+        notify("retries-$dataType", "$accountLabel: cannot sync", message, error = true)
 
     fun dismissRetriesFailed(dataType: SyncDataType) = dismiss("retries-$dataType")
 
@@ -100,10 +104,10 @@ class SyncNotificationManager(
 
     private fun buildTag(collectionId: Long) = "${accountId.name}-$collectionId"
 
-    private fun notify(tag: String, title: String, text: String, error: Boolean, quiet: Boolean = false) {
+    private fun notify(tag: String, title: String, text: String, error: Boolean, channel: String = Notifications.SYNC_CHANNEL) {
         try {
             Notifications.channels(context)
-            val notification = Notification.Builder(context, Notifications.SYNC_CHANNEL)
+            val notification = Notification.Builder(context, channel)
                 .setSmallIcon(if (error) android.R.drawable.stat_notify_sync_noanim else android.R.drawable.stat_sys_warning)
                 .setContentTitle(title)
                 .setContentText(text)
@@ -111,7 +115,6 @@ class SyncNotificationManager(
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_ERROR)
-                .apply { if (quiet) setPriority(Notification.PRIORITY_MIN) }
                 .setContentIntent(
                     PendingIntent.getActivity(
                         context, 0,
