@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.10 (2026-11-12)
 
 - The calendar and contacts sync (`services.caldav`) no longer rings with an error for every calendar and address book
   when the server cannot be reached for a moment (no network, Tailscale reconnecting, a name that does not resolve):
