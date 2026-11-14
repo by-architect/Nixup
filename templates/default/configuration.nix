@@ -530,6 +530,23 @@
     tasksApp = null;                              # "org.tasks", "org.dmfs.tasks", "at.techbee.jtx"; null: the one installed
   };
 
+  # Notifications from ntfy topics (ntfy.sh, or a server of your own), as ntfy's app shows them: the phone listens to
+  # the topics and each message is a notification of Nixup's app. Send one from anywhere: curl -d "Backup done"
+  # ntfy.sh/<topic>. A connection that breaks asks for what it missed. Anyone who knows a topic's name on ntfy.sh can
+  # read it: pick one no one guesses. (NixOS's services.ntfy-sh, below, is ntfy's server.)
+  services.ntfy = {
+    enable = false;                               # true: listen to the topics below
+    server = "https://ntfy.sh";                   # the server of the topics named alone
+    topics = [
+      # "phone-alerts-x7q2"                       # a topic on that server
+      # "ntfy.example.org/backups"                # a topic on another server ("http://host:port/topic" too)
+      # { topic = "backups"; name = "Backups"; }  # with its name on the phone (its own login too: tokenFile, userName)
+    ];
+    tokenFile = null;                             # ./ntfy-token: an access token (tk_…) for the server's topics, secret
+    userName = null;                              # or a user of the server,
+    passwordFile = null;                          # with its password: ./ntfy-password, secret
+  };
+
   # Snapcast, multi-room audio in sync. snapserver as NixOS's; snapclient (NixOS has none) plays a
   # server's stream through Android's audio, as music. nixpkgs' snapcast comes with PipeWire,
   # PulseAudio and Avahi: about 780 MB on the phone.

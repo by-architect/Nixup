@@ -8,10 +8,15 @@ import android.content.Intent
  * What the module tells the app (as root, with am broadcast; the receiver is not exported, so only root and the system
  * can): an event (json: a build, backup or update that started or ended, a service that failed, Tailscale's
  * connection; see the module's notify.sh), the progress of installs, or "schedule" alone. Each one also makes sure the
- * update check and the backup check are scheduled.
+ * update check and the backup check are scheduled. And a message of services.ntfy's topics, from its listener (the
+ * engine's Ntfy), which NtfyMessages shows.
  */
 class EventsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == NtfyMessages.ACTION) {
+            NtfyMessages.show(context, intent.getStringExtra("message").orEmpty(), intent.getStringExtra("url").orEmpty(), intent.getStringExtra("name").orEmpty())
+            return
+        }
         Notifications.channels(context)
         UpdateJob.schedule(context)
         BackupJob.schedule(context)

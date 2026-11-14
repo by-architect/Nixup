@@ -334,4 +334,14 @@
     <string name="channel_sync">Calendar and contacts sync</string>
     <string name="channel_sync_warnings">Calendar and contacts sync: items passed over</string>
     <string name="channel_sync_network">Calendar and contacts sync: network errors</string>
+
+    <!-- ntfy (services.ntfy): a channel for each of ntfy's priorities, and its messages' notifications. -->
+    <string name="channel_ntfy_min">ntfy messages: min priority</string>
+    <string name="channel_ntfy_low">ntfy messages: low priority</string>
+    <string name="channel_ntfy_default">ntfy messages</string>
+    <string name="channel_ntfy_high">ntfy messages: high priority</string>
+    <string name="channel_ntfy_max">ntfy messages: urgent</string>
+    <string name="ntfy_file">File: %1$s</string>
+    <string name="ntfy_open_file">Open the file</string>
+    <string name="ntfy_action_failed">“%1$s” did not go through: %2$s</string>
 </resources>

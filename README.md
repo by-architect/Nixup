@@ -22,7 +22,7 @@ is built to cover all of these.
 - Smart Backup: if new version of apk exist, it backups apk. Checks data changes of apps, if data changes, auto backups.
 - Smart app install: Installs from play store, fdroid, obtanium and other fdroid stores. With option, it installs apks from backup with data in build, if only new version of that app exist, it installs from store.
 - Backup Options: You can backup to remote device and restore from there. Imagine that, you don't have any data in your phone, just building nix system from github, and all your data comes from your server and being built. 
-- Background services those run stable in background and start automaticly on boot: Tailscale, ssh, adb, caldav, snapcast, snapclient and custom services like nixos does. Best way is that, option syntax is same with nixos. So one service file will run in both device. But careful about arm based packages. 
+- Background services those run stable in background and start automaticly on boot: Tailscale, ssh, adb, caldav, ntfy, snapcast, snapclient and custom services like nixos does. Best way is that, option syntax is same with nixos. So one service file will run in both device. But careful about arm based packages. 
 - Packages of nixos: Run nix-shell commands, install packages via config, use the terminal with your way just like nix-on-droid.
 - App Settings: Change any app settings via config. No need to setup everything from stratch.
 - Generations: Roll back, built on the phone or in pc. 
@@ -39,6 +39,7 @@ is built to cover all of these.
   [NixOS's own service modules](https://by-architect.github.io/Nixup/docs.html#nixos-modules)
 - Encrypted [backups](https://by-architect.github.io/Nixup/docs.html#backups) of apps and folders
 - Calendars, contacts and tasks from CalDAV/CardDAV servers, synced by Nixup's app itself with DAVx⁵'s sync
+- Notifications from [ntfy](https://ntfy.sh) topics, on ntfy.sh or a server of your own, with no ntfy app
 - [Generations](https://by-architect.github.io/Nixup/docs.html#building) you can roll back to, built on the
   phone or [from a PC](https://by-architect.github.io/Nixup/docs.html#from-a-pc)
 
@@ -132,6 +133,12 @@ Services, with NixOS's own options:
       userName = "neo";
       passwordFile = ./dav-password;
     };
+  };
+
+  # Notifications from ntfy topics: send one from anywhere with curl -d "Backup done" ntfy.sh/phone-alerts-x7q2
+  services.ntfy = {
+    enable = true;
+    topics = [ "phone-alerts-x7q2" "ntfy.example.org/backups" ];
   };
 
   # SSH: logins get root's shell with your Nix packages; 127.0.0.1 keeps it to the tailnet

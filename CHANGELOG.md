@@ -4,6 +4,25 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- Notifications from ntfy topics, with no ntfy app: `services.ntfy`. The phone listens to the topics of
+  `services.ntfy.topics` (each a name on `services.ntfy.server`, ntfy.sh by default, or `"host/topic"`, or a whole
+  address, as `ntfy subscribe` takes them), and each message is a notification of Nixup's app, as ntfy's app shows it:
+  its title (else the topic's name, or the topic's own `name`), text, tags that are emoji short codes as emojis, its
+  priority as a channel of its own ("ntfy messages: …", one for each of ntfy's five priorities, which Android's
+  notification settings can change), its link opened by a tap (else the topic's page), its buttons (view, http,
+  broadcast, copy) and its attachment's link. A message that updates another (the same sequence id) takes its place,
+  and one deleted or cleared on the server goes from the phone too. The listening is a service, `ntfy` in the Services
+  tab: Nixup's engine, run as root, with one connection to each server for all of its topics, started with the build
+  and at the phone's start. A connection that breaks (another network, airplane mode, the server restarted) is made
+  again and asks for what came in the meantime, so no message the server still keeps is lost and none comes twice. A
+  server of your own with logins takes an access token (`tokenFile`) or a user and password (`userName`,
+  `passwordFile`), for the server's topics or each topic its own, as secret files. A server that refuses the login or
+  the topics is told once, in the Services channel.
+- A secret file option (`tokenFile`, `authKeyFile`, ...) also takes an ntfy access token itself (`tk_…`), read from
+  a JSON file of secrets, as it takes a Tailscale key.
+
 ## 0.1.10 (2026-11-12)
 
 - The calendar and contacts sync (`services.caldav`) no longer rings with an error for every calendar and address book

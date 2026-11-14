@@ -95,6 +95,11 @@
             android:name=".EventsReceiver"
             android:exported="false" />
 
+        <!-- The buttons of services.ntfy's messages that the app does itself: an HTTP request, a broadcast, a copy. -->
+        <receiver
+            android:name=".NtfyActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".UpdateJob"
             android:exported="false"
