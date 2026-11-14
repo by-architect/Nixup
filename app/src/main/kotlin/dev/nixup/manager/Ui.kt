@@ -1,11 +1,16 @@
 package dev.nixup.manager
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.format.DateUtils
@@ -15,6 +20,8 @@ import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ScrollView
@@ -26,51 +33,79 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The tabs' small pieces: headings and rows of their lists, search boxes over them, a dialog of text (searchable), a
- * dialog to pick from a long list, and times as people say them.
+ * The tabs' small pieces: cards of rows, headings over them, buttons, filters, the tabs at the bottom, search boxes over
+ * the lists, a dialog of text (searchable), a dialog to pick from a long list, and times as people say them. Their
+ * colors and shapes are the app's (res/values/styles.xml), in a light and a dark version.
  */
 object Ui {
     fun dp(context: Context, value: Int) = (value * context.resources.displayMetrics.density).toInt()
 
-    /** A heading over a part of a list. */
+    /** A heading over a part of a list (the card of its rows). */
     fun heading(context: Context, text: String) = TextView(context).apply {
         this.text = text
-        setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Medium)
-        setTypeface(typeface, Typeface.BOLD)
-        setPadding(0, dp(context, 16), 0, dp(context, 4))
+        setTextAppearance(R.style.TextAppearance_Nixup_Heading)
+        setPadding(dp(context, 4), dp(context, 16), dp(context, 4), dp(context, 8))
     }
 
     /** A line of text in a list: why it is empty, or a note. */
     fun note(context: Context, text: String) = TextView(context).apply {
         this.text = text
-        setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Small)
+        setTextAppearance(R.style.TextAppearance_Nixup_Secondary)
         setTextIsSelectable(true)
-        setPadding(0, dp(context, 8), 0, dp(context, 8))
+        setPadding(dp(context, 4), dp(context, 8), dp(context, 4), dp(context, 8))
     }
 
-    /** A button of a row: borderless, as small as its text. */
-    fun button(context: Context, text: String, click: () -> Unit) = Button(context, null, android.R.attr.borderlessButtonStyle).apply {
+    /** A button: a row's (text alone), or with [style] a tab's main one (filled) or its others (tonal). */
+    fun button(context: Context, text: String, style: Int = R.style.Widget_Nixup_Button_Plain, click: () -> Unit) =
+        Button(context, null, 0, style).apply {
+            this.text = text
+            setOnClickListener { click() }
+        }
+
+    /** A filter (the Logs tab's): outlined, filled while it is the one picked (selected). */
+    fun chip(context: Context, text: String, click: () -> Unit) = TextView(context, null, 0, R.style.Widget_Nixup_Chip).apply {
         this.text = text
-        minWidth = 0
-        minimumWidth = 0
-        setPadding(dp(context, 10), paddingTop, dp(context, 10), paddingBottom)
         setOnClickListener { click() }
     }
 
+    /** A card for rows (a part of a list), with a line between each two. */
+    fun card(context: Context) = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setBackgroundResource(R.drawable.bg_card)
+        // A row's press stays inside the rounded corners.
+        clipToOutline = true
+        dividerDrawable = context.getDrawable(R.drawable.divider)
+        showDividers = LinearLayout.SHOW_DIVIDER_MIDDLE
+        dividerPadding = dp(context, 16)
+    }
+
+    /** A round mark of [color] (a color resource): how a service is, how the last day went, behind an event's sign. */
+    fun circle(context: Context, color: Int) = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(context.getColor(color))
+    }
+
+    /** The icon of an installed app, as the launcher shows it; null when it is not installed. */
+    fun appIcon(context: Context, id: String): Drawable? = try {
+        context.packageManager.getApplicationIcon(id)
+    } catch (e: PackageManager.NameNotFoundException) {
+        null
+    }
+
     /**
-     * A row of a list: its title, what it says under it, and its buttons, beside them ([below]: under them, for more
-     * than two), with a line under the row.
+     * A row of a card: before it [icon] (an app's) or a [dot] of a color resource (how a service is); its title, what
+     * it says under it, and its buttons, beside them ([below]: under them, for more than two).
      */
-    fun row(context: Context, title: String, subtitle: String, buttons: List<Button>, below: Boolean = false): View {
+    fun row(context: Context, title: String, subtitle: String, buttons: List<Button>, below: Boolean = false, icon: Drawable? = null, dot: Int? = null): View {
         val text = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
                 this.text = title
-                setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Medium)
+                setTextAppearance(R.style.TextAppearance_Nixup_Title)
             })
             if (subtitle.isNotEmpty()) addView(TextView(context).apply {
                 this.text = subtitle
-                setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Small)
+                setTextAppearance(R.style.TextAppearance_Nixup_Secondary)
             })
         }
         val actions = LinearLayout(context).apply {
@@ -78,27 +113,88 @@ object Ui {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             buttons.forEach { addView(it) }
         }
-        val row = LinearLayout(context).apply {
-            orientation = if (below) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        val top = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(context, 8), 0, if (below) 0 else dp(context, 8))
-            if (below) {
-                addView(text, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-                addView(actions, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            } else {
-                addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                addView(actions)
-            }
+            // Level with the title's first line, however many lines are under it.
+            if (icon != null) addView(ImageView(context).apply { setImageDrawable(icon) }, LinearLayout.LayoutParams(dp(context, 40), dp(context, 40)).apply {
+                marginEnd = dp(context, 16)
+                gravity = Gravity.TOP
+            })
+            if (dot != null) addView(View(context).apply { background = circle(context, dot) }, LinearLayout.LayoutParams(dp(context, 10), dp(context, 10)).apply {
+                marginEnd = dp(context, 14)
+                topMargin = dp(context, 7)
+                gravity = Gravity.TOP
+            })
+            addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            if (!below) addView(actions)
         }
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            addView(row)
-            addView(View(context).apply {
-                val divider = context.obtainStyledAttributes(intArrayOf(android.R.attr.listDivider))
-                background = divider.getDrawable(0)
-                divider.recycle()
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1))
+            // The buttons' own padding is the room at the end (and under them, below).
+            setPadding(dp(context, 16), dp(context, 12), dp(context, if (buttons.isEmpty()) 16 else 4), dp(context, if (below && buttons.isNotEmpty()) 4 else 12))
+            addView(top)
+            if (below) addView(actions, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
+    }
+
+    // --- The tabs at the bottom.
+
+    /** A tab: its icon (in a pill while it is the one shown: selected), a count on it, and its name under it. */
+    class Tab(val view: View, val name: String, private val badge: TextView) {
+        /** The count on the tab ([count] news: updates, problems) in [color], a color resource; none at 0. */
+        fun count(count: Int, color: Int, said: String) {
+            badge.visibility = if (count > 0) View.VISIBLE else View.GONE
+            badge.text = if (count > 99) "99+" else count.toString()
+            badge.background = GradientDrawable().apply {
+                cornerRadius = dp(badge.context, 8).toFloat()
+                setColor(badge.context.getColor(color))
+            }
+            view.contentDescription = if (count > 0) said else name
+        }
+    }
+
+    fun tab(context: Context, name: String, icon: Int): Tab {
+        val badge = TextView(context).apply {
+            setTextColor(Color.WHITE)
+            textSize = 10f
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            minWidth = dp(context, 16)
+            setPadding(dp(context, 4), 0, dp(context, 4), 0)
+            visibility = View.GONE
+        }
+        val pill = FrameLayout(context).apply {
+            setBackgroundResource(R.drawable.bg_tab_indicator)
+            addView(ImageView(context).apply {
+                setImageResource(icon)
+                imageTintList = context.getColorStateList(R.color.tab)
+            }, FrameLayout.LayoutParams(dp(context, 24), dp(context, 24), Gravity.CENTER))
+            addView(badge, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(context, 16), Gravity.TOP or Gravity.END).apply {
+                marginEnd = dp(context, 6)
+            })
+        }
+        val view = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, dp(context, 10), 0, dp(context, 10))
+            isClickable = true
+            isFocusable = true
+            contentDescription = name
+            context.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackgroundBorderless)).let {
+                background = it.getDrawable(0)
+                it.recycle()
+            }
+            addView(pill, LinearLayout.LayoutParams(dp(context, 56), dp(context, 28)))
+            addView(TextView(context).apply {
+                text = name
+                setTextAppearance(R.style.TextAppearance_Nixup_Tab)
+                setTextColor(context.getColorStateList(R.color.tab))
+                setPadding(0, dp(context, 4), 0, 0)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+        return Tab(view, name, badge)
     }
 
     // --- Searching.
@@ -121,10 +217,17 @@ object Ui {
 
     /**
      * A search box (one of a tab's, or a dialog's): [changed] gets what is in it as it is typed, and again when it is
-     * emptied with its ✕; the keyboard goes when the search is sent.
+     * emptied with its ✕; the keyboard goes when the search is sent. It is a rounded field, without the line Android
+     * draws under its text.
      */
+    // The line is the background of Android's own part of the box, and the text its own field: it names both, but does
+    // not make them public.
+    @SuppressLint("DiscouragedApi")
     fun onSearch(box: SearchView, changed: (String) -> Unit) {
         box.setIconifiedByDefault(false)
+        if (box.background == null) box.setBackgroundResource(R.drawable.bg_search)
+        box.findViewById<View>(box.resources.getIdentifier("search_plate", "id", "android"))?.background = null
+        box.findViewById<TextView>(box.resources.getIdentifier("search_src_text", "id", "android"))?.textSize = 16f
         box.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextChange(text: String): Boolean {
                 changed(text.trim())
@@ -232,7 +335,9 @@ object Ui {
         }
         val box = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            addView(searchBox(activity, activity.getString(R.string.search_text)) { query = it; show() }.apply { setPadding(pad / 2, 0, pad / 2, 0) })
+            addView(searchBox(activity, activity.getString(R.string.search_text)) { query = it; show() }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { setMargins(pad, pad / 4, pad, pad / 4) })
             addView(found)
             addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         }

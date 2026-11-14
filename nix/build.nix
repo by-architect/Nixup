@@ -14,13 +14,16 @@ let
   # What a shell has besides environment.systemPackages, as on NixOS.
   shellPackages = lib.optionals anyPackages (with pkgs; [ bashInteractive coreutils findutils gnugrep gnused less ]);
   # The shell's part of the profile, as a shell on NixOS has it: nixup-shell's PATH (environment.systemPackages first; a
-  # user's profile goes before it), the shell Nixup's login starts (users.defaultUserShell, else bash), and with NixOS's
-  # shells' environment (nix/shells.nix) /run/current-system/sw, which is system.path; none without Nix packages.
+  # user's profile goes before it), the shell Nixup's login starts (users.defaultUserShell, else bash), with NixOS's
+  # shells' environment (nix/shells.nix) /run/current-system/sw, which is system.path, and the view's /usr/bin/env;
+  # none without Nix packages.
   shellPart = if !anyPackages then null else {
     path = "${lib.makeBinPath (config.environment.systemPackages ++ shellPackages)}:/system/bin";
     bash = if config.system.build.users.defaultShell != null then config.system.build.users.defaultShell
       else "${pkgs.bashInteractive}/bin/bash";
     system = if config.system.build.nixosShells.enabled then "${config.system.path}" else null;
+    # The env program /usr/bin/env leads to (environment.usrbinenv), which Etc.kt links: none when it is null.
+    usrbinenv = if config.environment.usrbinenv == null then null else "${config.environment.usrbinenv}";
   };
   # Whether a user has packages (users.users.<name>.packages), asked of the definitions alone: their packages need
   # nixpkgs, which a configuration.nix's first look has not got.

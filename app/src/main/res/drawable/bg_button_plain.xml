@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A row's buttons (Back up, Restore, Log, ...): text alone, and a press the shape of a button. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetTop="4dp"
+    android:insetBottom="4dp">
+    <ripple android:color="@color/ripple_tonal">
+        <item android:id="@android:id/mask">
+            <shape android:shape="rectangle">
+                <solid android:color="#FFFFFFFF" />
+                <corners android:radius="20dp" />
+            </shape>
+        </item>
+    </ripple>
+</inset>

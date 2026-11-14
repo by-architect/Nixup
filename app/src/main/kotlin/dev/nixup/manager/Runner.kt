@@ -20,12 +20,16 @@ class Runner(private val activity: Activity, private val changed: (Boolean) -> U
     var running = false
         private set
 
-    /** Runs [command] as root and shows what it says in [out], line by line, and how it ended; then [after], with its exit status. */
+    /**
+     * Runs [command] as root and shows what it says in [out] (hidden until a tab's first run), line by line, and how it
+     * ended; then [after], with its exit status.
+     */
     fun run(command: String, starting: String, out: TextView, scroller: ScrollView, after: (Int?) -> Unit = {}) {
         if (running) return
         running = true
         changed(true)
         out.text = ""
+        out.visibility = View.VISIBLE
         show(out, scroller, starting)
         worker.execute {
             val exit = Root.run(command) { line -> activity.runOnUiThread { show(out, scroller, line) } }

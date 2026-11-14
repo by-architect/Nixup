@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The main screen's pieces: its texts, its three kinds of buttons, the Logs tab's filters and the cards. -->
+<resources>
+    <!-- Texts: the app's name at the top, a card's main line, a row's title, plain text, what goes under a title, a
+         small label over a card, a heading over a list, and a tab's name. -->
+    <style name="TextAppearance.Nixup.AppTitle" parent="">
+        <item name="android:textSize">22sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+
+    <style name="TextAppearance.Nixup.Large" parent="">
+        <item name="android:textSize">18sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+
+    <style name="TextAppearance.Nixup.Title" parent="">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+
+    <style name="TextAppearance.Nixup.Body" parent="">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+
+    <style name="TextAppearance.Nixup.Secondary" parent="">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/text_secondary</item>
+    </style>
+
+    <style name="TextAppearance.Nixup.Overline" parent="">
+        <item name="android:textSize">12sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.06</item>
+    </style>
+
+    <style name="TextAppearance.Nixup.Heading" parent="">
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/primary</item>
+    </style>
+
+    <style name="TextAppearance.Nixup.Tab" parent="">
+        <item name="android:textSize">12sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
+    <!-- A tab's main button: filled. Complete in itself, as buttons made in code take nothing from the theme. -->
+    <style name="Widget.Nixup.Button" parent="">
+        <item name="android:background">@drawable/bg_button_filled</item>
+        <item name="android:textColor">@color/button_filled</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingBottom">4dp</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+
+    <!-- A tab's other buttons: a lighter fill. -->
+    <style name="Widget.Nixup.Button.Tonal">
+        <item name="android:background">@drawable/bg_button_tonal</item>
+        <item name="android:textColor">@color/button_tonal</item>
+    </style>
+
+    <!-- A row's buttons, and the small ones of a card: text alone. -->
+    <style name="Widget.Nixup.Button.Plain">
+        <item name="android:background">@drawable/bg_button_plain</item>
+        <item name="android:textColor">@color/button_plain</item>
+    </style>
+
+    <!-- A filter of the Logs tab. -->
+    <style name="Widget.Nixup.Chip" parent="">
+        <item name="android:background">@drawable/bg_chip</item>
+        <item name="android:textColor">@color/chip_text</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minHeight">32dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+
+    <!-- A card: a part of a tab (the config, the last build, a tab's state and its buttons). -->
+    <style name="Widget.Nixup.Card" parent="">
+        <item name="android:background">@drawable/bg_card</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:padding">16dp</item>
+    </style>
+
+    <!-- A search box over a tab's list. -->
+    <style name="Widget.Nixup.Search" parent="">
+        <item name="android:background">@drawable/bg_search</item>
+        <item name="android:iconifiedByDefault">false</item>
+    </style>
+
+    <!-- What a script says, as it runs. -->
+    <style name="Widget.Nixup.Console" parent="">
+        <item name="android:background">@drawable/bg_console</item>
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textIsSelectable">true</item>
+        <item name="android:padding">12dp</item>
+    </style>
+</resources>

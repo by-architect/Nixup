@@ -6,5 +6,23 @@
     <color name="level_warn">#FFCC80</color>
     <color name="level_info">#90CAF9</color>
     <color name="level_start">#CE93D8</color>
+    <color name="on_level">#0F1020</color>
     <color name="search_match">#80FFB300</color>
+
+    <!-- The night blue of the icon as the background, the cards a little lighter. -->
+    <color name="background">#0F1020</color>
+    <color name="surface">#191B2E</color>
+    <color name="surface_variant">#252840</color>
+    <color name="outline">#2D3150</color>
+    <color name="text_secondary">#A7ABC2</color>
+    <color name="primary">#B8C0FF</color>
+    <color name="on_primary">#151C5E</color>
+    <color name="primary_container">#2F3778</color>
+    <color name="on_primary_container">#DFE2FF</color>
+    <color name="flame_container">#3A2416</color>
+    <color name="on_flame_container">#FFDCC7</color>
+    <color name="console">#0A0B17</color>
+    <color name="disabled">#1FE6E7F2</color>
+    <color name="ripple_filled">#29151C5E</color>
+    <color name="ripple_tonal">#29B8C0FF</color>
 </resources>

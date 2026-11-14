@@ -23,6 +23,23 @@ section after the version, and its text is what the Magisk app shows as the upda
 - A secret file option (`tokenFile`, `authKeyFile`, ...) also takes an ntfy access token itself (`tk_…`), read from
   a JSON file of secrets, as it takes a Tailscale key.
 
+## 0.1.11 (2026-11-14)
+
+- Scripts that start with `#!/usr/bin/env bash` (or `python3`, ...) run in Nixup's shells and services: the view has
+  a `/usr/bin/env`, as NixOS has, coreutils' `env` unless `environment.usrbinenv` names another (null leaves it out).
+  Only with Nix packages: without them the phone's shell is Android's.
+- With `programs.nano.enable = true;`, `EDITOR` is nano, as on NixOS.
+- The app has a new look. Its five tabs are in a bar at the bottom, each with an icon, and the tab shown is marked;
+  Updates counts the updates waiting on its tab, and Logs the problems of the last day. Each tab has its state and its
+  buttons in a card, the main one filled (Build, Check for updates, Back up all), and its list in cards under their
+  headings (each day's entries in Logs, each part in Backups). Apps have their icons in Updates and Backups, and each
+  service a colored dot for how it is (green running, red failed, amber waiting). The Build tab names the last build's
+  generation, when it was made and from what, and Generations and Open its folder are beside what they are about. The
+  colors are Nixup's (the night blue of its icon), in a light and a dark version as the phone is set, behind the status
+  and navigation bars too. The search boxes are rounded fields, what a script says has a panel of its own, and a line
+  under the bar at the top moves while one runs. Logs' filters are chips, and a tap on how the last day went shows its
+  problems. Services has a Refresh button.
+
 ## 0.1.10 (2026-11-12)
 
 - The calendar and contacts sync (`services.caldav`) no longer rings with an error for every calendar and address book

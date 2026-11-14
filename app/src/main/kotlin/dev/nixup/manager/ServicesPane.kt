@@ -9,9 +9,10 @@ import org.json.JSONObject
 
 /**
  * The Services tab: the last build's services (its systemd.services units: services.tailscale, services.openssh, the
- * config's own), how each is, and a start, stop or restart by hand, as systemctl does, which lasts until the next
- * build or restart; and each one's log. Its search box keeps the services with what is typed in their name, what they
- * are, or how they are ("failed", "running"). Through the module's units.sh, as root.
+ * config's own), how each is (in words, and a colored dot: green running, red failed, ...), and a start, stop or
+ * restart by hand, as systemctl does, which lasts until the next build or restart; and each one's log. Its search box
+ * keeps the services with what is typed in their name, what they are, or how they are ("failed", "running"). Through
+ * the module's units.sh, as root.
  */
 class ServicesPane(private val activity: MainActivity, root: View, private val runner: Runner) {
     private val list: LinearLayout = root.findViewById(R.id.services_list)
@@ -28,6 +29,7 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
             query = it
             show()
         }
+        root.findViewById<Button>(R.id.services_refresh).setOnClickListener { load() }
     }
 
     /** What the tab shows, read again. */
@@ -57,8 +59,17 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
         actions.clear()
         val found = units.filter { Ui.matches(query, it.getString("name"), it.optString("description"), line(it)) }
         if (found.isEmpty()) list.addView(Ui.noMatch(activity, query))
-        found.forEach { list.addView(row(it)) }
+        else list.addView(Ui.card(activity).apply { found.forEach { addView(row(it)) } })
         setRunning(runner.running)
+    }
+
+    /** The color of how a service is: running or done green, failed red, waiting amber, listening blue, else grey. */
+    private fun color(state: String) = when (state) {
+        "running", "done" -> R.color.level_ok
+        "failed" -> R.color.level_error
+        "restarting", "waiting" -> R.color.level_warn
+        "listening" -> R.color.level_info
+        else -> R.color.text_secondary
     }
 
     /** How a service is: running since when, failed, ...; and its timer's next run. */
@@ -99,7 +110,7 @@ class ServicesPane(private val activity: MainActivity, root: View, private val r
         }
         actions += buttons
         val log = Ui.button(activity, activity.getString(R.string.service_log)) { log(name) }
-        return Ui.row(activity, name, listOf(line, unit.optString("description")).filter { it.isNotBlank() }.joinToString("\n"), buttons + log, below = true)
+        return Ui.row(activity, name, listOf(line, unit.optString("description")).filter { it.isNotBlank() }.joinToString("\n"), buttons + log, below = true, dot = color(state))
     }
 
     private fun act(action: String, name: String, label: Int) {

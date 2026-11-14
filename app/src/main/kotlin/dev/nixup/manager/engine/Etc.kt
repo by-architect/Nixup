@@ -21,7 +21,8 @@ import java.util.TimeZone
  * user's own packages first, the time zone, environment.extraInit) /etc/profile and /etc/zshenv give a user's own shell
  * too (users.users.<name>.shell). With NixOS's shells' environment (nix/shells.nix) its /etc/set-environment and
  * shells' files are the config's, and Nixup's own then only adds what the phone has ([writeSystem]: /run/current-system,
- * Android's commands, the phone's name, the users' /run/user). Nix's commands are in /etc/nixup/bin ([writeNixCommands]).
+ * Android's commands, the phone's name, the users' /run/user). Nix's commands are in /etc/nixup/bin ([writeNixCommands]),
+ * and the env program the view's /usr/bin/env leads to is /etc/nixup/usrbinenv ([writeSystem]: environment.usrbinenv).
  */
 object Etc {
     /**
@@ -103,7 +104,7 @@ object Etc {
             machineId.writeText(java.util.UUID.randomUUID().toString().replace("-", "") + "\n")
         }
         writeLogin(etc, home, profile?.optJSONObject("shell"))
-        writeSystem(data, profile?.optJSONObject("shell"))
+        writeSystem(data, etc, profile?.optJSONObject("shell"))
         // Android's own commands' folders, which NixOS's /etc/set-environment puts on PATH after the Nix ones
         // (nix/shells.nix).
         writeWhole(File(etc, "nixup/path"), androidPath().joinToString(":") + "\n")
@@ -509,12 +510,14 @@ object Etc {
     /**
      * /run/current-system/sw, as on NixOS: system.path ([shell]'s system: environment.systemPackages with the shells'
      * packages), whose bin folder NixOS's /etc/set-environment puts on PATH (nix/shells.nix); gone when the profile has
-     * none. [data]'s run is the view's /run.
+     * none. [data]'s run is the view's /run. And [etc]'s nixup/usrbinenv, the env program the view's /usr/bin/env leads
+     * to (environment.usrbinenv, as NixOS links its /usr/bin/env; see Units' view), gone with it.
      */
-    private fun writeSystem(data: File, shell: JSONObject?) {
+    private fun writeSystem(data: File, etc: File, shell: JSONObject?) {
         val system = shell?.string("system")
         link(File(data, "run/current-system/sw"), system)
         if (system == null) File(data, "run/current-system").delete()
+        link(File(etc, "nixup/usrbinenv"), shell?.string("usrbinenv"))
     }
 
     /** [file] made a link to [target] (whole or not at all), or one there removed when [target] is null. */

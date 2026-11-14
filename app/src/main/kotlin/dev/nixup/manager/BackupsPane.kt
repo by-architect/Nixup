@@ -17,11 +17,11 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The Backups tab: the last build's backups (android.backup): the config's apps and folders, when each was backed up
- * and whether it is due, and every backup in its repository; its search box keeps the rows with what is typed in
- * them (an app's name or package, a folder, "due", "not installed"). By hand, any app (the parts picked: its APK, its
- * data, ...) or folder backed up now, and an app's APK and data, or a folder, brought back from any of its backups.
- * All through the module's backup.sh, as root.
+ * The Backups tab: the last build's backups (android.backup): the config's apps (with their icons) and folders, when
+ * each was backed up and whether it is due, and every backup in its repository, each part a card under its heading;
+ * its search box keeps the rows with what is typed in them (an app's name or package, a folder, "due", "not
+ * installed"). By hand, any app (the parts picked: its APK, its data, ...) or folder backed up now, and an app's APK
+ * and data, or a folder, brought back from any of its backups. All through the module's backup.sh, as root.
  */
 class BackupsPane(private val activity: MainActivity, root: View, private val runner: Runner) {
     private val status: TextView = root.findViewById(R.id.backups_status)
@@ -141,7 +141,9 @@ class BackupsPane(private val activity: MainActivity, root: View, private val ru
             val found = items.filter { matches(it) }
             if (found.isEmpty()) continue
             list.addView(Ui.heading(activity, activity.getString(heading)))
-            for (item in found) list.addView(if (item.app != null) appRow(item.app, item.line, item.mine) else folderRow(item.folder!!, item.line, item.mine))
+            list.addView(Ui.card(activity).apply {
+                for (item in found) addView(if (item.app != null) appRow(item.app, item.line, item.mine) else folderRow(item.folder!!, item.line, item.mine))
+            })
             shown += found.size
         }
         if (shown == 0 && query.isNotEmpty() && (apps.isNotEmpty() || folders.isNotEmpty() || all.isNotEmpty())) list.addView(Ui.noMatch(activity, query))
@@ -192,14 +194,14 @@ class BackupsPane(private val activity: MainActivity, root: View, private val ru
         val backUp = Ui.button(activity, activity.getString(R.string.backup)) { backUp(listOf(id), null) }
         val restore = Ui.button(activity, activity.getString(R.string.restore)) { restoreApp(id) }
         rowButtons += listOf(backUp to (installed(id) != null), restore to mine.isNotEmpty())
-        return Ui.row(activity, title, subtitle, listOf(backUp, restore))
+        return Ui.row(activity, title, subtitle, listOf(backUp, restore), below = true, icon = Ui.appIcon(activity, id) ?: activity.packageManager.defaultActivityIcon)
     }
 
     private fun folderRow(path: String, line: String?, mine: List<Snapshot>): View {
         val backUp = Ui.button(activity, activity.getString(R.string.backup)) { backUp(listOf(path), null) }
         val restore = Ui.button(activity, activity.getString(R.string.restore)) { restoreFolder(path) }
         rowButtons += listOf(backUp to true, restore to mine.isNotEmpty())
-        return Ui.row(activity, path, listOfNotNull(line, countLine(mine)).joinToString("\n"), listOf(backUp, restore))
+        return Ui.row(activity, path, listOfNotNull(line, countLine(mine)).joinToString("\n"), listOf(backUp, restore), below = true, icon = activity.getDrawable(R.drawable.ic_folder_badge))
     }
 
     fun setRunning(on: Boolean) {
