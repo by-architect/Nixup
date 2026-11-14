@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.11 (2026-11-14)
 
 - Scripts that start with `#!/usr/bin/env bash` (or `python3`, ...) run in Nixup's shells and services: the view has
   a `/usr/bin/env`, as NixOS has, coreutils' `env` unless `environment.usrbinenv` names another (null leaves it out).
