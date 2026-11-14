@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.13 (2026-11-14)
 
 - UnifiedPush, with no ntfy app: with `services.ntfy.unifiedPush.enable`, Nixup's app is the phone's UnifiedPush
   distributor, as ntfy's app is. Apps that get their pushes through UnifiedPush (Element, Element X, ...) can pick
