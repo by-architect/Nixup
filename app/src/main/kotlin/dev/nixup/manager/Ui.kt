@@ -192,7 +192,7 @@ object Ui {
                 setTextColor(context.getColorStateList(R.color.tab))
                 setPadding(0, dp(context, 4), 0, 0)
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            })
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
         return Tab(view, name, badge)
     }
@@ -220,12 +220,14 @@ object Ui {
      * emptied with its ✕; the keyboard goes when the search is sent. It is a rounded field, without the line Android
      * draws under its text.
      */
-    // The line is the background of Android's own part of the box, which it names but does not make public.
+    // The line is the background of Android's own part of the box, and the text its own field: it names both, but does
+    // not make them public.
     @SuppressLint("DiscouragedApi")
     fun onSearch(box: SearchView, changed: (String) -> Unit) {
         box.setIconifiedByDefault(false)
         if (box.background == null) box.setBackgroundResource(R.drawable.bg_search)
         box.findViewById<View>(box.resources.getIdentifier("search_plate", "id", "android"))?.background = null
+        box.findViewById<TextView>(box.resources.getIdentifier("search_src_text", "id", "android"))?.textSize = 16f
         box.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextChange(text: String): Boolean {
                 changed(text.trim())
