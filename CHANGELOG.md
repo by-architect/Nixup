@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.12 (2026-11-14)
 
 - Notifications from ntfy topics, with no ntfy app: `services.ntfy`. The phone listens to the topics of
   `services.ntfy.topics` (each a name on `services.ntfy.server`, ntfy.sh by default, or `"host/topic"`, or a whole
