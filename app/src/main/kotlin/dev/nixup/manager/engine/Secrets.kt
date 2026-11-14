@@ -74,6 +74,12 @@ class Secrets(data: File, private val incoming: File?) {
     /** The secrets Nixup put there (the module's removal takes them all, with its data). */
     private fun managed(): List<String> = if (managedList.isFile) managedList.readLines().filter { it.isNotBlank() } else emptyList()
 
+    /**
+     * Where the secret at [file] (its place in /data/adb/nixup/secrets) is while the build is planned: the copy sent with
+     * it, which [apply] puts there only after every check; null when none was sent, and [file] is what the build keeps.
+     */
+    fun staged(file: File): File? = file.takeIf { it.parentFile?.path == dir.path }?.let { sent(it.name) }
+
     private fun sent(name: String): File? = incoming?.let { File(it, name) }?.takeIf { it.isFile }
 
     private fun same(a: File, b: File) = b.isFile && a.length() == b.length() && a.readBytes().contentEquals(b.readBytes())

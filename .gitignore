@@ -12,3 +12,5 @@ commit-changes.md
 *.key
 *.p12
 key.properties
+/synctools/build/
+/dav4jvm/build/

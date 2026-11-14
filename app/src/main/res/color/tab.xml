@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tab of the bar at the bottom: its icon and name, darker on the tab shown. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="@color/on_primary_container" android:state_selected="true" />
+    <item android:color="@color/text_secondary" />
+</selector>

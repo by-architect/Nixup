@@ -19,11 +19,12 @@ import java.lang.reflect.Method
  * came back without them has nothing to sync with.
  *
  * They are read as root from those databases (accounts_de.db, and accounts_ce.db, there after the first unlock): each
- * one's name, type, password, user data, auth tokens and which apps see it; and from Android's sync settings, which of
- * the sync adapters of its type run for it (syncable, automatically, periodic syncs). On restore, those not on the
- * phone are made again as the app itself: Android lets only an account type's own app add its accounts (it checks the
- * caller's signing key, which root has not), so a copy of the engine runs with the app's uid for that, reading them
- * from its input. Their sync settings are set as root after.
+ * one's name, type, password, user data, auth tokens and which apps see it. On restore, those not on the phone are made
+ * again as the app itself: Android lets only an account type's own app add its accounts (it checks the caller's
+ * signing key, which root has not), so a copy of the engine runs with the app's uid for that, reading them from its
+ * input. Their sync settings (which of the sync adapters of their type run for them: syncable, automatically, periodic
+ * syncs) are read and set as the app too: from Android 13 on, the sync settings of an account are only for a caller
+ * that can see it, and root, which is no app, gets none of them (Android answers with defaults and drops the changes).
  */
 object Accounts {
     private const val DE = "/data/system_de/0/accounts_de.db"
@@ -49,7 +50,7 @@ object Accounts {
     fun read(id: String): JSONArray? {
         val types = typesNow[id] ?: emptySet()
         if (types.isEmpty()) return JSONArray()
-        return try {
+        val accounts = try {
             open(CE).use { ce ->
                 open(DE).use { de ->
                     val accounts = JSONArray()
@@ -69,7 +70,6 @@ object Accounts {
                                     account.put("visibility", pairs(de, "SELECT _package, value FROM visibility WHERE accounts_id = ?", found.getLong(0).toString()))
                                 }
                             }
-                            account.put("sync", syncSettings(Account(name, type)))
                             accounts.put(account)
                         }
                     }
@@ -78,8 +78,31 @@ object Accounts {
             }
         } catch (e: Exception) {
             Out.line("  $id's accounts cannot be read here (${e.javaClass.simpleName}: ${e.message}): backed up without them")
-            null
+            return null
         }
+        if (accounts.length() > 0) readSync(id, accounts)
+        return accounts
+    }
+
+    /**
+     * Adds each account's sync settings to [accounts] of [id], read as the app (see the top): left out when they cannot
+     * be read that way, and a restore then leaves Android's own.
+     */
+    private fun readSync(id: String, accounts: JSONArray) {
+        val user = Device.uid(id)?.let { appUser(it) }
+        val list = (0 until accounts.length()).map { accounts.getJSONObject(it) }
+        var settings: JSONObject? = null
+        if (user != null) {
+            val names = JSONArray(list.map { JSONObject().put("name", it.getString("name")).put("type", it.getString("type")) })
+            asApp(id, user, "accounts-sync", names.toString()) { line ->
+                if (line.startsWith("{")) settings = runCatching { JSONObject(line) }.getOrNull() else Out.line(line)
+            }
+        }
+        val read = settings ?: run {
+            Out.line("  $id's accounts: their sync settings cannot be read as the app: backed up without them")
+            return
+        }
+        for (account in list) read.optJSONArray(key(account))?.let { account.put("sync", it) }
     }
 
     private fun open(path: String): SQLiteDatabase {
@@ -200,10 +223,9 @@ object Accounts {
             Out.line("  ✘ $id's accounts: its uid ($uid) is not an app's of the phone's owner: they cannot be added as it")
             return Restored(0, missing.size)
         }
-        val status = asApp(id, user, JSONArray(wanted))
+        val status = asApp(id, user, "accounts-add", JSONArray(wanted).toString()) { Out.line(it) }
         val now = present()
         val back = wanted.filter { key(it) in now }
-        back.forEach { applySync(it) }
         val lost = missing.size - back.size
         // (All back, but the app's engine said something went wrong: an account's tokens or the apps that see it.)
         return Restored(back.size, if (lost == 0 && status != 0) 1 else lost)
@@ -213,11 +235,11 @@ object Accounts {
     private fun appUser(uid: Int): String? = if (uid in 10000..19999) "u0_a${uid - 10000}" else null
 
     /**
-     * Runs the engine as [user] (the app's uid, with its group alone) to add [accounts], which it reads from its input
-     * (passwords stay off command lines and files); its lines are told here. The engine's APK is copied where the app's
-     * uid can read it first (Nixup's own folder is root's alone). Returns its exit status.
+     * Runs the engine's [command] as [user] (the app's uid, with its group alone) for [id], with [input] on its input
+     * (passwords stay off command lines and files); each line it says goes to [line]. The engine's APK is copied where
+     * the app's uid can read it first (Nixup's own folder is root's alone). Returns its exit status.
      */
-    private fun asApp(id: String, user: String, accounts: JSONArray): Int {
+    private fun asApp(id: String, user: String, command: String, input: String, line: (String) -> Unit): Int {
         val classpath = System.getenv("CLASSPATH")?.split(':')?.firstOrNull { File(it).isFile }
         if (classpath == null) {
             Out.line("  ✘ $id's accounts: the engine's APK is not known here (CLASSPATH)")
@@ -227,14 +249,14 @@ object Accounts {
         return try {
             File(classpath).copyTo(copy, overwrite = true)
             Os.chmod(copy.path, "644".toInt(8))
-            val process = ProcessBuilder(BUSYBOX, "setuidgid", user, "/system/bin/app_process", "/system/bin", "dev.nixup.manager.engine.Main", "accounts-add", id)
+            val process = ProcessBuilder(BUSYBOX, "setuidgid", user, "/system/bin/app_process", "/system/bin", "dev.nixup.manager.engine.Main", command, id)
                 .directory(File("/")).redirectErrorStream(true)
                 .apply {
                     environment()["CLASSPATH"] = copy.path
                     environment().remove("NIXUP_ENGINE_STATUS")
                 }.start()
-            process.outputStream.use { it.write(accounts.toString().toByteArray()) }
-            process.inputStream.bufferedReader().forEachLine { if (it.isNotBlank()) Out.line(it) }
+            process.outputStream.use { it.write(input.toByteArray()) }
+            process.inputStream.bufferedReader().forEachLine { if (it.isNotBlank()) line(it) }
             process.waitFor()
         } catch (e: Exception) {
             Out.line("  ✘ $id's accounts: could not run as the app (${e.javaClass.simpleName}: ${e.message})")
@@ -244,7 +266,7 @@ object Accounts {
         }
     }
 
-    /** An account's sync settings as backed up, set as root (it may change them for any app). */
+    /** In the engine run as the app: an account's sync settings as backed up (see the top). */
     private fun applySync(account: JSONObject) {
         val it = Account(account.getString("name"), account.getString("type"))
         val settings = account.optJSONArray("sync") ?: return
@@ -317,12 +339,32 @@ object Accounts {
                     runCatching { setVisibility?.invoke(service, account, pkg, visibility.optInt(pkg)) }
                 }
                 Out.line("  ✔ Account ${label(json)}: back, with ${if (password != null) "its password, " else ""}${count(userData.length(), "setting")} and ${count(tokens.length(), "token")}")
+                applySync(json)
             } catch (e: InvocationTargetException) {
                 Out.line("  ✘ Account ${label(json)}: ${e.targetException.javaClass.simpleName}: ${e.targetException.message}")
                 failed++
             }
         }
         return failed
+    }
+
+    /**
+     * In the engine run as the app: the sync settings of the accounts it reads from its input (names and types), said
+     * as one line of JSON by "type/name"; an account whose settings cannot be read is left out, and said why.
+     */
+    fun syncAsApp(): Int {
+        val accounts = JSONArray(System.`in`.bufferedReader().readText())
+        val settings = JSONObject()
+        for (i in 0 until accounts.length()) {
+            val account = accounts.getJSONObject(i)
+            try {
+                settings.put(key(account), syncSettings(Account(account.getString("name"), account.getString("type"))))
+            } catch (e: Exception) {
+                Out.line("  Account ${label(account)}: its sync settings cannot be read (${e.javaClass.simpleName}: ${e.message})")
+            }
+        }
+        Out.line(settings.toString())
+        return 0
     }
 
     private fun count(n: Int, what: String) = if (n == 1) "1 $what" else "$n ${what}s"

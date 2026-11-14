@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The text of a row's buttons, and of one that waits while a script runs. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:alpha="0.6" android:color="@color/text_secondary" android:state_enabled="false" />
+    <item android:color="@color/primary" />
+</selector>

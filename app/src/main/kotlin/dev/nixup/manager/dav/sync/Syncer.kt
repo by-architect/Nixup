@@ -1,0 +1,338 @@
+/*
+ * From DAVx⁵ (davx5-ose 4.5.21, https://github.com/bitfireAT/davx5-ose), adapted for Nixup's calendar and contacts
+ * sync. Copyright © All Contributors of DAVx⁵ (synctools/AUTHORS). GNU General Public License 3.0 (synctools/LICENSE).
+ */
+
+package dev.nixup.manager.dav.sync
+
+import android.content.Context
+import android.os.DeadObjectException
+import androidx.annotation.VisibleForTesting
+import dev.nixup.manager.dav.accounts.AccountId
+import dev.nixup.manager.dav.accounts.AndroidAccountManager
+import dev.nixup.manager.dav.db.Collection
+import dev.nixup.manager.dav.db.ServiceType
+import dev.nixup.manager.dav.Dav
+import dev.nixup.manager.dav.accounts.InvalidAccountException
+import dev.nixup.manager.dav.db.DavCollectionRepository
+import dev.nixup.manager.dav.db.DavServiceRepository
+import dev.nixup.manager.dav.settings.AccountSettings
+import dev.nixup.manager.dav.resource.local.LocalCollection
+import dev.nixup.manager.dav.resource.local.LocalDataStore
+import at.bitfire.synctools.util.causedBy
+import at.bitfire.synctools.storage.LocalStorageClient
+import at.bitfire.synctools.storage.LocalStorageException
+import kotlinx.coroutines.CancellationException
+import java.io.Closeable
+import java.util.logging.Level
+import java.util.logging.Logger
+
+/**
+ * Base class for sync code.
+ *
+ * Contains generic sync code, equal for all sync authorities.
+ *
+ * @param accountId     [AccountId] of the account to synchronize
+ * @param resync        whether re-synchronization is requested (`null` for normal sync)
+ * @param syncResult    synchronization result, to be modified during sync
+ * @param settings      snapshot of the account settings relevant for this sync run
+ */
+abstract class Syncer<StoreType: LocalDataStore<CollectionType>, CollectionType: LocalCollection<*>>(
+    protected val accountId: AccountId,
+    protected val resync: ResyncType?,
+    protected val syncResult: SyncResult,
+    protected val settings: SyncSettings
+): Closeable {
+
+    abstract val dataStore: StoreType
+
+    // (What DAVx⁵ has Hilt inject: Nixup's own, see Dav.)
+    val context: Context get() = Dav.context
+
+    val androidAccountManager = AndroidAccountManager(Dav.context)
+
+    val collectionRepository: DavCollectionRepository get() = Dav.store.collectionRepository
+
+    val logger: Logger get() = Dav.logger
+
+    val serviceRepository: DavServiceRepository get() = Dav.store.serviceRepository
+
+    /** The account's settings, read once for the run (from Android's account: see AccountSettings). */
+    protected val accountSettings by lazy { AccountSettings(Dav.context, accountId) }
+
+    @ServiceType
+    abstract val serviceType: String
+
+    val syncNotificationManager by lazy {
+        SyncNotificationManager(accountId)
+    }
+
+    private val lazyHttpClient = lazy {
+        Dav.httpClientBuilder().fromAccount(accountSettings).build()
+    }
+
+    /** authenticated HTTP client to be used by subclasses */
+        val httpClient by lazyHttpClient
+
+    /**
+     * Creates, updates and/or deletes local collections (calendars, address books, etc) according to
+     * remote collection information. Then syncs the actual entries (events, tasks, contacts, etc)
+     * of the remaining, now up-to-date, collections.
+     */
+    @VisibleForTesting
+    internal suspend fun sync(client: LocalStorageClient) {
+        // Collection type specific preparations
+        if (!prepare(client)) {
+            logger.warning("Failed to prepare sync. Won't run sync.")
+            return
+        }
+
+        // Find collections in database and provider which should be synced (are sync-enabled)
+        val dbCollections = getSyncEnabledCollections()
+        val localCollections = dataStore.getAll(accountId, client)
+
+        // Create/update/delete local collections according to DB
+        val updatedLocalCollections = updateCollections(client, localCollections, dbCollections)
+
+        // Sync local collection contents (events, contacts, tasks)
+        syncCollectionContents(client, updatedLocalCollections, dbCollections)
+    }
+
+    /**
+     * (Nixup) Creates, updates and deletes the local collections as [sync] does, without syncing their contents: for
+     * the address books, whose accounts must be there before Android can sync them.
+     *
+     * @return the local collections that were created
+     */
+    suspend fun updateCollectionsOnly(): List<CollectionType> {
+        val client = dataStore.acquireLocalStorageClient(throwOnMissingPermissions = false) ?: return emptyList()
+        return client.use {
+            if (!prepare(client))
+                return@use emptyList()
+            val localCollections = dataStore.getAll(accountId, client)
+            val updated = updateCollections(client, localCollections, getSyncEnabledCollections())
+            updated - localCollections.toSet()
+        }
+    }
+
+    /**
+     * Finds sync enabled collections in database. They contain collection info which might have
+     * been updated by collection refresh [dev.nixup.manager.dav.servicedetection.DavResourceFinder].
+     *
+     * @return The sync enabled database collections as hash map identified by their ID
+     */
+    @VisibleForTesting
+    internal suspend fun getSyncEnabledCollections(): Map<Long, Collection> {
+        val dbCollections = mutableMapOf<Long, Collection>()
+        serviceRepository.getByAccountIdAndType(accountId, serviceType)?.let { service ->
+            for (dbCollection in getDbSyncCollections(service.id))
+                dbCollections[dbCollection.id] = dbCollection
+        }
+
+        return dbCollections
+    }
+
+    /**
+     * Updates and deletes local collections.
+     *
+     * - Updates local collections with possibly new info from corresponding database collections.
+     * - Deletes local collections without a corresponding database collection.
+     * - Creates local collections for database collections without local match.
+     *
+     * @param client The [LocalStorageClient] used to create local collections
+     * @param localCollections The current local collections
+     * @param dbCollections The current database collections, possibly containing new information
+     *
+     * @return Updated list of local collections (obsolete collections removed, new collections added)
+     */
+    @VisibleForTesting
+    internal suspend fun updateCollections(
+        client: LocalStorageClient,
+        localCollections: List<CollectionType>,
+        dbCollections: Map<Long, Collection>
+    ): List<CollectionType> {
+        // create mutable copies of input
+        val updatedLocalCollections = localCollections.toMutableList()
+        val newDbCollections = dbCollections.toMutableMap()
+
+        for (localCollection in localCollections) {
+            val dbCollection = dbCollections.getOrDefault(localCollection.dbCollectionId, null)
+            if (dbCollection == null) {
+                // Collection not available in db = on server (anymore), delete and remove from the updated list
+                logger.log(
+                    Level.INFO,
+                    "Deleting local collection {0} without matching remote collection",
+                    arrayOf(localCollection.dbCollectionId)
+                )
+                dataStore.delete(localCollection)
+                updatedLocalCollections -= localCollection
+            } else {
+                // Collection exists locally, update local collection and remove it from "to be created" map
+                logger.log(
+                    Level.FINE,
+                    "Updating local collection {0} with {1}",
+                    arrayOf(localCollection.dbCollectionId, dbCollection)
+                )
+                dataStore.update(accountId, client, localCollection, dbCollection)
+                newDbCollections -= dbCollection.id
+            }
+        }
+
+        // Create local collections which are in DB, but don't exist locally yet
+        if (newDbCollections.isNotEmpty()) {
+            val toBeCreated = newDbCollections.values.toList()
+            logger.log(Level.INFO, "Creating new local collections: {0}", arrayOf(toBeCreated.joinToString()))
+            val newLocalCollections = createLocalCollections(client, toBeCreated)
+            // Add the newly created collections to the updated list
+            updatedLocalCollections.addAll(newLocalCollections)
+        }
+
+        return updatedLocalCollections
+    }
+
+    /**
+     * Creates new local collections from database collections.
+     *
+     * @param client [LocalStorageClient] to access local collections
+     * @param dbCollections Database collections to be created as local collections
+     *
+     * @return Newly created local collections
+     */
+    @VisibleForTesting
+    internal suspend fun createLocalCollections(
+        client: LocalStorageClient,
+        dbCollections: List<Collection>
+    ): List<CollectionType> =
+        dbCollections.map { collection ->
+            dataStore.create(client, collection)
+                ?: throw IllegalStateException("Couldn't create local collection for $collection")
+        }
+
+    /**
+     * Synchronize the actual collection contents.
+     *
+     * @param client [LocalStorageClient] to access local collections
+     * @param localCollections Collections to be synchronized
+     * @param dbCollections Remote collection information
+     */
+    @VisibleForTesting
+    internal suspend fun syncCollectionContents(
+        client: LocalStorageClient,
+        localCollections: List<CollectionType>,
+        dbCollections: Map<Long, Collection>
+    ) {
+        for (localCollection in localCollections) {
+            val dbCollection = dbCollections[localCollection.dbCollectionId] ?: continue
+            syncCollection(client, localCollection, dbCollection)
+        }
+    }
+
+    override fun close() {
+        if (lazyHttpClient.isInitialized())
+            httpClient.close()
+    }
+
+    /**
+     * For collection specific sync preparations.
+     *
+     * @param client [LocalStorageClient] for data store
+     *
+     * @return *true* to run the sync; *false* to abort
+     */
+    open fun prepare(client: LocalStorageClient): Boolean = true
+
+    /**
+     * Get the local database collections which are sync-enabled (should by synchronized).
+     *
+     * @param serviceId The CalDAV or CardDAV service (account) to be synchronized
+     *
+     * @return Database collections to be synchronized
+     */
+    abstract fun getDbSyncCollections(serviceId: Long): List<Collection>
+
+    /**
+     * Synchronizes local with remote collection contents.
+     *
+     * @param client The [LocalStorageClient] to access the local collection to be updated
+     * @param localCollection The local collection to be synchronized
+     * @param remoteCollectionInfo The database collection representing the remote collection. Contains
+     * remote address of the collection to be synchronized.
+     */
+    abstract suspend fun syncCollection(
+        client: LocalStorageClient,
+        localCollection: CollectionType,
+        remoteCollectionInfo: Collection
+    )
+
+    /**
+     * Acquires the content provider, runs the sync, and handles exceptions that are not handled by the SyncManager itself.
+     *
+     * Handled exceptions are logged; most are also recorded in [syncResult] as soft or hard errors.
+     *
+     * @throws CancellationException if the sync has been canceled – not recorded in [syncResult], but passed
+     * on to the caller (see [dev.nixup.manager.dav.sync.worker.BaseSyncWorker])
+     */
+    suspend operator fun invoke() {
+        logger.info("${dataStore.authority} sync of $accountId initiated (resync=$resync)")
+
+        try {
+            dataStore.acquireLocalStorageClient(throwOnMissingPermissions = true)
+        } catch (e: SecurityException) {
+            logger.log(Level.WARNING, "Missing permissions for content provider authority ${dataStore.authority}", e)
+            /* Don't show a notification here without possibility to permanently dismiss it!
+            Some users intentionally don't grant all permissions for what is syncable. */
+            return
+        }.use { client ->
+            if (client == null) {
+                /* Content provider is not available at all.
+                I.E. system app (like "calendar storage") is missing or disabled */
+                logger.warning("Couldn't connect to content provider of authority ${dataStore.authority}")
+                syncNotificationManager.notifyProviderError(dataStore.authority)
+                syncResult.hardError = true
+                return // Don't continue without provider
+            }
+
+            // Dismiss previous content provider error notification
+            syncNotificationManager.dismissProviderError(dataStore.authority)
+
+            // run sync
+            try {
+                sync(client)
+
+            } catch (e: Exception) {
+                /* Handle sync exceptions. Note that most exceptions that occur during synchronization of a specific
+                collection are already handled in SyncManager. The exceptions here usually
+                - have occurred during Syncer operation (for instance when creating/deleting local collections) —
+                  content provider access here can also throw a DeadObjectException wrapped by the storage layer,
+                - or have been re-thrown from SyncManager (like a LocalStorageException caused by DeadObjectException).
+                */
+                when (e) {
+                    /* The sync has been canceled (usually because WorkManager stopped our worker). Cancellation is
+                    not a sync error and must never be swallowed: the coroutine has to stop here, and the worker has
+                    to pass the cancellation on to WorkManager. See BaseSyncWorker. */
+                    is CancellationException ->
+                        throw e
+
+                    // content provider process died, or (Android 14+) was killed for being frozen/cached;
+                    // see throwWrappedLocalStorageException() in LocalStorageClient.kt
+                    is LocalStorageException if (e.softError) -> {
+                        logger.log(Level.WARNING, "Temporary error while accessing storage, treating as soft error", e)
+                        syncResult.softError = true
+                    }
+
+                    is InvalidAccountException ->
+                        logger.log(Level.WARNING, "Account was removed during synchronization", e)
+
+                    else -> {
+                        logger.log(Level.SEVERE, "Couldn't sync ${dataStore.authority}", e)
+                        syncResult.hardError = true
+                    }
+                }
+
+            } finally {
+                logger.info("${dataStore.authority} sync of $accountId finished")
+            }
+        }
+    }
+
+}

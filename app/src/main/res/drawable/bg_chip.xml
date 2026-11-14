@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A filter of the Logs tab: outlined, filled when it is the one picked. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/ripple_tonal">
+    <item android:id="@android:id/mask">
+        <shape android:shape="rectangle">
+            <solid android:color="#FFFFFFFF" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+    <item>
+        <selector>
+            <item android:state_selected="true">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/primary_container" />
+                    <corners android:radius="8dp" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <stroke android:width="1dp" android:color="@color/outline" />
+                    <corners android:radius="8dp" />
+                </shape>
+            </item>
+        </selector>
+    </item>
+</ripple>

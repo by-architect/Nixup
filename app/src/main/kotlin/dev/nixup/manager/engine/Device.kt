@@ -1,5 +1,6 @@
 package dev.nixup.manager.engine
 
+import android.app.admin.DevicePolicyManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -68,21 +69,23 @@ object Device {
 
     class Installed(val versionCode: Long, val versionName: String, val signers: Set<String>)
 
-    fun installed(id: String): Installed? {
+    /** The app installed for the main user, or with [hidden], the app hidden from it (pm hide: on the phone, but not the user's until unhidden). */
+    fun installed(id: String, hidden: Boolean = false): Installed? {
         packageManager?.let { pm ->
             return try {
-                val info = pm.getPackageInfo(id, PackageManager.GET_SIGNING_CERTIFICATES)
+                val flags = PackageManager.GET_SIGNING_CERTIFICATES or if (hidden) PackageManager.MATCH_UNINSTALLED_PACKAGES else 0
+                val info = pm.getPackageInfo(id, flags)
                 Installed(info.longVersionCode, info.versionName ?: "", signers(info.signingInfo))
             } catch (e: PackageManager.NameNotFoundException) {
                 null
             }
         }
-        val code = versionCode(id) ?: return null
+        val code = (if (hidden) versionCode(id, "-u", "--user", "0") else versionCode(id)) ?: return null
         return Installed(code, code.toString(), emptySet())
     }
 
-    /** The installed version, asked of pm itself (no cache in between), or null when the app is not installed. */
-    fun versionCode(id: String): Long? = run("pm", "list", "packages", "--show-versioncode", id).second
+    /** The installed version, asked of pm itself (no cache in between), or null when the app is not installed; [options] go to pm list packages. */
+    fun versionCode(id: String, vararg options: String): Long? = run("pm", "list", "packages", "--show-versioncode", *options, id).second
         .lineSequence().firstOrNull { it.startsWith("package:$id ") }
         ?.substringAfter("versionCode:")?.trim()?.toLongOrNull()
 
@@ -97,7 +100,11 @@ object Device {
     /** The APK's package, version and keys, or null when it cannot be read here. */
     fun archive(apk: File): Archive? {
         val pm = packageManager ?: return null
-        val info = pm.getPackageArchiveInfo(apk.path, PackageManager.GET_SIGNING_CERTIFICATES) ?: return null
+        // Android 13 can skip certificate collection without GET_SIGNATURES (b/243324820).
+        // Still read SigningInfo below, including its signing-certificate history.
+        @Suppress("DEPRECATION")
+        val flags = PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES
+        val info = pm.getPackageArchiveInfo(apk.path, flags) ?: return null
         return Archive(info.packageName, info.longVersionCode, info.versionName ?: "", signers(info.signingInfo))
     }
 
@@ -217,6 +224,7 @@ object Device {
         var enabled = 0
         var suspended = false
         var installed = false
+        var hidden = false
         var apk = true
         var user = -1
         var section: String? = null
@@ -247,6 +255,7 @@ object Device {
                         // Later sections (app links, ...) have "User 0:" lines too, without the package state.
                         if (user == 0 && text.contains(" installed=")) {
                             installed = Regex("""\binstalled=(true|false)""").find(text)?.groupValues?.get(1) == "true"
+                            hidden = Regex("""\bhidden=(true|false)""").find(text)?.groupValues?.get(1) == "true"
                             enabled = Regex("""\benabled=(\d+)""").find(text)?.groupValues?.get(1)?.toInt() ?: 0
                             suspended = Regex("""\bsuspended=(true|false)""").find(text)?.groupValues?.get(1) == "true"
                         }
@@ -255,8 +264,8 @@ object Device {
             }
         }
         // Uninstalled with its data kept, an app is still listed: not installed for the main user, or (One UI after a
-        // restart) said to be installed with no APK left (pkg=null).
-        return if (installed && apk) Dump(requested, runtime, enabled, suspended) else null
+        // restart) said to be installed with no APK left (pkg=null). A hidden one (android.strict's) is not the user's either.
+        return if (installed && apk && !hidden) Dump(requested, runtime, enabled, suspended) else null
     }
 
     /** Grants or revokes a runtime permission, with the user-set and user-fixed flags of the state wanted. */
@@ -359,8 +368,13 @@ object Device {
     fun setOpensLinks(id: String, allowed: Boolean): Boolean =
         run("pm", "set-app-links-allowed", "--user", "0", "--package", id, allowed.toString()).first == 0
 
-    fun roleHolders(role: String): List<String> = run("cmd", "role", "get-role-holders", "--user", "0", role).second
-        .split(';', '\n').map { it.trim() }.filter { PACKAGE_NAME.matches(it) }
+    /** RoleManager reads the root process's user (0); the role shell has no getter on Android 13. */
+    @Suppress("UNCHECKED_CAST")
+    fun roleHolders(role: String): List<String> {
+        val manager = checkNotNull(context?.getSystemService(Context.ROLE_SERVICE)) { "Role service unavailable" }
+        // getRoleHolders is a system API, absent from the public SDK stubs.
+        return manager.javaClass.getMethod("getRoleHolders", String::class.java).invoke(manager, role) as List<String>
+    }
 
     /** Makes [id] the role's holder, or leaves the role with none when [id] is null. */
     fun setRoleHolder(role: String, id: String?): Boolean =
@@ -437,6 +451,20 @@ object Device {
         val binder = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java).invoke(null, "mount") as android.os.IBinder
         val service = Class.forName("android.os.storage.IStorageManager\$Stub").getMethod("asInterface", android.os.IBinder::class.java).invoke(null, binder)
         service.javaClass.getMethod("fixupAppDir", String::class.java).invoke(service, path)
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * Lets an app off Android's stopped state, in which nothing starts it in the background (its jobs, syncs, alarms,
+     * broadcasts) until it is opened: where force-stop and an install leave it. Android 15 and later keep a force-stopped
+     * app there. False when it cannot be done here.
+     */
+    fun letOffStopped(id: String): Boolean = try {
+        val packages = Class.forName("android.app.ActivityThread").getMethod("getPackageManager").invoke(null)
+        packages.javaClass.getMethod("setPackageStoppedState", String::class.java, Boolean::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .invoke(packages, id, false, 0)
         true
     } catch (e: Exception) {
         false
@@ -727,6 +755,60 @@ object Device {
     /** Installs again, for the main user, an app the phone still has (one that came with it), with the data it kept. */
     fun installExisting(id: String): Boolean =
         run("cmd", "package", "install-existing", "--user", "0", id).let { (status, said) -> status == 0 && said.contains("installed") }
+
+    // --- The main user's own apps (android.strict).
+
+    /** The main user's apps that are not the system's: installed by hand, from a store, sideloaded, or by Nixup. */
+    fun userApps(): Set<String> = run("pm", "list", "packages", "-3", "--user", "0").second.lineSequence()
+        .map { it.trim() }.filter { it.startsWith("package:") }.map { it.removePrefix("package:") }
+        .filter { PACKAGE_NAME.matches(it) }.toSet()
+
+    /** Whether the app is installed for the main user (one another user alone has, or a hidden one, is not). */
+    fun installedForUser(id: String): Boolean =
+        run("pm", "list", "packages", "--user", "0", id).second.lineSequence().any { it.trim() == "package:$id" }
+
+    /**
+     * Hides the app from the main user, as device policies do: gone for the user (no icon, it cannot run, other apps do
+     * not find it), but kept on the phone as it is, with its data and all Android keeps of it, until [unhide].
+     */
+    fun hide(id: String): Boolean = run("pm", "hide", "--user", "0", id).second.contains("new hidden state: true")
+
+    fun unhide(id: String): Boolean = run("pm", "unhide", "--user", "0", id).second.contains("new hidden state: false")
+
+    /** The app that installed it, its installer of record (which updates it, and which some apps check), or null. */
+    fun installerOf(id: String): String? = run("pm", "list", "packages", "-i", "--user", "0", id).second.lineSequence()
+        .firstOrNull { it.startsWith("package:$id ") }?.substringAfter("installer=", "")?.trim()
+        ?.takeIf { it.isNotEmpty() && it != "null" }
+
+    /** The phone's other users that have the app installed (an app clone's, a work profile's), by their numbers. */
+    fun otherUsers(id: String): List<Int> = run("dumpsys", "package", id).second.lineSequence()
+        .mapNotNull { Regex("""^\s*User (\d+): .*\binstalled=true\b""").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+        .filter { it != 0 }.distinct().toList()
+
+    /** Whether Android knows the app at all: installed, hidden, or uninstalled with its data (and its key) kept. */
+    fun known(id: String): Boolean = run("pm", "list", "packages", "-u", id).second.lineSequence().any { it.trim() == "package:$id" }
+
+    /** Whether the app is on the phone, hidden from the main user. */
+    fun hiddenForUser(id: String): Boolean =
+        run("dumpsys", "package", id).second.lineSequence().any { line ->
+            line.trimStart().startsWith("User 0:") && Regex("""\binstalled=true\b""").containsMatchIn(line) && Regex("""\bhidden=true\b""").containsMatchIn(line)
+        }
+
+    /** The apps that are device admin apps of the main user: Android does not uninstall one while it is. */
+    fun deviceAdmins(): Set<String> = try {
+        context?.getSystemService(DevicePolicyManager::class.java)?.activeAdmins?.map { it.packageName }?.toSet() ?: emptySet()
+    } catch (e: Throwable) {
+        emptySet()
+    }
+
+    /** The Magisk app's name while it is hidden under another one (Magisk keeps it as its "requester"), or null. */
+    fun hiddenMagiskApp(): String? = try {
+        run("magisk", "--sqlite", "SELECT value FROM strings WHERE key='requester'").second.lineSequence()
+            .map { it.trim() }.firstOrNull { it.startsWith("value=") }?.removePrefix("value=")?.takeIf { PACKAGE_NAME.matches(it) }
+    } catch (e: Exception) {
+        // (No magisk here: KernelSU or APatch.)
+        null
+    }
 
     /** Runs one of Android's commands with no input (it would hand that to Android, which may not read /data/adb); its exit status and what it said. */
     fun run(vararg command: String): Pair<Int, String> {

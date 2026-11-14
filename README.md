@@ -8,6 +8,8 @@ backups, all from one `configuration.nix`.
 
 **[Read the documentation →](https://by-architect.github.io/Nixup/docs.html)**
 
+**ALL OPTIONS: https://github.com/by-architect/Nixup/blob/main/templates/default/configuration.nix**
+
 ## Aim Of The Project
 
 This project aims to close the gap between Android and Nix. You can install NixOS on a phone, but it does
@@ -15,6 +17,15 @@ not support every phone. Nix-on-Droid, on the other hand, does not have the perm
 Android itself. What I found missing: a native app backup system driven by the config, installing apps from
 F-Droid-like repositories from a config, stable background services and scripts, app settings, and more. Nixup
 is built to cover all of these.
+
+## FEATURES
+- Smart Backup: if new version of apk exist, it backups apk. Checks data changes of apps, if data changes, auto backups.
+- Smart app install: Installs from play store, fdroid, obtanium and other fdroid stores. With option, it installs apks from backup with data in build, if only new version of that app exist, it installs from store.
+- Backup Options: You can backup to remote device and restore from there. Imagine that, you don't have any data in your phone, just building nix system from github, and all your data comes from your server and being built. 
+- Background services those run stable in background and start automaticly on boot: Tailscale, ssh, adb, caldav, snapcast, snapclient and custom services like nixos does. Best way is that, option syntax is same with nixos. So one service file will run in both device. But careful about arm based packages. 
+- Packages of nixos: Run nix-shell commands, install packages via config, use the terminal with your way just like nix-on-droid.
+- App Settings: Change any app settings via config. No need to setup everything from stratch.
+- Generations: Roll back, built on the phone or in pc. 
 
 ## What It Manages
 
@@ -27,6 +38,7 @@ is built to cover all of these.
 - [Services](https://by-architect.github.io/Nixup/docs.html#services) and
   [NixOS's own service modules](https://by-architect.github.io/Nixup/docs.html#nixos-modules)
 - Encrypted [backups](https://by-architect.github.io/Nixup/docs.html#backups) of apps and folders
+- Calendars, contacts and tasks from CalDAV/CardDAV servers, synced by Nixup's app itself with DAVx⁵'s sync
 - [Generations](https://by-architect.github.io/Nixup/docs.html#building) you can roll back to, built on the
   phone or [from a PC](https://by-architect.github.io/Nixup/docs.html#from-a-pc)
 
@@ -112,6 +124,16 @@ Services, with NixOS's own options:
     };
   };
 
+  # Calendars and contacts from a CalDAV/CardDAV server, synced by Nixup's app itself (DAVx⁵'s sync)
+  services.caldav = {
+    enable = true;
+    accounts.home = {
+      url = "https://dav.example.org/";
+      userName = "neo";
+      passwordFile = ./dav-password;
+    };
+  };
+
   # SSH: logins get root's shell with your Nix packages; 127.0.0.1 keeps it to the tailnet
   services.openssh = {
     enable = true;
@@ -153,4 +175,5 @@ Then follow [Your first build](https://by-architect.github.io/Nixup/docs.html#fi
 ## License
 
 [GPL-3.0](LICENSE). Nixup includes Termux's terminal code (Apache 2.0) and Nix-on-Droid's terminal options
-(MIT), ships Nix (LGPL 2.1) and uses Aurora OSS's gplayapi (GPL-3.0) for Google Play; see [NOTICE](NOTICE).
+(MIT), DAVx⁵'s synctools (GPL-3.0) and dav4jvm (MPL 2.0) for the calendar and contacts sync, ships Nix
+(LGPL 2.1) and uses Aurora OSS's gplayapi (GPL-3.0) for Google Play; see [NOTICE](NOTICE).

@@ -38,6 +38,26 @@ restore_debloat() {
   rm -f "$journal"
 }
 
+# The apps strict hid (android.strict) come back, as they were: they stayed on the
+# phone with their data (the engine does this; this is for when it could not run).
+restore_strict() {
+  hidden=/data/adb/nixup/hidden
+  [ -f "$hidden" ] || return 0
+  # (One that did not come back stays listed, for the next try at a start.)
+  left=
+  while read -r app; do
+    [ -n "$app" ] || continue
+    if pm unhide --user 0 "$app" < /dev/null 2> /dev/null | grep -q 'hidden state: false'; then
+      echo "Brought $app back"
+    else
+      left="$left$app
+"
+    fi
+  done < "$hidden"
+  printf '%s' "$left" > "$hidden"
+  [ -s "$hidden" ] || rm -f "$hidden"
+}
+
 # The apps the module put in Obtainium's list go out of it again (the engine does
 # this; this is for when it could not run). Only the files the module wrote.
 restore_obtainium() {
@@ -78,6 +98,7 @@ if [ "${0##*/}" = nixup-restore.sh ]; then
   fi
   restore_apps
   restore_debloat
+  restore_strict
   restore_obtainium
   restore_services
   # What did not go back (the engine says so) is tried again at the next start, 3 times: until then its records of

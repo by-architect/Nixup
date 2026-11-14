@@ -1,0 +1,129 @@
+/*
+ * From DAVx⁵ (davx5-ose 4.5.21, https://github.com/bitfireAT/davx5-ose), adapted for Nixup's calendar and contacts
+ * sync. Copyright © All Contributors of DAVx⁵ (synctools/AUTHORS). GNU General Public License 3.0 (synctools/LICENSE).
+ */
+
+package dev.nixup.manager.dav.resource.local
+
+import androidx.core.content.contentValuesOf
+import dev.nixup.manager.dav.resource.local.LocalTaskList.Companion.COLUMN_TASKLIST_SYNC_STATE
+import at.bitfire.synctools.storage.tasks.DmfsRecurringTaskList
+import at.bitfire.synctools.storage.tasks.DmfsTaskList
+import at.bitfire.synctools.storage.tasks.DmfsTasksContract
+import at.bitfire.synctools.storage.tasks.TaskAndExceptions
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import org.dmfs.tasks.contract.TaskContract
+import org.dmfs.tasks.contract.TaskContract.TaskListColumns
+import org.dmfs.tasks.contract.TaskContract.Tasks
+
+/**
+ * App-specific implementation of a task list.
+ *
+ * [org.dmfs.tasks.contract.TaskContract.TaskLists._SYNC_ID] corresponds to the database
+ * collection ID ([dev.nixup.manager.dav.db.Collection.id]).
+ */
+class LocalTaskList (
+    internal val dmfsTaskList: DmfsTaskList
+): LocalCollection<LocalTask> {
+
+    override val readOnly
+        get() = dmfsTaskList.accessLevel.let {
+            it != TaskListColumns.ACCESS_LEVEL_UNDEFINED && it <= TaskListColumns.ACCESS_LEVEL_READ
+        }
+
+    override val dbCollectionId: Long?
+        get() = dmfsTaskList.syncId?.toLongOrNull()
+
+    /** The task list's [SyncState] is stored in serialized JSON format in the [COLUMN_TASKLIST_SYNC_STATE] column. */
+    override var lastSyncState: SyncState?
+        get() {
+            val serializedState = dmfsTaskList.provider
+                .getTaskListRow(dmfsTaskList.id, arrayOf(COLUMN_TASKLIST_SYNC_STATE))
+                ?.getAsString(COLUMN_TASKLIST_SYNC_STATE)
+            return serializedState?.let {
+                SyncState.fromString(it)
+            }
+        }
+        set(state) {
+            val serializedState = state?.toString()     // don't call "null".toString()
+            dmfsTaskList.update(
+                contentValuesOf(
+                    COLUMN_TASKLIST_SYNC_STATE to serializedState
+                )
+            )
+        }
+
+    internal val recurringTaskList = DmfsRecurringTaskList(dmfsTaskList)
+
+
+    fun add(taskAndExceptions: TaskAndExceptions): Long {
+        return recurringTaskList.addTaskAndExceptions(taskAndExceptions)
+    }
+
+
+    // implement LocalResource
+
+    override fun countAll(): Int =
+        dmfsTaskList.countTasks(null, null)
+
+    override fun countDeleted(): Int =
+        dmfsTaskList.countTasks(Tasks._DELETED, null)
+
+    override fun countModified(): Int =
+        dmfsTaskList.countTasks("${Tasks._DIRTY} AND NOT ${Tasks._DELETED}", null)
+
+    override fun countDirty(): Int =
+        dmfsTaskList.countTasks(Tasks._DIRTY, null)
+
+    override fun findDeleted(): Flow<LocalTask> =
+        recurringTaskList.queryTasksAndExceptions(Tasks._DELETED, null).map { LocalTask(recurringTaskList, it) }
+
+    override fun findDirty(): Flow<LocalTask> =
+        recurringTaskList.queryTasksAndExceptions(Tasks._DIRTY, null).map { LocalTask(recurringTaskList, it) }
+
+    override suspend fun findByName(name: String): LocalTask? {
+        val result = recurringTaskList.findTaskAndExceptions("${Tasks._SYNC_ID}=?", arrayOf(name))
+        return result?.let {
+            LocalTask(recurringTaskList, it)
+        }
+    }
+
+    override suspend fun markNotDirty(flags: Int): Int =
+        withContext(Dispatchers.IO) {
+            dmfsTaskList.updateTasks(
+                contentValuesOf(DmfsTasksContract.COLUMN_FLAGS to flags),
+                "${Tasks.LIST_ID}=? AND ${Tasks._DIRTY}=0",
+                arrayOf(dmfsTaskList.id.toString())
+            )
+        }
+
+    override suspend fun removeNotDirtyMarked(flags: Int) =
+        withContext(Dispatchers.IO) {
+            dmfsTaskList.deleteTasks(
+                "${Tasks.LIST_ID}=? AND NOT ${Tasks._DIRTY} AND ${DmfsTasksContract.COLUMN_FLAGS}=?",
+                arrayOf(dmfsTaskList.id.toString(), flags.toString())
+            )
+        }
+
+    override suspend fun forgetETags() {
+        withContext(Dispatchers.IO) {
+            dmfsTaskList.updateTasks(
+                contentValuesOf(DmfsTasksContract.COLUMN_ETAG to null),
+                "${Tasks.LIST_ID}=?",
+                arrayOf(dmfsTaskList.id.toString())
+            )
+        }
+    }
+
+
+    companion object {
+        /**
+         * Column to store per task list sync state as a [String].
+         */
+        private const val COLUMN_TASKLIST_SYNC_STATE = TaskContract.TaskLists.SYNC_VERSION
+    }
+
+}

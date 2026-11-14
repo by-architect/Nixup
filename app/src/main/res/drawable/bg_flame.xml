@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A newer Nixup, in the Updates tab: a card in the warm color of the icon's flame. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/flame_container" />
+    <corners android:radius="16dp" />
+</shape>

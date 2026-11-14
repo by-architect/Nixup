@@ -47,6 +47,7 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
                 // Not installed: the next build installs it.
                 val installed = Device.installed(id) ?: continue
                 val app = repo.find(id) ?: continue
+                // (One installed with another key is a build's to reinstall, not an update.)
                 val pick = repo.suggested(app, installed) as? FDroid.Choice.Pick ?: continue
                 if (pick.version.code > installed.versionCode) steps += repo.step(app, pick.version, installed)
             }
@@ -54,7 +55,8 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
         for (app in fromReleases) {
             val installed = Device.installed(app.id) ?: continue
             when (val plan = releases.plan(app, installed)) {
-                is Releases.Plan.Install -> steps += plan.step
+                // (One installed with another key is a build's to reinstall: it says so first.)
+                is Releases.Plan.Install -> if (!plan.step.reinstall) steps += plan.step else if (!quiet) Out.line("${app.id}: installed with another key, so a build reinstalls it")
                 is Releases.Plan.Problem -> if (!quiet) Out.line("${app.id}: ${plan.text.removePrefix("${app.id}: ")}")
                 is Releases.Plan.Current -> {}
             }
@@ -62,7 +64,7 @@ class Updates(private val data: File, private val profile: File = File(data, "pr
         for (id in fromPlay) {
             val installed = Device.installed(id) ?: continue
             when (val plan = play.plan(id, installed)) {
-                is PlayStore.Plan.Install -> steps += plan.steps
+                is PlayStore.Plan.Install -> if (plan.steps.none { it.reinstall }) steps += plan.steps else if (!quiet) Out.line("$id: installed with another key, so a build reinstalls it")
                 is PlayStore.Plan.Problem -> if (!quiet) Out.line("$id: ${plan.text.removePrefix("$id: ")}")
                 is PlayStore.Plan.Current -> {}
             }

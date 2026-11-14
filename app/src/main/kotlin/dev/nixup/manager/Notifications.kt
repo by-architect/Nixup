@@ -18,6 +18,15 @@ object Notifications {
     private const val PROGRESS = "progress"
     private const val INSTALL_ID = 1
 
+    /**
+     * The calendar and contacts sync's own problems (services.caldav, see dav.sync.SyncNotificationManager), in
+     * DAVx⁵'s three channels: what stops it until something is done; the items it passed over (no sound); and the
+     * network's errors (no sound nor status bar icon), which mostly pass by themselves.
+     */
+    const val SYNC_CHANNEL = "sync"
+    const val SYNC_WARNINGS_CHANNEL = "sync_warnings"
+    const val SYNC_NETWORK_CHANNEL = "sync_network"
+
     /** Each kind of event's channel, and its name. */
     private val CHANNELS = linkedMapOf(
         "builds" to R.string.channel_builds,
@@ -25,6 +34,7 @@ object Notifications {
         "backups" to R.string.channel_backups,
         "services" to R.string.channel_services,
         "connections" to R.string.channel_connections,
+        SYNC_CHANNEL to R.string.channel_sync,
     )
 
     private fun channelOf(kind: String) = when (kind) {
@@ -41,7 +51,11 @@ object Notifications {
         manager.deleteNotificationChannel("results")
         manager.createNotificationChannels(
             listOf(NotificationChannel(PROGRESS, context.getString(R.string.channel_progress), NotificationManager.IMPORTANCE_LOW)) +
-                CHANNELS.map { (id, name) -> NotificationChannel(id, context.getString(name), NotificationManager.IMPORTANCE_DEFAULT) },
+                CHANNELS.map { (id, name) -> NotificationChannel(id, context.getString(name), NotificationManager.IMPORTANCE_DEFAULT) } +
+                listOf(
+                    NotificationChannel(SYNC_WARNINGS_CHANNEL, context.getString(R.string.channel_sync_warnings), NotificationManager.IMPORTANCE_LOW),
+                    NotificationChannel(SYNC_NETWORK_CHANNEL, context.getString(R.string.channel_sync_network), NotificationManager.IMPORTANCE_MIN),
+                ),
         )
     }
 

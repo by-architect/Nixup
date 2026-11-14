@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tab's other buttons (Dry run, Update all, ...): a lighter fill. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetTop="4dp"
+    android:insetBottom="4dp">
+    <ripple android:color="@color/ripple_tonal">
+        <item>
+            <selector>
+                <item android:state_enabled="false">
+                    <shape android:shape="rectangle">
+                        <solid android:color="@color/disabled" />
+                        <corners android:radius="20dp" />
+                    </shape>
+                </item>
+                <item>
+                    <shape android:shape="rectangle">
+                        <solid android:color="@color/primary_container" />
+                        <corners android:radius="20dp" />
+                    </shape>
+                </item>
+            </selector>
+        </item>
+    </ripple>
+</inset>

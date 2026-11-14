@@ -3,7 +3,6 @@ package dev.nixup.manager
 import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextUtils
@@ -20,14 +19,17 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The Logs tab: what Nixup did and what happened, newest first, by day, from its journal of events (see the module's
- * notify.sh): each build, update, backup and git pull as one entry with how it ended and how long it took, each
- * service that stopped or ran again, and Tailscale's connection. A filter shows one kind, or the problems alone, and
- * the search box the entries with what is typed in them (their title, what they say, their kind); an entry opens its
- * own log (the run's, or the service's, searchable too); Files opens the logs themselves.
+ * The Logs tab: what Nixup did and what happened, newest first, a card for each day, from its journal of events (see
+ * the module's notify.sh): each build, update, backup and git pull as one entry with how it ended and how long it took,
+ * each service that stopped or ran again, and Tailscale's connection. Over them, how the last day went (its problems
+ * are counted on the tab too, and a tap shows them). A filter shows one kind, or the problems alone, and the search box
+ * the entries with what is typed in them (their title, what they say, their kind); an entry opens its own log (the
+ * run's, or the service's, searchable too); Files opens the logs themselves.
  */
 class LogsPane(private val activity: MainActivity, root: View, private val runner: Runner) {
     private val filters: LinearLayout = root.findViewById(R.id.logs_filters)
+    private val summary: View = root.findViewById(R.id.logs_summary)
+    private val statusDot: View = root.findViewById(R.id.logs_status_dot)
     private val status: TextView = root.findViewById(R.id.logs_status)
     private val list: LinearLayout = root.findViewById(R.id.logs_list)
     private var events: List<Shown> = emptyList()
@@ -52,7 +54,9 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
 
     init {
         kinds.forEachIndexed { i, (label, _) ->
-            filters.addView(Ui.button(activity, activity.getString(label)) { filter = i; show() })
+            filters.addView(Ui.chip(activity, activity.getString(label)) { filter = i; show() }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = Ui.dp(activity, 8) })
         }
         root.findViewById<Button>(R.id.logs_refresh).setOnClickListener { load() }
         root.findViewById<Button>(R.id.logs_files).setOnClickListener { files() }
@@ -63,15 +67,18 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
     }
 
     fun load() {
-        runner.read("tail -n 800 $EVENTS 2>/dev/null") { exit, said ->
-            if (exit == null) {
-                list.removeAllViews()
-                list.addView(Ui.note(activity, activity.getString(R.string.no_root)))
-                return@read
-            }
-            events = pair(said.lineSequence().mapNotNull { Event.of(it.trim()) }.toList())
-            show()
+        runner.read(JOURNAL) { exit, said -> take(exit, said) }
+    }
+
+    /** The journal as [JOURNAL] read it (also in the main screen's own read: see MainActivity.loadState), shown. */
+    fun take(exit: Int?, said: String) {
+        if (exit == null) {
+            list.removeAllViews()
+            list.addView(Ui.note(activity, activity.getString(R.string.no_root)))
+            return
         }
+        events = pair(said.lineSequence().mapNotNull { Event.of(it.trim()) }.toList())
+        show()
     }
 
     /** A run's start and its end as one entry, with how long it took; a start with no end yet is running. */
@@ -91,12 +98,7 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
     }
 
     private fun show() {
-        filters.childCount.let { count ->
-            for (i in 0 until count) (filters.getChildAt(i) as Button).apply {
-                setTypeface(null, if (i == filter) Typeface.BOLD else Typeface.NORMAL)
-                alpha = if (i == filter) 1f else 0.6f
-            }
-        }
+        for (i in 0 until filters.childCount) filters.getChildAt(i).isSelected = i == filter
         list.removeAllViews()
         val keep = kinds[filter].second
         val shown = events.filter { keep(it.event) && matches(it.event) }
@@ -106,17 +108,24 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
             problems > 0 -> activity.resources.getQuantityString(R.plurals.logs_problems_today, problems, problems)
             else -> activity.getString(R.string.logs_fine)
         }
+        statusDot.background = Ui.circle(activity, if (events.isEmpty()) R.color.text_secondary else if (problems > 0) R.color.level_error else R.color.level_ok)
+        // With problems, a tap on how the day went shows them.
+        if (problems > 0) summary.setOnClickListener { filter = kinds.lastIndex; show() } else summary.setOnClickListener(null)
+        summary.isClickable = problems > 0
+        activity.countProblems(problems)
         if (shown.isEmpty() && events.isNotEmpty()) {
             list.addView(if (query.isNotEmpty()) Ui.noMatch(activity, query) else Ui.note(activity, activity.getString(R.string.logs_none_here)))
         }
         var day = ""
+        var card: LinearLayout? = null
         for (entry in shown) {
             val thisDay = Logs.day(activity, entry.event.time)
-            if (thisDay != day) {
+            if (thisDay != day || card == null) {
                 day = thisDay
                 list.addView(Ui.heading(activity, day))
+                card = Ui.card(activity).also { list.addView(it) }
             }
-            list.addView(row(entry))
+            card.addView(row(entry))
         }
     }
 
@@ -129,41 +138,38 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
         val dot = TextView(context).apply {
             text = if (entry.brokenOff) "!" else Logs.symbol(event.level, entry.running)
             gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(context.getColor(R.color.on_level))
             setTypeface(typeface, Typeface.BOLD)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(context.getColor(Logs.color(if (entry.brokenOff) "warn" else if (entry.running) "start" else event.level)))
-            }
+            background = Ui.circle(context, Logs.color(if (entry.brokenOff) "warn" else if (entry.running) "start" else event.level))
         }
         val size = Ui.dp(context, 28)
         val texts = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
                 text = event.title
-                setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Medium)
+                setTextAppearance(R.style.TextAppearance_Nixup_Title)
             })
             if (event.text.isNotEmpty()) addView(TextView(context).apply {
                 text = event.text
                 maxLines = 3
                 ellipsize = TextUtils.TruncateAt.END
-                setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Small)
+                setTextAppearance(R.style.TextAppearance_Nixup_Body)
             })
             addView(TextView(context).apply {
                 text = if (entry.brokenOff) Logs.meta(context, event, null, false) + " · " + context.getString(R.string.logs_broken_off)
                 else Logs.meta(context, event, entry.took, entry.running)
-                alpha = 0.7f
-                setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Small)
+                setTextAppearance(R.style.TextAppearance_Nixup_Secondary)
+                textSize = 12f
             })
         }
         val time = TextView(context).apply {
             text = Logs.clock(event.time)
-            alpha = 0.7f
-            setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Small)
+            setTextAppearance(R.style.TextAppearance_Nixup_Secondary)
+            textSize = 12f
         }
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, Ui.dp(context, 8), 0, Ui.dp(context, 8))
+            setPadding(Ui.dp(context, 16), Ui.dp(context, 12), Ui.dp(context, 16), Ui.dp(context, 12))
             addView(dot, LinearLayout.LayoutParams(size, size).apply { marginEnd = Ui.dp(context, 12); topMargin = Ui.dp(context, 2) })
             addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             addView(time, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = Ui.dp(context, 8) })
@@ -244,6 +250,8 @@ class LogsPane(private val activity: MainActivity, root: View, private val runne
 
     companion object {
         private const val EVENTS = "/data/adb/nixup/events"
+        /** The journal's newest events, as root reads them. */
+        const val JOURNAL = "tail -n 800 $EVENTS 2>/dev/null"
         private const val LOGS = "/data/adb/nixup/logs"
         private val RUN = Regex("[0-9]{8}-[0-9]{6}-[a-z]+-[0-9]+")
         private val UNIT = Regex("[A-Za-z0-9_.:-]+")

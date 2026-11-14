@@ -10,20 +10,123 @@ section after the version, and its text is what the Magisk app shows as the upda
   a `/usr/bin/env`, as NixOS has, coreutils' `env` unless `environment.usrbinenv` names another (null leaves it out).
   Only with Nix packages: without them the phone's shell is Android's.
 - With `programs.nano.enable = true;`, `EDITOR` is nano, as on NixOS.
+- The app has a new look. Its five tabs are in a bar at the bottom, each with an icon, and the tab shown is marked;
+  Updates counts the updates waiting on its tab, and Logs the problems of the last day. Each tab has its state and its
+  buttons in a card, the main one filled (Build, Check for updates, Back up all), and its list in cards under their
+  headings (each day's entries in Logs, each part in Backups). Apps have their icons in Updates and Backups, and each
+  service a colored dot for how it is (green running, red failed, amber waiting). The Build tab names the last build's
+  generation, when it was made and from what, and Generations and Open its folder are beside what they are about. The
+  colors are Nixup's (the night blue of its icon), in a light and a dark version as the phone is set, behind the status
+  and navigation bars too. The search boxes are rounded fields, what a script says has a panel of its own, and a line
+  under the bar at the top moves while one runs. Logs' filters are chips, and a tap on how the last day went shows its
+  problems. Services has a Refresh button.
 
-## 0.1.3 (2026-11-07)
+## 0.1.10 (2026-11-12)
 
+- The calendar and contacts sync (`services.caldav`) no longer rings with an error for every calendar and address book
+  when the server cannot be reached for a moment (no network, Tailscale reconnecting, a name that does not resolve):
+  those network errors go to a channel of their own, "Calendar and contacts sync: network errors", with no sound and
+  no status bar icon, as DAVx⁵ shows them, and the next sync that reaches the server takes them away. Items the server
+  has that cannot be read go to "Calendar and contacts sync: items passed over", with no sound. What needs something
+  done (a refused password, an address with nothing to sync) stays in "Calendar and contacts sync". Before, all three
+  rang the same way.
+
+## 0.1.9 (2026-11-11)
+
+- Calendars, contacts and tasks from CalDAV/CardDAV servers are synced by Nixup's app itself, with no DAVx⁵ app:
+  `services.caldav` (its accounts: `url`, `userName`, `passwordFile`, `accountName`, as `services.davx5` had them).
+  The app has DAVx⁵'s sync inside it (its synctools and dav4jvm, and its sync code, from davx5-ose 4.5.21): each
+  account is an Android account of Nixup's app, which a build adds with no taps, its calendars in every calendar app,
+  its address books in the contacts (each one an account of its own, as DAVx⁵ has them) and its task lists in
+  Tasks.org, OpenTasks or jtx Board (`tasksApp`), synced both ways on each change made on the phone and every
+  `syncInterval` minutes. DAVx⁵'s settings are options: which collections sync (`syncCollections`, or each account's
+  `collections` and `exclude`), `wifiOnly`, `pastDays`, `defaultAlarm`, `manageCalendarColors`, `eventColors`,
+  `contactGroupMethod`. The build asks the server first (a refused password, or an address with no CalDAV nor CardDAV,
+  stops that account with the reason), waits for an account's first sync and says what came (its calendars and
+  events, address books and contacts, task lists and tasks). An account that leaves the config goes with what it put
+  on the phone (the server keeps it); changes made on the phone and not synced yet are synced first. Android's
+  Settings → Accounts lists each, and its Sync now syncs it.
+- `services.davx5` is `services.caldav`'s old name: a config that still has it builds as before, as `services.caldav`,
+  and each build warns with what to write instead (and that `install` and `automatic` do nothing now). The DAVx⁵
+  setting the earlier builds changed ("preselect collections") is given back; DAVx⁵ itself, and the accounts it has,
+  are left alone (a build warns that its calendars would show twice beside Nixup's).
+- An app from a developer's own server: in `android.packages.obtainium`, an app's `url` may be the link of one APK
+  (ending in `.apk`), as Obtainium's "Direct APK link", besides a repository on GitHub, GitLab or Forgejo. That APK is
+  installed and no newer one is looked for: a new link in the config is the update. Its version is read once it is
+  downloaded and remembered, so the next builds leave it be; one installed newer (by the app's own updater) is not
+  taken back. Pin its `signer`, as nothing else vouches for the APK. `apkFilter` and `prerelease` have nothing to pick
+  between there, and a build stops when they are set.
+- A Google Play token given in the config (`android.playstore.tokenFile`) works on the first build that sends it, and on
+  the one that changes it: the build checked the account before it put its secrets in place, so it found no token
+  there (or the old one) and stopped with "there is no token in /data/adb/nixup/secrets/android.playstore.tokenFile".
+  It now checks the token the build brings.
+
+## 0.1.8 (2026-11-11)
+
+- A build from a PC over SSH (`nixup-rebuild --target-host` through the phone's sshd) no longer starts the
+  services it restarts without the SD card: it applies the build from Android's own view of the phone, as a build
+  over adb does, instead of the SSH session's, which has no card mounted after sshd started. sshd restarted that way
+  showed SSH sessions and file managers an empty, locked folder for the card.
+
+## 0.1.7 (2026-11-11)
+
+- An app of the config installed with another signing key than its source's builds (from another store, or the
+  developer's build where F-Droid builds its own) no longer stops the build: it is reinstalled as the source's build,
+  with its data. Android lets no build with another key update an app, nor install over the data an uninstall keeps,
+  so each build sets the app's data aside first (its folders and APKs, with its runtime permissions, accounts,
+  default-app roles, keyboard, battery setting and enabled state), uninstalls it, installs the source's build and
+  puts it all back as the new install's own; when the new build does not install, the app comes back as it was. It
+  stays your app (removing Nixup leaves it). What an app locked in Android's keystore does not come with it, so such
+  an app may ask to sign in again. A build checks first that the source's version is not older than the one
+  installed (its data could be newer than it reads), that the app did not come with the phone, and that no other user
+  (an app clone, a work profile) has it. The same goes for Google Play's builds, and for an app from its releases whose
+  `signer` is pinned.
+- Strict mode: `android.strict.enable = true` keeps the phone to the config's apps. Each build removes every app
+  installed by hand (from a store, sideloaded) that no list of `android.packages` has, nor `android.strict.keep`
+  (for apps no repository has: a bank's app, a build of your own). It is hidden from the user, as Android's device
+  policies remove an app: gone for the user, but kept on the phone with its data, permissions and settings, so it
+  comes back exactly as it was when strict is turned off, when `keep` or a list names it, and when Nixup is removed
+  (an uninstall would lose its settings, and a phone maker can refuse to install its own apps again: One UI's Tips).
+  Nixup's app, the root solution's app (Magisk, also when hidden under another name, KernelSU, APatch) and the apps
+  the config needs (a user's `androidApp`, DAVx⁵ with `services.davx5`) always stay; a build stops rather than
+  remove the launcher or the keyboard in use, leaves device admin apps, and with backups, no longer reinstalls an
+  app strict would remove.
+
+## 0.1.6 (2026-11-08)
+
+- Request APK certificate collection on affected Android 13 builds, which otherwise return no signing
+  information and reject valid downloads with an empty signer in the error. Signing-key checks remain enabled.
+- Read default-app role holders through Android's role service instead of an unavailable shell
+  getter, fixing false activation failures for default apps on Android 13.
+
+## 0.1.5 (2026-11-07)
+
+- DAVx⁵'s accounts in the config: `services.davx5` (Nixup's own; NixOS has no DAVx⁵, an Android app). Each build
+  sets them up: an account the phone has not got opens DAVx⁵'s login screen on the phone, already filled in with the
+  server, the user name and the password (`passwordFile`, sent to the phone root-only like every secret), so a tap on
+  Login and one on Finish add it; with `automatic = true` it is added with no taps (the build asks the server
+  for the calendars and address books itself, writes them into DAVx⁵'s database, adds the account as DAVx⁵ and starts
+  its first sync), on DAVx⁵ 4.5.17 to 4.5.21, whose database Nixup knows; any other DAVx⁵ gets the login screen.
+  An account there gets the config's user name and password at each build. `syncCollections` (`all` by
+  default, or `none`) is DAVx⁵'s own setting of what it selects for syncing as it finds it, given back when
+  `services.davx5` leaves the config. `install = "fdroid"` installs DAVx⁵ too; it gets the contacts, calendar and
+  notifications permissions, unrestricted battery use, and is never paused for being unused (which takes an app's
+  permissions away).
 - Backups keep an app's accounts too (the new `accounts` part, on by default): the accounts it adds to Android's
-  settings, with their passwords, user data, auth tokens, which apps see them and their sync settings. Android keeps
-  them outside the app's folders and deletes them with the app, so a restored DAVx⁵ had its data but no account to
-  sync with. A restore adds the missing ones again as the app itself (Android lets only an account type's own app add
-  its accounts); one that is on the phone stays as it is. The Backups tab offers them among the parts to restore.
-  Backups made before this have none: such an app is signed in again by hand once.
+  settings, with their passwords, user data, auth tokens, which apps see them and their sync settings (which of its
+  sync adapters run, automatically, how often). Android keeps them outside the app's folders and deletes them with
+  the app, so a restored DAVx⁵ had its data but no account to sync with. A restore adds the missing ones again as the
+  app itself, with their sync settings: Android lets only an account type's own app add its accounts, and shows an
+  account's sync settings only to a caller that can see it. One that is on the phone stays as it is. The Backups tab
+  offers them among the parts to restore. Backups made before this have none: such an app is signed in again by hand
+  once.
 - Backups keep which runtime permissions an app was granted, and a restore grants them again (none is taken away; the
   config's own permissions are set again by the next build).
 - A restore takes the app's files out of the backup into a folder of their own first, as Neo Backup does, and only
   then puts them in place of the app's: a restore that fails, or a restart in the middle, leaves the app's data as it
   was (before, its data was emptied first). A restore a restart broke off is picked up again after it.
+- A restored app is let off Android's stopped state, where the restore and an install leave it: Android 15 and later
+  start none of its syncs or jobs until it is opened, so a restored DAVx⁵ did not sync by itself.
 - After an app is installed from a backup, its data waits (up to 30 s) for Android to have made the app's folders:
   before, it went in at once, and Android could replace the folder under it (a whole Termux restore ended in
   thousands of "no such file or directory" errors).

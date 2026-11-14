@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Whether the status and navigation bars' icons are dark, on the light background. -->
+<resources>
+    <bool name="light_bars">true</bool>
+</resources>

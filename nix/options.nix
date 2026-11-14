@@ -66,7 +66,10 @@ let
         description = ''
           Where its releases are: https://github.com/<owner>/<repo>,
           https://gitlab.com/<group>/<project>, https://codeberg.org/<owner>/<repo>, or
-          another Forgejo or Gitea server.
+          another Forgejo or Gitea server. Or the link of one APK (ending in .apk), as
+          Obtainium's "Direct APK link", for a developer who puts APKs on a server of their
+          own: that APK is installed, and no newer one is looked for (a new link is the
+          update; pin its signer, as nothing else vouches for it).
         '';
       };
       apkFilter = mkOption {
@@ -120,7 +123,13 @@ let
   misplacedReleasesApps = lib.concatLists (lib.mapAttrsToList (repo: list:
     map (app: { inherit repo; inherit (app) id; }) (lib.filter isReleasesApp list)
   ) (removeAttrs packages builtinSources));
-  badReleaseUrls = map (app: app.id) (lib.filter (app: isReleasesApp app && builtins.match "https://[^/]+/[^/]+/[^/]+.*" app.url == null) releasesApps);
+  # An app's url is the link of one APK (Obtainium's "Direct APK link"), as the engine tells it (Releases.isDirect).
+  isApkLink = url: builtins.match "https://[^/?#]+/[^?#]*\\.[aA][pP][kK]([?#].*)?" url != null;
+  badReleaseUrls = map (app: app.id) (lib.filter (app: isReleasesApp app && !isApkLink app.url
+    && builtins.match "https://[^/]+/[^/]+/[^/]+.*" app.url == null) releasesApps);
+  # An APK at a link is the only one: nothing for apkFilter or prerelease to pick between.
+  apkLinksPicking = map (app: app.id) (lib.filter (app: isReleasesApp app && isApkLink app.url
+    && (app.apkFilter != null || app.prerelease)) releasesApps);
   badSigners = map (app: app.id) (lib.filter (app: isReleasesApp app && app.signer != null
     && builtins.match "[0-9a-fA-F]{64}|([0-9a-fA-F]{2}:){31}[0-9a-fA-F]{2}" app.signer == null) releasesApps);
   twice = lib.concatLists (lib.mapAttrsToList (repo: list:
@@ -147,6 +156,7 @@ let
 
   apps = config.android.apps;
   appsNotNames = lib.filter (id: !isPackageName id) (lib.attrNames apps);
+  keepNotNames = lib.filter (id: !isPackageName id) config.android.strict.keep;
   # Each default (browser, dialer, ...) can belong to one app only.
   claims = lib.concatLists (lib.mapAttrsToList (id: app: map (role: { inherit id role; }) app.defaultFor) apps);
   roleClash = lib.filter (role: lib.length (lib.filter (c: c.role == role) claims) > 1) (lib.unique (map (c: c.role) claims));
@@ -157,7 +167,7 @@ let
   check = assertion: message: { inherit assertion message; };
 in
 {
-  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./etc.nix ./tmpfiles.nix ./nixos-compat.nix ./shells.nix ./programs.nix ./nix.nix ./nixos.nix ./home-manager.nix ./services.nix ./syncthing.nix ./snapcast.nix ./users.nix ./terminal.nix ./openssh.nix ./adb.nix ./backup.nix ./playstore.nix ./auto-upgrade.nix ./secrets.nix ./specialisation.nix ./version.nix ./renamed.nix ./activation.nix ./build.nix ];
+  imports = [ ./nixpkgs.nix ./system.nix ./lineage.nix ./global.nix ./units.nix ./etc.nix ./tmpfiles.nix ./nixos-compat.nix ./shells.nix ./programs.nix ./nix.nix ./nixos.nix ./home-manager.nix ./services.nix ./syncthing.nix ./snapcast.nix ./caldav.nix ./davx5.nix ./users.nix ./terminal.nix ./openssh.nix ./adb.nix ./backup.nix ./playstore.nix ./auto-upgrade.nix ./secrets.nix ./specialisation.nix ./version.nix ./renamed.nix ./activation.nix ./build.nix ];
 
   options = {
     assertions = mkOption {
@@ -209,9 +219,40 @@ in
         android.packages.playstore apps from Google Play, as Aurora Store does, by their
         package names as strings (android.playstore has the account). An app can come
         from one source only. An app that came with the phone is removed with
-        android.apps.<app>.debloat = true. Nix packages (from nixpkgs) are
-        environment.systemPackages, as on NixOS.
+        android.apps.<app>.debloat = true, and the apps installed by hand that no list has
+        with android.strict. Nix packages (from nixpkgs) are environment.systemPackages, as
+        on NixOS.
       '';
+    };
+
+    android.strict = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Only the config's apps on the phone: each build removes every app of the phone's main user
+          that is not one of the system's (installed by hand, from a store, or sideloaded) when no list
+          of android.packages has it, nor keep. It is hidden from the user, as Android's device
+          policies remove an app: gone for the user (no icon, it cannot run), but kept on the phone as
+          it is, with its data, permissions and settings, so it comes back exactly as it was when
+          strict is off again, when keep or a list names it, and when the module is removed. Nixup's
+          app, the root solution's (Magisk, also hidden under another name; KernelSU; APatch) and the
+          apps the config needs (a user's androidApp) always stay, and a build stops rather than remove
+          the launcher or the keyboard in use. The apps that came with the phone are debloat's
+          (android.apps.<app>.debloat).
+        '';
+      };
+
+      keep = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = [ "com.example.bank" ];
+        description = ''
+          Apps strict leaves on the phone though no list of android.packages has them, by package
+          name: ones no repository here has (a bank's from Google Play, a build of your own),
+          installed by hand.
+        '';
+      };
     };
 
     android.settings.repo = mkOption {
@@ -276,7 +317,8 @@ in
     (check (misplacedReleasesApps == [ ]) (lib.concatMapStringsSep "\n" (m:
       "android.packages.${m.repo}: ${m.id} comes with a url; list it under android.packages.obtainium."
     ) misplacedReleasesApps))
-    (check (badReleaseUrls == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " badReleaseUrls} needs an https:// url of its repository, like https://github.com/<owner>/<repo>.")
+    (check (badReleaseUrls == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " badReleaseUrls} needs an https:// url of its repository, like https://github.com/<owner>/<repo>, or of its APK (ending in .apk).")
+    (check (apkLinksPicking == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " apkLinksPicking}: its url is the link of one APK, so apkFilter and prerelease have nothing to pick between: leave them out.")
     (check (badSigners == [ ]) "android.packages.obtainium: the signer of ${lib.concatStringsSep ", " badSigners} is not a SHA-256 (64 hex digits).")
     (check (lib.elem "obtainium" (lib.attrNames repos) == false) "android.repos.obtainium: that name is taken by android.packages.obtainium (apps from their own releases); name the repository otherwise.")
     (check (lib.elem "playstore" (lib.attrNames repos) == false) "android.repos.playstore: that name is taken by android.packages.playstore (apps from Google Play); name the repository otherwise.")
@@ -292,6 +334,7 @@ in
       "android.apps.\"${id}\".debloat: ${id} is also in android.packages, to install; pick one."
     ) debloatInstalled))
     (check (appsNotNames == [ ]) "android.apps: ${lib.concatStringsSep ", " appsNotNames} is not a package name (like \"org.example.app\").")
+    (check (keepNotNames == [ ]) "android.strict.keep: ${lib.concatStringsSep ", " keepNotNames} is not a package name (like \"org.example.app\").")
     (check (roleClash == [ ]) (lib.concatMapStringsSep "\n" (role:
       "android.apps: more than one app is the default for ${role} ("
       + lib.concatStringsSep ", " (map (c: c.id) (lib.filter (c: c.role == role) claims)) + "): pick one."

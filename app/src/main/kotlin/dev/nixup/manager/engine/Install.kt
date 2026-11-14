@@ -13,11 +13,16 @@ import java.util.concurrent.atomic.AtomicBoolean
  * next one downloads, with notifications.
  *
  * The apps it installed (not the ones that were on the phone before), from anywhere, are listed in owned: a build
- * removes them again, keeping their data, when they leave the config, and so does the module's removal (restore).
+ * removes them again, keeping their data, when they leave the config, and so does the module's removal (restore). One
+ * that was on the phone with another key and is reinstalled as its source's build, its data kept (see Reinstall), stays
+ * the user's.
  */
 class Installer(private val data: File) {
     private val ownedFile = File(data, "owned")
     private val cache = File(data, "cache")
+
+    /** The apps of the config installed with another key, reinstalled from their source with their data (see Reinstall). */
+    val reinstall = Reinstall(data)
 
     /**
      * One app to install or update, and what its APK must be. An F-Droid index tells everything beforehand; a release
@@ -59,6 +64,11 @@ class Installer(private val data: File) {
          * lists it by its name and version, not as an app, and it is not the module's to remove.
          */
         val library: Boolean = false,
+        /**
+         * The app installed ([installed]) is signed with another key than this build: it is reinstalled as this build,
+         * its data kept (see Reinstall), at the same version too.
+         */
+        val reinstall: Boolean = false,
     )
 
     /** One file of an app in several, with what it must be. */
@@ -82,7 +92,8 @@ class Installer(private val data: File) {
     fun roomFor(steps: List<Step>): Boolean {
         if (steps.isEmpty()) return true
         val download = steps.sumOf { it.room }
-        val needed = download * 2 + (steps.maxOfOrNull { it.room } ?: 0) * 2 + RESERVE
+        // (And an app reinstalled has its data and APKs aside for the moment: one at a time.)
+        val needed = download * 2 + (steps.maxOfOrNull { it.room } ?: 0) * 2 + reinstall.room + RESERVE
         val free = Device.freeBytes(data)
         val unknown = steps.count { it.size < 0 }
         val guess = if (unknown > 0) "${apps(unknown)} of unknown size counted as ${Out.size(UNKNOWN_SIZE)} each" else null
@@ -209,7 +220,8 @@ class Installer(private val data: File) {
             if (step.fromRelease) {
                 step.learn(apk.versionCode)
                 val now = step.installed
-                if (now != null && apk.versionCode <= now.versionCode) {
+                // (A reinstall goes ahead at the same version: it is another build of it.)
+                if (now != null && !step.reinstall && apk.versionCode <= now.versionCode) {
                     Out.line("$label ${step.id}: the APK of ${step.version} is version ${apk.versionName} (code ${apk.versionCode}), not newer than the one installed (${now.versionName}, code ${now.versionCode}): left as it is")
                     return Outcome.Left
                 }
@@ -218,10 +230,28 @@ class Installer(private val data: File) {
                 }
             }
         }
+        // A reinstall: never as an older version (the data kept could be newer than it reads); then its data aside and the
+        // app uninstalled, now that its new build is here and checked.
+        if (step.reinstall) {
+            val now = step.installed
+            val version = apk?.versionCode ?: step.code
+            if (now != null && version != null && version < now.versionCode) {
+                return Outcome.Failed(
+                    "the APK of ${step.id} ${step.version} is version code $version, older than the one installed (${now.versionName}, code ${now.versionCode}): " +
+                        "its data could be newer than that version reads, so it is not reinstalled",
+                )
+            }
+            Out.line("$label Keeping the data of ${step.id} aside and uninstalling it (installed with another key)")
+            reinstall.prepare(step.id)?.let { return Outcome.Failed("${step.id} is not reinstalled: $it") }
+        }
         val updater = Device.firstInstalled(step.installers)
         Out.line("$label Installing ${step.id} ${step.version}" + (updater?.let { " (later updates by $it)" } ?: ""))
         val said = if (item.files.size == 1) Device.install(item.files.single(), updater) else Device.installAll(item.files, updater)
-        said?.let { return Outcome.Failed("pm could not install ${step.id}: $it") }
+        if (said != null) {
+            // (The app back as it was, from its own APKs.)
+            if (step.reinstall) reinstall.undo(step.id)
+            return Outcome.Failed("pm could not install ${step.id}: $said")
+        }
         if (step.library) {
             // The version the app needs it at, as Google Play names it (the one Android lists the library by).
             val version = step.code ?: apk?.versionCode
@@ -229,11 +259,18 @@ class Installer(private val data: File) {
             Out.line("$label ✔ Installed the library ${step.id} ${step.version}")
             return Outcome.Installed
         }
+        // An app reinstalled gets its data back whatever else is wrong.
+        if (step.reinstall) reinstall.finish(step.id)?.let { return Outcome.Failed("${step.id} is reinstalled, but $it") }
         val wanted = apk?.versionCode ?: step.code ?: return Outcome.Failed("the version code of ${step.id} is not known")
         val now = Device.versionCode(step.id)
         if (now != wanted) return Outcome.Failed("${step.id} is at version code $now after installing, not $wanted")
         if (step.installed == null) writeOwned(readOwned() + step.id)
-        Out.line("$label ✔ ${if (step.installed == null) "Installed" else "Updated"} ${step.id} ${step.version}")
+        val done = when {
+            step.reinstall -> "Reinstalled ${step.id} ${step.version}, with its data"
+            step.installed == null -> "Installed ${step.id} ${step.version}"
+            else -> "Updated ${step.id} ${step.version}"
+        }
+        Out.line("$label ✔ $done")
         return Outcome.Installed
     }
 

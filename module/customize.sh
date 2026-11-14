@@ -65,9 +65,11 @@ case "$said" in
   *Success*) ;;
   *INSTALL_FAILED_UPDATE_INCOMPATIBLE* | *INSTALL_FAILED_VERSION_DOWNGRADE* | *"signatures do not match"*)
     # The app there is signed with another key (a build of one's own, or a release after one), or
-    # is newer: it goes first. It keeps nothing of its own (Nixup's data is in /data/adb/nixup);
-    # the root solution asks once more to let it use root, as for any app installed anew.
+    # is newer: it goes first. It keeps little of its own (Nixup's data is in /data/adb/nixup): its
+    # calendar and contacts accounts go with it (the server keeps them, and the next build adds
+    # them again); the root solution asks once more to let it use root, as for any app installed anew.
     ui_print "- The app there is signed with another key, or is newer: replacing it"
+    ui_print "  (its calendar and contacts accounts, services.caldav's, go with it: the next build adds them again)"
     pm uninstall dev.nixup.manager < /dev/null > /dev/null 2>&1
     said=$(install_app)
     ui_print "- Nixup's app is a new app to the root solution now: allow it root again when it asks" ;;

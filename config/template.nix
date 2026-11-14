@@ -37,14 +37,15 @@
     byarchitect.url = "https://fdroid.byarchitect.org/fdroid/repo?fingerprint=50941BDAC56B056A520ABFA3FC7DAAB789DEE5B83B295DA54A1961C7BC8A91C9";
   };
 
-  # Apps to install and keep up to date, each from one repository. An app installed already must
-  # be signed with the key the repository's builds have (the build says so when it is not).
+  # Apps to install and keep up to date, each from one repository. An app installed already with
+  # another key than the repository's builds (from another store) is reinstalled as theirs, its data
+  # kept (but what it locked in Android's keystore: it may ask to sign in again).
   android.packages.fdroid = with pkgs.fdroid; [
     com.termux                                    # Termux: terminal
   ];
 
   android.packages.izzyondroid = with pkgs.izzyondroid; [
-    at.bitfire.davdroid                           # DAVx5: calendar and contacts sync
+    at.bitfire.davdroid                           # DAVx5: calendar and contacts sync (services.caldav syncs without it)
     "in.sunilpaulmathew.izzyondroid"              # IzzyOnDroid client (in quotes: "in" is a Nix word)
     moe.shizuku.privileged.api                    # Shizuku: system access for apps
     org.wisso.newpipematerial                     # WizeStream: NewPipe-based player
@@ -95,7 +96,16 @@
   # The phone's other apps (sideloaded, debug builds, and Google Play apps not listed above) come
   # from no repository here, so Nixup leaves them as they are. F-Droid has its own builds of
   # Tailscale, KDE Connect, LocalSend, Organic Maps, Proton VPN and addy.io, signed with another
-  # key than the ones installed: moving to them means reinstalling (the app's data goes).
+  # key than the ones installed: listing one here reinstalls it as F-Droid's build, its data kept.
+
+  # Or strict: the phone has the apps of the lists above and no others. Each build removes the apps
+  # installed by hand that no list has, nor keep: hidden from you, they stay on the phone as they
+  # are, so enable = false again (or keep, or a list) brings one back exactly as it was. Nixup's app,
+  # the root solution's (Magisk, KernelSU, APatch) and the apps the config needs (users') stay.
+  android.strict = {
+    enable = false;                               # true: remove the apps no list has
+    keep = [ ];                                   # apps to keep all the same, like "com.example.bank"
+  };
 
   # ==== 2. App settings ========================================================================
   # By package name; an app that is not installed is told while building and left out.
@@ -414,7 +424,7 @@
     defaults = {
       apk = true;                                 # its APK too: installable from the backup
       data = true;                                # false: the APK alone
-      include = [ "data" "deviceData" "storage" "accounts" ];   # also "media", "obb"; "accounts": the ones it adds to Android (DAVx5's)
+      include = [ "data" "deviceData" "storage" "accounts" ];   # also "media", "obb"; "accounts": the ones it adds to Android (a mail app's)
       when = "auto";                              # "auto": after use; "schedule"; "manual"
       autoRestore = false;                        # true (a new phone): data back when a build installs it, and backed-up apps reinstalled; never an app removed here
     };
@@ -493,6 +503,31 @@
     configDir = "/var/lib/syncthing";
     databaseDir = "/var/lib/syncthing";
     relay.enable = false;                         # relay server: not on a phone (its other options, as on NixOS, are taken unused)
+  };
+
+  # Calendars, contacts and tasks from CalDAV/CardDAV servers, synced by Nixup's app itself into Android's Calendar and
+  # Contacts (DAVx⁵'s sync, no DAVx⁵ app; services.davx5 is its old name). Each account is added with no taps.
+  services.caldav = {
+    enable = false;                               # true: the accounts below, synced both ways
+    accounts = {
+      # home = {
+      #   url = "https://dav.example.org/";       # the server (its calendars and address books are found there)
+      #   userName = "neo";
+      #   passwordFile = ./dav-password;          # secret: a file next to this one, put on the phone root-only
+      #   accountName = null;                     # its name in Android's accounts; null: the email address the server has
+      #   collections = null;                     # [ "Personal" "Contacts" ]: those alone; null: as syncCollections says
+      #   exclude = [ ];                          # collections never synced
+      # };
+    };
+    syncCollections = "all";                      # "all", "personal" (the user's own) or "none"
+    syncInterval = 240;                           # minutes (15 at least), besides each change; null: only when asked
+    wifiOnly = false;                             # true: no syncs over mobile data
+    pastDays = 90;                                # events older than this are not synced; null: all
+    defaultAlarm = null;                          # 15: a reminder 15 minutes before events that have none
+    manageCalendarColors = true;                  # the calendars' colors are the server's
+    eventColors = false;                          # events may have colors of their own
+    contactGroupMethod = "groupVCards";           # contact groups: "groupVCards" (vCard 4) or "categories"
+    tasksApp = null;                              # "org.tasks", "org.dmfs.tasks", "at.techbee.jtx"; null: the one installed
   };
 
   # Snapcast, multi-room audio in sync. snapserver as NixOS's; snapclient (NixOS has none) plays a

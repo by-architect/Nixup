@@ -28,16 +28,19 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.Toolbar
 import dev.nixup.manager.terminal.TerminalActivity
 import org.json.JSONObject
 import java.util.Locale
 
 /**
- * Five tabs, and a menu with the terminal (see [TerminalActivity]), the Google Play account (see [GoogleSignInActivity]),
- * the notifications' settings, freeing up space, what the phone supports, and about.
+ * Five tabs, in a bar at the bottom (Updates with a count of the updates waiting, Logs of the last day's problems), and
+ * a menu with the terminal (see [TerminalActivity]), the Google Play account (see [GoogleSignInActivity]), the
+ * notifications' settings, freeing up space, what the phone supports, and about.
  * Build: the config to build (see [ConfigSource]): a file picked wherever the user keeps it, a new one made from the
  * module's default, a git repository cloned onto the phone (pulled, cloned again: the module's git.sh), or a flake's
  * address typed in; built with the module's build.sh (as root), or only tried (a dry run), or built with everything at
@@ -47,7 +50,9 @@ import java.util.Locale
  */
 class MainActivity : Activity() {
     private lateinit var runner: Runner
-    private lateinit var tabs: List<Pair<Button, View>>
+    private lateinit var tabs: List<Pair<Ui.Tab, View>>
+    /** The line under the bar at the top that moves while a script runs. */
+    private lateinit var busy: ProgressBar
     private lateinit var backups: BackupsPane
     private lateinit var services: ServicesPane
     private lateinit var logs: LogsPane
@@ -59,6 +64,7 @@ class MainActivity : Activity() {
     private lateinit var buildButtons: List<Button>
     private lateinit var source: TextView
     private lateinit var lastBuild: TextView
+    private lateinit var lastBuildDetails: TextView
     private lateinit var configButtons: List<Button>
     private lateinit var openFolder: Button
     private lateinit var output: TextView
@@ -72,17 +78,24 @@ class MainActivity : Activity() {
     private lateinit var nixupUpdate: View
     private lateinit var nixupUpdateText: TextView
     private lateinit var nixupUpdateInstall: Button
+    /** The Update buttons of the updates' rows, which wait while a script runs. */
+    private val updateButtons = mutableListOf<Button>()
     private var tab = 0
     private var currentSource: String? = null
     private var builtOn: String? = null
     /** The last check's results (updates.json), and what the Updates tab's search box has. */
     private var updatesSaved = ""
     private var updatesQuery = ""
+    /** The updates waiting, counted on the Updates tab: the config's apps, and Nixup itself. */
+    private var appUpdates = 0
+    private var nixupNewer = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        setActionBar(findViewById<Toolbar>(R.id.toolbar))
         runner = Runner(this) { setRunning(it) }
+        busy = findViewById(R.id.busy)
         output = findViewById(R.id.output)
         scroll = findViewById(R.id.scroll)
         updatesStatus = findViewById(R.id.updates_status)
@@ -94,14 +107,19 @@ class MainActivity : Activity() {
         nixupUpdate = findViewById(R.id.nixup_update)
         nixupUpdateText = findViewById(R.id.nixup_update_text)
         nixupUpdateInstall = findViewById(R.id.nixup_update_install)
+        val bar = findViewById<LinearLayout>(R.id.tabs)
         tabs = listOf(
-            findViewById<Button>(R.id.tab_build) to findViewById(R.id.build_pane),
-            findViewById<Button>(R.id.tab_updates) to findViewById(R.id.updates_pane),
-            findViewById<Button>(R.id.tab_backups) to findViewById(R.id.backups_pane),
-            findViewById<Button>(R.id.tab_services) to findViewById(R.id.services_pane),
-            findViewById<Button>(R.id.tab_logs) to findViewById(R.id.logs_pane),
-        )
-        tabs.forEachIndexed { i, (button, _) -> button.setOnClickListener { select(i) } }
+            Triple(R.string.tab_build, R.drawable.ic_tab_build, R.id.build_pane),
+            Triple(R.string.tab_updates, R.drawable.ic_tab_updates, R.id.updates_pane),
+            Triple(R.string.tab_backups, R.drawable.ic_tab_backups, R.id.backups_pane),
+            Triple(R.string.tab_services, R.drawable.ic_tab_services, R.id.services_pane),
+            Triple(R.string.tab_logs, R.drawable.ic_tab_logs, R.id.logs_pane),
+        ).mapIndexed { i, (name, icon, pane) ->
+            val tab = Ui.tab(this, getString(name), icon)
+            tab.view.setOnClickListener { select(i) }
+            bar.addView(tab.view, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            tab to findViewById<View>(pane)
+        }
         buildButtons = listOf(
             findViewById<Button>(R.id.build).apply { setOnClickListener { build() } },
             findViewById<Button>(R.id.dry_run).apply { setOnClickListener { buildScript("dry", R.string.dry_running) } },
@@ -110,6 +128,7 @@ class MainActivity : Activity() {
         )
         source = findViewById(R.id.source)
         lastBuild = findViewById(R.id.last_build)
+        lastBuildDetails = findViewById(R.id.last_build_details)
         openFolder = findViewById(R.id.open_folder)
         openFolder.setOnClickListener { openFolder() }
         configButtons = listOf(
@@ -128,7 +147,7 @@ class MainActivity : Activity() {
         backups = BackupsPane(this, findViewById(R.id.backups_pane), runner)
         services = ServicesPane(this, findViewById(R.id.services_pane), runner)
         logs = LogsPane(this, findViewById(R.id.logs_pane), runner)
-        loadSource()
+        loadState()
         checkUpdates.setOnClickListener {
             runner.run(Root.MODULE + "sh \$d/update.sh app check 2>&1", getString(R.string.checking), updatesOutput, updatesScroll) { loadUpdates() }
         }
@@ -137,7 +156,7 @@ class MainActivity : Activity() {
             updatesQuery = it
             if (updatesSaved.isNotEmpty()) showUpdates(updatesSaved)
         }
-        padForSystemBars(findViewById(R.id.root))
+        fitSystemBars(findViewById(R.id.root), findViewById(R.id.tab_bar))
 
         Notifications.channels(this)
         // Magisk gives root to the phone owner's apps: in an app clone, work profile or other user, su is refused
@@ -201,10 +220,9 @@ class MainActivity : Activity() {
             getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(focused.windowToken, 0)
             focused.clearFocus()
         }
-        tabs.forEachIndexed { i, (button, pane) ->
+        tabs.forEachIndexed { i, (item, pane) ->
             pane.visibility = if (i == index) View.VISIBLE else View.GONE
-            button.setTypeface(null, if (i == index) Typeface.BOLD else Typeface.NORMAL)
-            button.alpha = if (i == index) 1f else 0.6f
+            item.view.isSelected = i == index
         }
         when (index) {
             1 -> loadUpdates()
@@ -215,16 +233,27 @@ class MainActivity : Activity() {
     }
 
     private fun setRunning(on: Boolean) {
+        busy.visibility = if (on) View.VISIBLE else View.INVISIBLE
         buildButtons.forEach { it.isEnabled = !on }
         configButtons.forEach { it.isEnabled = !on }
         gitButtons.forEach { it.isEnabled = !on }
         checkUpdates.isEnabled = !on
         updateAll.isEnabled = !on
         nixupUpdateInstall.isEnabled = !on
-        for (i in 0 until updatesList.childCount) updatesList.getChildAt(i).findViewWithTag<Button>(UPDATE_BUTTON)?.isEnabled = !on
+        updateButtons.forEach { it.isEnabled = !on }
         backups.setRunning(on)
         services.setRunning(on)
     }
+
+    /** The count on the Updates tab: the config's apps with a newer version, and Nixup itself. */
+    private fun countUpdates() {
+        val count = appUpdates + if (nixupNewer) 1 else 0
+        tabs[1].first.count(count, R.color.badge_news, resources.getQuantityString(R.plurals.tab_updates_count, count, count))
+    }
+
+    /** The count on the Logs tab: the problems of the last day (see LogsPane). */
+    fun countProblems(count: Int) =
+        tabs[4].first.count(count, R.color.badge_problem, resources.getQuantityString(R.plurals.tab_logs_count, count, count))
 
     // --- The menu.
 
@@ -279,19 +308,32 @@ class MainActivity : Activity() {
 
     // --- The config: kept by the module in /data/adb/nixup/source (see ConfigSource).
 
-    /** The config a build reads (as the module's config_source finds it, so a phone set up before it could be picked shows its own), and the last build's. */
-    private fun loadSource() {
+    /**
+     * The config a build reads (as the module's config_source finds it, so a phone set up before it could be picked
+     * shows its own), and the last build's: when it was made, from what and where. With them, in the same read as root
+     * (at the start, and after each build), what the tabs' counts need: the last update check's results and the
+     * journal.
+     */
+    private fun loadState() {
         runner.read(
             Root.MODULE + "if [ -f \$d/common.sh ]; then MODDIR=\$d; . \$d/common.sh > /dev/null 2>&1; s=\$(config_source); " +
                 "else s=\$(head -n 1 ${ConfigSource.FILE} 2>/dev/null); fi; echo \"source=\$s\"; " +
                 "g=\$(cat /data/adb/nixup/generations/last 2>/dev/null); echo \"generation=\$g\"; " +
                 "[ -n \"\$g\" ] && echo \"built=\$(head -n 1 /data/adb/nixup/generations/\$g/source 2>/dev/null)\" && " +
-                "echo \"on=\$(head -n 1 /data/adb/nixup/generations/\$g/built-on 2>/dev/null)\"; " +
-                "[ -f \$d/git.sh ] && echo \"git=\$(sh \$d/git.sh app status --json 2>/dev/null | tail -n 1)\"",
-        ) { _, said ->
-            val values = said.lineSequence().mapNotNull { line -> line.indexOf('=').takeIf { it > 0 }?.let { line.substring(0, it) to line.substring(it + 1) } }.toMap()
-            showSource(values["source"].orEmpty(), values["generation"].orEmpty(), values["built"].orEmpty(), values["on"].orEmpty())
+                "echo \"on=\$(head -n 1 /data/adb/nixup/generations/\$g/built-on 2>/dev/null)\" && " +
+                "echo \"time=\$(stat -c %Y /data/adb/nixup/generations/\$g/profile.json 2>/dev/null)\"; " +
+                "[ -f \$d/git.sh ] && echo \"git=\$(sh \$d/git.sh app status --json 2>/dev/null | tail -n 1)\"; " +
+                "echo; echo '$SPLIT'; $UPDATES; echo; echo '$SPLIT'; ${LogsPane.JOURNAL}",
+        ) { exit, said ->
+            val parts = said.split(SPLIT)
+            val values = parts[0].lineSequence().mapNotNull { line -> line.indexOf('=').takeIf { it > 0 }?.let { line.substring(0, it) to line.substring(it + 1) } }.toMap()
+            showSource(values["source"].orEmpty(), values["generation"].orEmpty(), values["built"].orEmpty(), values["on"].orEmpty(), (values["time"]?.trim()?.toLongOrNull() ?: 0L) * 1000)
             showClone(values["git"]?.let { runCatching { JSONObject(it) }.getOrNull() }?.takeIf { it.optBoolean("clone") })
+            if (parts.size == 4) {
+                showUpdates(parts[1].trim())
+                showNixupUpdate(parts[2].trim())
+                logs.take(exit, parts[3])
+            }
         }
     }
 
@@ -399,12 +441,12 @@ class MainActivity : Activity() {
     /** Runs the module's git.sh with [args] in the Build tab, then shows the config again. */
     private fun gitScript(args: String, starting: Int, vararg formatArgs: Any) {
         select(0)
-        runner.run(Root.MODULE + "sh \$d/git.sh app $args 2>&1", getString(starting, *formatArgs), output, scroll) { loadSource() }
+        runner.run(Root.MODULE + "sh \$d/git.sh app $args 2>&1", getString(starting, *formatArgs), output, scroll) { loadState() }
     }
 
     private fun pullAndBuild() {
         select(0)
-        runner.run(Root.MODULE + "sh \$d/git.sh app pull 2>&1 && sh \$d/build.sh app switch 2>&1", getString(R.string.git_pulling), output, scroll) { loadSource() }
+        runner.run(Root.MODULE + "sh \$d/git.sh app pull 2>&1 && sh \$d/build.sh app switch 2>&1", getString(R.string.git_pulling), output, scroll) { loadState() }
     }
 
     private fun reclone() {
@@ -417,7 +459,8 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun showSource(picked: String, generation: String, built: String, on: String) {
+    /** The config, and the last build's generation with when it was made ([time]; 0: not known), from what and where. */
+    private fun showSource(picked: String, generation: String, built: String, on: String, time: Long) {
         currentSource = picked.ifEmpty { null }
         builtOn = on.ifEmpty { null }
         val storage = getString(R.string.phone_storage)
@@ -427,19 +470,24 @@ class MainActivity : Activity() {
             picked.substringBefore('#').endsWith("/flake.nix") -> getString(R.string.source_flake, ConfigSource.shown(picked, storage))
             else -> getString(R.string.source_file, ConfigSource.shown(picked, storage))
         }
-        lastBuild.text = when {
-            generation.isEmpty() || generation == "0" -> getString(R.string.no_build_yet)
-            built.isEmpty() -> getString(R.string.last_build_unknown, generation)
-            on.isNotEmpty() -> getString(R.string.last_build_on, generation, built, on)
-            else -> getString(R.string.last_build, generation, ConfigSource.shown(built, storage))
-        }
+        val none = generation.isEmpty() || generation == "0"
+        lastBuild.text = if (none) getString(R.string.no_build_yet) else getString(R.string.generation_title, generation)
+        lastBuildDetails.text = if (none) getString(R.string.no_build_yet_details) else listOfNotNull(
+            getString(R.string.last_build_time, Ui.ago(time)).takeIf { time > 0 },
+            when {
+                built.isEmpty() -> null
+                on.isNotEmpty() -> getString(R.string.last_build_source_pc, built, on)
+                else -> getString(R.string.last_build_source, ConfigSource.shown(built, storage))
+            },
+        ).joinToString("\n")
+        lastBuildDetails.visibility = if (lastBuildDetails.text.isEmpty()) View.GONE else View.VISIBLE
         openFolder.isEnabled = currentSource?.let { ConfigSource.folderDocument(it) } != null
     }
 
     /** Runs the module's build.sh with [args] in the Build tab, then shows the last build again. */
     private fun buildScript(args: String, starting: Int, vararg formatArgs: Any) {
         select(0)
-        runner.run(Root.MODULE + "sh \$d/build.sh app $args 2>&1", getString(starting, *formatArgs), output, scroll) { loadSource() }
+        runner.run(Root.MODULE + "sh \$d/build.sh app $args 2>&1", getString(starting, *formatArgs), output, scroll) { loadState() }
     }
 
     /**
@@ -643,7 +691,7 @@ class MainActivity : Activity() {
             check + "mkdir -p /data/adb/nixup && printf '%s\\n' ${ConfigSource.quote(picked)} > ${ConfigSource.FILE} && rm -f /data/adb/nixup/build-from",
         ) { exit, _ ->
             when (exit) {
-                0 -> loadSource()
+                0 -> loadState()
                 3 -> toast(getString(R.string.not_readable, where))
                 else -> toast(getString(R.string.no_root))
             }
@@ -780,7 +828,7 @@ class MainActivity : Activity() {
 
     /** The last check's results (updates.json, and nixup-update.json for Nixup itself, kept by the module), read as root. */
     private fun loadUpdates() {
-        runner.read("cat /data/adb/nixup/updates.json 2>/dev/null; echo; echo $SPLIT; cat /data/adb/nixup/nixup-update.json 2>/dev/null") { _, said ->
+        runner.read(UPDATES) { _, said ->
             showUpdates(said.substringBefore(SPLIT).trim())
             showNixupUpdate(said.substringAfter(SPLIT, "").trim())
         }
@@ -790,7 +838,9 @@ class MainActivity : Activity() {
     private fun showNixupUpdate(saved: String) {
         val json = runCatching { JSONObject(saved) }.getOrNull()
         val latest = json?.optJSONObject("latest")
-        if (json == null || latest == null || !json.optBoolean("newer")) {
+        nixupNewer = json != null && latest != null && json.optBoolean("newer")
+        countUpdates()
+        if (json == null || latest == null || !nixupNewer) {
             nixupUpdate.visibility = View.GONE
             return
         }
@@ -819,15 +869,21 @@ class MainActivity : Activity() {
         }
     }
 
-    /** The updates of the last check, those with what the search box has (an app's name, package or repository). */
+    /**
+     * The updates of the last check, those with what the search box has (an app's name, package or repository): each
+     * a row of a card, with the app's icon, its version now and the one coming, and its Update button.
+     */
     private fun showUpdates(saved: String) {
         updatesSaved = saved
         updatesList.removeAllViews()
+        updateButtons.clear()
         val json = try {
             JSONObject(saved)
         } catch (e: Exception) {
             updatesStatus.setText(R.string.updates_not_checked)
             updateAll.isEnabled = false
+            appUpdates = 0
+            countUpdates()
             return
         }
         val checked = Ui.date(json.optLong("checked"))
@@ -837,8 +893,10 @@ class MainActivity : Activity() {
         } ?: ""
         updatesStatus.text = getString(R.string.updates_status, checked, repos)
         val updates = json.optJSONArray("updates")
+        appUpdates = updates?.length() ?: 0
+        countUpdates()
         if (updates == null || updates.length() == 0) {
-            updatesList.addView(TextView(this).apply { setText(R.string.up_to_date) })
+            updatesList.addView(Ui.note(this, getString(R.string.up_to_date)))
             updateAll.isEnabled = false
             return
         }
@@ -846,31 +904,16 @@ class MainActivity : Activity() {
             Ui.matches(updatesQuery, update.optString("name"), update.optString("id"), update.optString("repo"), update.optString("from"), update.optString("to"))
         }
         if (found.isEmpty()) updatesList.addView(Ui.noMatch(this, updatesQuery))
-        for (update in found) {
-            val id = update.getString("id")
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 8, 0, 8)
+        else updatesList.addView(Ui.card(this).apply {
+            for (update in found) {
+                val id = update.getString("id")
+                val button = Ui.button(this@MainActivity, getString(R.string.update)) { update(listOf(id)) }
+                button.isEnabled = !runner.running
+                updateButtons += button
+                val details = getString(R.string.update_details, update.getString("from"), update.getString("to"), size(update.getLong("size")), update.optString("repo"))
+                addView(Ui.row(this@MainActivity, update.getString("name"), details, listOf(button), icon = Ui.appIcon(this@MainActivity, id)))
             }
-            row.addView(
-                TextView(this).apply {
-                    text = getString(
-                        R.string.update_line, update.getString("name"), update.getString("from"), update.getString("to"),
-                        size(update.getLong("size")), update.optString("repo"),
-                    )
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                },
-            )
-            row.addView(
-                Button(this).apply {
-                    setText(R.string.update)
-                    tag = UPDATE_BUTTON
-                    isEnabled = !runner.running
-                    setOnClickListener { update(listOf(id)) }
-                },
-            )
-            updatesList.addView(row)
-        }
+        })
         updateAll.isEnabled = !runner.running
     }
 
@@ -893,12 +936,20 @@ class MainActivity : Activity() {
         startActivity(Intent.createChooser(view, getString(R.string.open_folder_with)))
     }
 
-    /** The app draws behind the status and navigation bars (edge to edge), so its content keeps clear of them. */
-    private fun padForSystemBars(root: View) {
-        val pad = root.paddingLeft
+    /**
+     * The app draws behind the status and navigation bars (edge to edge, on every Android it runs on), so its content
+     * keeps clear of them: the tabs' bar reaches down behind the navigation bar, and while the keyboard is up (a
+     * search) it goes, and the content keeps clear of the keyboard instead.
+     */
+    private fun fitSystemBars(root: View, tabBar: View) {
+        // Android 15 and newer draw every app so; before, it is asked for.
+        if (Build.VERSION.SDK_INT < 35) @Suppress("DEPRECATION") window.setDecorFitsSystemWindows(false)
         root.setOnApplyWindowInsetsListener { view, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-            view.setPadding(pad + bars.left, pad + bars.top, pad + bars.right, pad + bars.bottom)
+            val typing = insets.isVisible(WindowInsets.Type.ime())
+            view.setPadding(bars.left, bars.top, bars.right, if (typing) insets.getInsets(WindowInsets.Type.ime()).bottom else 0)
+            tabBar.visibility = if (typing) View.GONE else View.VISIBLE
+            tabBar.setPadding(0, 0, 0, bars.bottom)
             insets
         }
     }
@@ -917,7 +968,6 @@ class MainActivity : Activity() {
         private val GIT_WORD = Regex("[A-Za-z0-9._/-]*")
         private val TOKEN = Regex("[A-Za-z0-9_.-]+")
         private const val STATE_TAB = "tab"
-        private const val UPDATE_BUTTON = "update"
         private const val PICK_FILE = 1
         private const val NEW_CONFIG = 2
         private const val PICK_FOLDER = 3
@@ -927,8 +977,10 @@ class MainActivity : Activity() {
         /** The name its token is saved under, and the one the config's lines name (android.playstore.tokenFile). */
         private const val PLAY_TOKEN_FILE = "google-play.token"
         private const val SOURCE = "https://github.com/by-architect/Nixup"
-        /** Between the two files loadUpdates reads. */
+        /** Between the files loadUpdates and loadState read. */
         private const val SPLIT = "--nixup-update--"
+        /** The last check's results: updates.json, then nixup-update.json for Nixup itself (both kept by the module). */
+        private const val UPDATES = "cat /data/adb/nixup/updates.json 2>/dev/null; echo; echo $SPLIT; cat /data/adb/nixup/nixup-update.json 2>/dev/null"
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
         /** A specialisation's name, as nix/specialisation.nix allows it (it goes into build.sh's command). */
         private val SPECIALISATION_NAME = Regex("[A-Za-z0-9][A-Za-z0-9_.-]*")

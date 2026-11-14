@@ -71,8 +71,10 @@ import kotlin.system.exitProcess
  *   backup-restore <folder> [snapshot] [--to=<folder>]
  *                                 brings a folder's files back, into it or into a new folder
  *   backup-parts <app> <snapshot> what one backup of the app has (--json)
- *   accounts-add <app>            adds the accounts it reads (JSON) through Android's account service: what a restore
- *                                 runs as the app itself, which alone may add its accounts (see Accounts)
+ *   accounts-add <app>            adds the accounts it reads (JSON) through Android's account service, with their sync
+ *                                 settings: what a restore runs as the app itself, which alone may add its accounts
+ *   accounts-sync <app>           prints the sync settings of the accounts it reads (JSON): what a backup runs as the
+ *                                 app, which Android shows them to (see Accounts)
  *   restic <arguments...>         restic itself, with the backups' repository and password
  *   units [--json]                each service of the last build (its systemd.services units), and how it is, and its
  *                                 timers (systemd.timers) with their next times
@@ -89,6 +91,9 @@ import kotlin.system.exitProcess
  *   audio-out [--format=<rate:bits:channels>] [--latency-file=<file>]
  *                                 plays raw sound from its input with Android's audio, as music (services.snapclient's
  *                                 snapclient writes it), and writes the time Android's audio takes (ms) to the file
+ *   caldav-accounts               adds, sets or removes the calendar and contacts accounts it reads (JSON) through
+ *                                 Android's account service: what a build runs as Nixup's app, which alone may
+ *                                 (services.caldav; see Caldav)
  * Exit status: 0 done, 2 stopped before changing anything, 1 stopped partway.
  */
 object Main {
@@ -122,6 +127,8 @@ object Main {
                     0
                 }
                 "audio-out" -> AudioOut.play(option(args, "format") ?: "48000:16:2", option(args, "latency-file")?.let { File(it) }, System.`in`)
+                // (Run by a build, as Nixup's app: see Caldav.)
+                "caldav-accounts" -> Caldav.asApp()
                 "services" -> {
                     // adb listens on no port after a restart: the profile's again, before the units start.
                     val android = runCatching { JSONObject(File(data, "profile.json").readText()).optJSONObject("android") }.getOrNull()
@@ -169,6 +176,7 @@ object Main {
                 "backup-parts" -> json { backups().partsJson(files.getOrNull(0) ?: usage(), files.getOrNull(1) ?: usage()) }
                 // (Run by a restore, as the app itself: see Accounts.)
                 "accounts-add" -> Accounts.addAsApp(files.firstOrNull() ?: usage())
+                "accounts-sync" -> Accounts.syncAsApp()
                 "restic" -> backups().passThrough(args.drop(1))
                 "units" -> Units(data).list().let { list ->
                     if ("--json" in args) json { list }
