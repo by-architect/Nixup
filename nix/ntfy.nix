@@ -24,6 +24,13 @@
 #
 # Anyone who knows a topic's name on ntfy.sh can read it and send to it: pick a name no one guesses, or a server of
 # one's own, whose users and access tokens (tokenFile; userName and passwordFile) keep the topics to their owners.
+#
+# With unifiedPush.enable, Nixup's app is a UnifiedPush distributor, in the place of ntfy's app: apps that get their
+# pushes through UnifiedPush (Element, Element X, ...) can pick Nixup in their notification settings. Each gets a private
+# topic on unifiedPush.server (ntfy's address of it, <server>/up…?up=1), which it gives its own server (a Matrix
+# homeserver), and the service hands each push on it to that app, which shows its own notification; the app may use the
+# network for a while first, in Doze too. The service logs in to that server as to services.ntfy.server's topics. A
+# server with logins must let anyone send to those topics: `ntfy access everyone 'up*' write-only`.
 { config, lib, ... }:
 let
   inherit (lib) mkOption types;
@@ -129,6 +136,14 @@ let
 
   # What the engine's listener takes (its unit's argument): each topic's server, name, name on the phone and login, the
   # secrets by their paths on the phone (a build that changes one starts the service again).
+  pushServer = lib.removeSuffix "/" (if cfg.unifiedPush.server != null then cfg.unifiedPush.server else server);
+  # The login of a server: the service's for its own server, none for another.
+  loginFor = target: lib.filterAttrs (_: value: value != null) (if target != server then { } else {
+    token = if cfg.tokenFile == null then null else secretFiles.path config "ntfy-token" cfg.tokenFile;
+    user = cfg.userName;
+    password = if cfg.passwordFile == null then null else secretFiles.path config "ntfy-password" cfg.passwordFile;
+  });
+
   settings = {
     state = "/var/lib/ntfy/state.json";
     topics = map (topic: lib.filterAttrs (_: value: value != null) {
@@ -138,6 +153,9 @@ let
       user = topic.login.userName;
       password = if topic.login.passwordFile == null then null else secretFiles.path config topic.passwordSecret topic.login.passwordFile;
     }) topics;
+  } // lib.optionalAttrs cfg.unifiedPush.enable {
+    # (The app's registrations: its own file, which the service reads as root.)
+    unifiedPush = { server = pushServer; registrations = "/data/data/${app}/files/unifiedpush.json"; } // loginFor pushServer;
   };
 
   # A login's problems: what it lacks, or holds twice, and its files.
@@ -197,6 +215,26 @@ in
         (tokenFile; userName and passwordFile).
       '';
     };
+
+    unifiedPush = {
+      enable = lib.mkEnableOption ''
+        UnifiedPush: Nixup's app as the phone's distributor, as ntfy's app is, which apps like Element and Element X can
+        pick in their notification settings; each gets a private topic on unifiedPush.server, and the service hands
+        the pushes on it to that app'';
+
+      server = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "https://ntfy.example.org";
+        description = ''
+          The ntfy server the apps' topics are on, and their servers (a Matrix homeserver) send the pushes to; ntfy's
+          own Matrix gateway (<server>/_matrix/push/v1/notify) is what Element and Element X find there. null:
+          services.ntfy.server. One with logins must let anyone send to those topics
+          (`ntfy access everyone 'up*' write-only`); the service logs in to it as to services.ntfy.server's topics.
+          Another server moves every app to a topic there (each app is given its new address).
+        '';
+      };
+    };
   } // loginOptions "null: none (a topic anyone may read).";
 
   config = lib.mkIf cfg.enable {
@@ -214,8 +252,8 @@ in
       pauseIfUnused = lib.mkDefault false;
     };
 
-    systemd.services.ntfy = lib.mkIf (topics != [ ]) {
-      description = "Notifications from ntfy: ${lib.concatMapStringsSep ", " (topic: topic.label) topics}";
+    systemd.services.ntfy = lib.mkIf (topics != [ ] || cfg.unifiedPush.enable) {
+      description = "Notifications from ntfy: ${lib.concatStringsSep ", " (map (topic: topic.label) topics ++ lib.optional cfg.unifiedPush.enable "UnifiedPush")}";
       wantedBy = [ "multi-user.target" ];
       # A server on the tailnet answers once Tailscale is up, one on the phone (services.ntfy-sh) once it runs.
       after = [ "tailscaled.service" "ntfy-sh.service" ];
@@ -230,12 +268,18 @@ in
         CLASSPATH="$module/app.apk" exec /system/bin/app_process /system/bin dev.nixup.manager.engine.Main \
           ntfy ${lib.escapeShellArg (builtins.toJSON settings)}
       '';
+      # Once it leaves the config: Nixup's app is no UnifiedPush distributor any more, and tells its apps so.
+      cleanup = [ "/system/bin/am broadcast --user current -f 0x20 -n ${app}/.EventsReceiver -a ${app}.action.UNIFIED_PUSH" ];
     };
 
     assertions = [
       {
         assertion = builtins.match "https?://[^/]+.*" cfg.server != null;
         message = "services.ntfy.server: \"${cfg.server}\" is not an http:// or https:// address.";
+      }
+      {
+        assertion = !cfg.unifiedPush.enable || builtins.match "https?://[^/]+.*" pushServer != null;
+        message = "services.ntfy.unifiedPush.server: \"${pushServer}\" is not an http:// or https:// address.";
       }
       {
         assertion = twice == [ ];
@@ -254,9 +298,10 @@ in
       }
     ] ++ lib.optionals topic.own (loginChecks (optionName topic) topic.login)) topics;
 
-    warnings = lib.optional (cfg.topics == [ ])
+    warnings = lib.optional (cfg.topics == [ ] && !cfg.unifiedPush.enable)
       "services.ntfy is on with no topics (services.ntfy.topics): it listens to nothing."
-      ++ lib.optional ((cfg.tokenFile != null || cfg.userName != null) && !lib.any (topic: !topic.own && topic.server == server) topics)
+      ++ lib.optional ((cfg.tokenFile != null || cfg.userName != null) && !(cfg.unifiedPush.enable && pushServer == server)
+          && !lib.any (topic: !topic.own && topic.server == server) topics)
         "services.ntfy.tokenFile and userName are for the topics on services.ntfy.server (${server}), and no topic is there.";
   };
 }

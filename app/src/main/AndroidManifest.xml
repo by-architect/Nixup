@@ -103,6 +103,36 @@
             android:name=".NtfyActionReceiver"
             android:exported="false" />
 
+        <!-- UnifiedPush (services.ntfy.unifiedPush): Nixup as a distributor other apps (Element, ...) can pick, which they
+             ask for an endpoint and find by this receiver; and its link activity. Off until the ntfy service turns them
+             on (see UnifiedPush.kt). -->
+        <receiver
+            android:name=".UnifiedPushReceiver"
+            android:enabled="false"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.distributor.REGISTER" />
+                <action android:name="org.unifiedpush.android.distributor.UNREGISTER" />
+                <action android:name="org.unifiedpush.android.distributor.MESSAGE_ACK" />
+            </intent-filter>
+        </receiver>
+        <activity
+            android:name=".UnifiedPushLinkActivity"
+            android:enabled="false"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:host="link"
+                    android:scheme="unifiedpush" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".UpdateJob"
             android:exported="false"

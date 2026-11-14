@@ -39,7 +39,8 @@ is built to cover all of these.
   [NixOS's own service modules](https://by-architect.github.io/Nixup/docs.html#nixos-modules)
 - Encrypted [backups](https://by-architect.github.io/Nixup/docs.html#backups) of apps and folders
 - Calendars, contacts and tasks from CalDAV/CardDAV servers, synced by Nixup's app itself with DAVx⁵'s sync
-- Notifications from [ntfy](https://ntfy.sh) topics, on ntfy.sh or a server of your own, with no ntfy app
+- Notifications from [ntfy](https://ntfy.sh) topics, on ntfy.sh or a server of your own, with no ntfy app; and
+  UnifiedPush for apps like Element, with Nixup as their push distributor
 - [Generations](https://by-architect.github.io/Nixup/docs.html#building) you can roll back to, built on the
   phone or [from a PC](https://by-architect.github.io/Nixup/docs.html#from-a-pc)
 

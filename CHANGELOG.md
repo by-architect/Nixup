@@ -22,6 +22,15 @@ section after the version, and its text is what the Magisk app shows as the upda
   the topics is told once, in the Services channel.
 - A secret file option (`tokenFile`, `authKeyFile`, ...) also takes an ntfy access token itself (`tk_…`), read from
   a JSON file of secrets, as it takes a Tailscale key.
+- UnifiedPush, with no ntfy app: with `services.ntfy.unifiedPush.enable`, Nixup's app is the phone's UnifiedPush
+  distributor, as ntfy's app is. Apps that get their pushes through UnifiedPush (Element, Element X, ...) can pick
+  Nixup in their notification settings: each gets a private topic on `services.ntfy.unifiedPush.server` (else
+  `services.ntfy.server`), which it gives its own server, and the ntfy service hands each push on it to that app, which
+  shows its own notification; that app may use the network for 30 seconds first, in Doze too. The topics have a
+  connection of their own, made again when an app registers or unregisters, and catch up after a break as the other
+  topics do. Turned off (or `services.ntfy` taken out), every app is told it is unregistered, and Nixup is no longer
+  offered as a distributor. A server with logins must let anyone send to those topics
+  (`ntfy access everyone 'up*' write-only`).
 
 ## 0.1.11 (2026-11-14)
 

@@ -545,6 +545,10 @@
     tokenFile = null;                             # ./ntfy-token: an access token (tk_…) for the server's topics, secret
     userName = null;                              # or a user of the server,
     passwordFile = null;                          # with its password: ./ntfy-password, secret
+    unifiedPush.enable = false;                   # true: Nixup's app is the UnifiedPush distributor (instead of ntfy's app),
+                                                  # which Element, Element X, ... pick in their notification settings
+    unifiedPush.server = null;                    # the server of their topics; null: server above. With logins, it must let
+                                                  # anyone send to them: ntfy access everyone 'up*' write-only
   };
 
   # Snapcast, multi-room audio in sync. snapserver as NixOS's; snapclient (NixOS has none) plays a
