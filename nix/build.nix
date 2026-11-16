@@ -32,6 +32,9 @@ let
 
   repos = lib.mapAttrs (_: repo: { url = repo.address; fingerprint = repo.signingKey; }) config.android.repos;
 
+  # android.packages.nix: each app's APK in the store, by package name. A folder's APK is found on the phone.
+  nixApks = lib.listToAttrs (map (app: lib.nameValuePair app.id "${app.apk}") (config.android.packages.nix or [ ]));
+
   failedOf = config: map (check: check.message) (lib.filter (check: !check.assertion) config.assertions);
   failed = failedOf config;
 
@@ -83,6 +86,8 @@ let
     # The users' own shells (users.users.<name>.shell = pkgs.xonsh), which /etc/passwd names: not always the package
     # their programs.<shell> puts in system.path (programs.xonsh's has its extraPackages).
     passwd = config.system.build.users.passwd;
+    # The APKs of android.packages.nix.
+    apks = nixApks;
     # The ssh Nix reaches nix.buildMachines with (nix/nix.nix).
     builders = if config.system.build.nixBuilders == null then null else config.system.build.nixBuilders.sshPath;
     # The scripts (system.activationScripts, preSwitchChecks: nix/activation.nix), with the bash they run with.
@@ -174,12 +179,15 @@ in
         # with where they are.
         packages = lib.mapAttrs (_: map (app:
           if builtins.isString app then app
+          else if !(app ? _id) && app ? apk then app.id
           else if !(app ? _id) then {
             inherit (app) id url apkFilter prerelease;
             signer = if app.signer == null then null else lib.toLower (lib.replaceStrings [ ":" ] [ "" ] app.signer);
           }
           else app._id
         )) config.android.packages;
+        # Their APKs (see nixApks above), installed from Nixup's store.
+        inherit nixApks;
         settings = lib.mapAttrs (name: _: { autoupdatePackages = settings.repo.${name}.autoupdatePackages or false; })
           (repos // { obtainium = { }; playstore = { }; });
         # android.strict: the apps it keeps besides the lists'; null while it is off, when the apps it removed come back.

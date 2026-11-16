@@ -4,6 +4,16 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- Apps whose APK is a Nix package: `android.packages.nix = [ { id = "com.example.app"; apk = pkgs.fetchurl { … }; } ]`.
+  The APK can be a fetchurl of a release's APK, a build of the app, a folder with one APK, or a file of the config's
+  folder. The phone gets it as it gets the config's other Nix packages (built there or on the build machines when no
+  cache has it, a fetchurl's hash checked), and the engine installs it from Nixup's store: nothing is looked up or
+  downloaded again. So the APK is pinned, as anything else in the config is, and a new one in the config (a flake
+  input's update, a bumped hash) is the update. One older than the app installed (a rollback) is left, as Android
+  installs no older version over a newer one.
+
 ## 0.1.13 (2026-11-14)
 
 - UnifiedPush, with no ntfy app: with `services.ntfy.unifiedPush.enable`, Nixup's app is the phone's UnifiedPush

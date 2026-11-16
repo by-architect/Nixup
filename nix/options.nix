@@ -53,6 +53,29 @@ let
     description = "app from a repository (from pkgs.<repo>)";
   };
 
+  # An app whose APK Nix gives (a package of the config, or a file of its folder): android.packages.nix. The
+  # check keeps it apart from releasesApp, which takes any attribute set.
+  isNixApp = app: builtins.isAttrs app && !(app ? _id) && app ? apk;
+  nixApp = types.addCheck (types.submodule {
+    options = {
+      id = mkOption {
+        type = types.str;
+        description = "The app's package name, like com.example.app: the APK must be it.";
+      };
+      apk = mkOption {
+        type = types.either types.package types.path;
+        example = lib.literalExpression "pkgs.fetchurl { url = \"https://example.org/app-1.2.apk\"; hash = \"sha256-…\"; }";
+        description = ''
+          The APK: a package that is one (pkgs.fetchurl of a release's APK, or a build of the app), or a
+          folder with exactly one, or a file of the config's folder (./app.apk). The phone gets it the way
+          it gets the config's other Nix packages (cache.nixos.org, else built on the phone or the build
+          machines; a fetchurl downloads it there, its hash checked), so the APK is exactly the one the
+          config names: no newer one is looked for, a new APK in the config is the update.
+        '';
+      };
+    };
+  }) isNixApp // { description = "app from Nix ({ id; apk; })"; };
+
   # An app from its own releases, as Obtainium adds one: android.packages.obtainium.
   releasesApp = types.submodule {
     options = {
@@ -108,7 +131,7 @@ let
   # Lists of android.packages that are not F-Droid repositories: apps from their releases, apps from
   # Google Play (nix/playstore.nix), and pkgs, which is refused below with where Nix packages go
   # (environment.systemPackages, as on NixOS).
-  builtinSources = [ "obtainium" "playstore" "pkgs" ];
+  builtinSources = [ "obtainium" "playstore" "nix" "pkgs" ];
 
   repos = config.android.repos;
   packages = config.android.packages;
@@ -119,6 +142,10 @@ let
   # Google Play's apps go by their package names: an app from releases ({ id; url; }) is not one of them.
   playstoreNotNames = map (app: app.id or "an attribute set") (lib.filter (app: builtins.isAttrs app && !(app ? _id)) (packages.playstore or [ ]));
   releasesApps = packages.obtainium or [ ];
+  notNixApps = map idOf (lib.filter (app: !isNixApp app) (packages.nix or [ ]));
+  misplacedNixApps = lib.concatLists (lib.mapAttrsToList (repo: list:
+    map (app: { inherit repo; inherit (app) id; }) (lib.filter isNixApp list)
+  ) (removeAttrs packages [ "nix" ]));
   notReleasesApps = map idOf (lib.filter (app: !isReleasesApp app) releasesApps);
   misplacedReleasesApps = lib.concatLists (lib.mapAttrsToList (repo: list:
     map (app: { inherit repo; inherit (app) id; }) (lib.filter isReleasesApp list)
@@ -202,12 +229,13 @@ in
     };
 
     android.packages = mkOption {
-      type = types.attrsOf (types.listOf (types.oneOf [ types.str repoApp releasesApp ]));
+      type = types.attrsOf (types.listOf (types.oneOf [ types.str repoApp nixApp releasesApp ]));
       default = { };
       example = lib.literalExpression ''
         {
           fdroid = with pkgs.fdroid; [ com.byarchitect.dejavu ];
           obtainium = [ { id = "dev.imranr.obtainium"; url = "https://github.com/ImranR98/Obtainium"; apkFilter = "^(?!.*fdroid)"; } ];
+          nix = [ { id = "com.example.app"; apk = pkgs.fetchurl { url = "https://example.org/app-1.2.apk"; hash = "sha256-…"; }; } ];
           playstore = [ "com.whatsapp" ];
         }
       '';
@@ -215,7 +243,9 @@ in
         Apps installed from each repository (android.packages.<repo>): names from
         pkgs.<repo>, or package names as strings (a name with a Nix keyword in it,
         like "in.example.app", needs one). android.packages.obtainium takes apps from
-        their own releases instead, as Obtainium does: { id = …; url = …; }; and
+        their own releases instead, as Obtainium does: { id = …; url = …; };
+        android.packages.nix apps whose APK is a Nix package, pinned as any other:
+        { id = …; apk = pkgs.fetchurl { … }; }; and
         android.packages.playstore apps from Google Play, as Aurora Store does, by their
         package names as strings (android.playstore has the account). An app can come
         from one source only. An app that came with the phone is removed with
@@ -314,6 +344,11 @@ in
       "android.packages.${w.repo}: ${w.id} is from pkgs.${w.from}; list it under android.packages.${w.from}."
     ) wrongRepo))
     (check (notReleasesApps == [ ]) "android.packages.obtainium: ${lib.concatStringsSep ", " notReleasesApps} needs its releases: { id = \"…\"; url = \"https://github.com/…\"; }.")
+    (check (notNixApps == [ ]) "android.packages.nix: ${lib.concatStringsSep ", " notNixApps} needs its APK: { id = \"…\"; apk = pkgs.fetchurl { … }; }.")
+    (check (misplacedNixApps == [ ]) (lib.concatMapStringsSep "\n" (m:
+      "android.packages.${m.repo}: ${m.id} comes with an apk; list it under android.packages.nix."
+    ) misplacedNixApps))
+    (check (lib.elem "nix" (lib.attrNames repos) == false) "android.repos.nix: that name is taken by android.packages.nix (apps whose APK is a Nix package); name the repository otherwise.")
     (check (misplacedReleasesApps == [ ]) (lib.concatMapStringsSep "\n" (m:
       "android.packages.${m.repo}: ${m.id} comes with a url; list it under android.packages.obtainium."
     ) misplacedReleasesApps))

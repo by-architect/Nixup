@@ -70,6 +70,13 @@
     }
   ];
 
+  # Apps whose APK is a Nix package, pinned like any other: the phone gets exactly that APK (a fetchurl
+  # downloads it there, its hash checked), and a new APK in the config is the update. Or a build of the
+  # app, or a file of the config's folder (./app.apk).
+  android.packages.nix = [
+    # { id = "com.example.app"; apk = pkgs.fetchurl { url = "https://example.org/app-1.2.apk"; hash = "sha256-…"; }; }
+  ];
+
   # Apps from Google Play, by package name in quotes, downloaded as Aurora Store does, with the
   # Google account signed in on the phone (Nixup app: ⋮ → Google Play account): a build that lists
   # some stops until one is. No Play Store or GApps needed.
