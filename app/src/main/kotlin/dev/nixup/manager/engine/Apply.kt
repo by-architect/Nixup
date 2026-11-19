@@ -6,6 +6,7 @@ import java.io.File
 
 /**
  * Makes the phone match the profile: its apps (android.packages: a list for each repository, the apps from releases,
+ * those whose APK is a Nix package (see NixApks),
  * and those from Google Play), their settings (android.apps), the apps that came with the phone to remove (android.apps.<app>.debloat) and the
  * phone's own settings (android.system), the secrets (android.secrets), the calendar and contacts accounts (android.caldav) and the services (android.units, from the config's systemd.services), in nixos-rebuild's order: first the plan and every check, and when one fails
  * nothing changes (the config's own system.preSwitchChecks among them); then the secrets (see Secrets: [incoming] holds the ones a PC sent), the apps (see Installer), the settings of apps (see AppSettings), the debloat (see Debloat),
@@ -49,7 +50,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         val upToDate = ArrayList<String>()
         val problems = ArrayList<String>()
         for ((id, name) in wanted) {
-            if (name == Releases.NAME || name == PlayStore.NAME) continue
+            if (name == Releases.NAME || name == PlayStore.NAME || name == NixApks.NAME) continue
             val repo = repos[name]
             if (repo == null) {
                 problems += "android.packages.$name: there is no repository named $name"
@@ -86,6 +87,13 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                     steps += plan.step
                 }
                 is Releases.Plan.Current -> upToDate += "${app.id} ${plan.version}"
+                is Releases.Plan.Problem -> problems += plan.text
+            }
+        }
+        for ((id, path) in NixApks.apps(android)) {
+            when (val plan = NixApks.plan(data, id, path, Device.installed(id) ?: strict.hidden(id))) {
+                is Releases.Plan.Install -> steps += plan.step
+                is Releases.Plan.Current -> upToDate += "$id ${plan.version}"
                 is Releases.Plan.Problem -> problems += plan.text
             }
         }
@@ -312,8 +320,10 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         releases.tellObtainium(fromReleases)
     }
 
-    private fun download(steps: List<Installer.Step>) =
-        Out.size(steps.filter { it.size >= 0 }.sumOf { it.size }) + if (steps.any { it.size < 0 }) " and some of unknown size" else ""
+    // (An app from Nix is in Nixup's store already: nothing of it to download.)
+    private fun download(steps: List<Installer.Step>) = steps.filter { it.local == null }.let { fetched ->
+        Out.size(fetched.filter { it.size >= 0 }.sumOf { it.size }) + if (fetched.any { it.size < 0 }) " and some of unknown size" else ""
+    }
 
     /**
      * Brings back the apps it removed (strict's and debloat's), gives back every app setting and

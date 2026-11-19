@@ -69,6 +69,8 @@ class Installer(private val data: File) {
          * its data kept (see Reinstall), at the same version too.
          */
         val reinstall: Boolean = false,
+        /** The APK already on the phone (an app from Nix, in Nixup's store): installed from there, never downloaded or deleted. */
+        val local: File? = null,
     )
 
     /** One file of an app in several, with what it must be. */
@@ -125,6 +127,11 @@ class Installer(private val data: File) {
                 for ((i, step) in steps.withIndex()) {
                     if (stop.get()) return@Thread
                     val label = "[${i + 1}/$total]"
+                    if (step.local != null) {
+                        Out.line("$label ✔ ${step.id} ${step.version} is in ${step.listedBy}")
+                        ready.put(Ready.Apk(i + 1, step, listOf(step.local)))
+                        continue
+                    }
                     val parts = step.parts?.invoke()
                         ?: listOf(Part("${step.id}.apk", step.url, step.size, step.sha256))
                     if (parts.isEmpty()) throw IllegalStateException("${step.listedBy} names no files for ${step.id} ${step.version}")
@@ -168,7 +175,7 @@ class Installer(private val data: File) {
                 is Ready.Apk -> {
                     Notify.progress(title, "Installing ${item.step.name} ${item.step.version}", item.number - 1, total)
                     val outcome = install(item, total)
-                    item.files.forEach { it.delete() }
+                    if (item.step.local == null) item.files.forEach { it.delete() }
                     when (outcome) {
                         is Outcome.Failed -> {
                             stop.set(true)
