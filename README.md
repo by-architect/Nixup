@@ -44,6 +44,18 @@ is built to cover all of these.
 - [Generations](https://by-architect.github.io/Nixup/docs.html#building) you can roll back to, built on the
   phone or [from a PC](https://by-architect.github.io/Nixup/docs.html#from-a-pc)
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="screenshots/build.png" width="180" alt="Build tab"><br>Build</td>
+    <td align="center"><img src="screenshots/updates.png" width="180" alt="Updates tab"><br>Updates</td>
+    <td align="center"><img src="screenshots/services.png" width="180" alt="Services tab"><br>Services</td>
+    <td align="center"><img src="screenshots/logs.png" width="180" alt="Logs tab"><br>Logs</td>
+    <td align="center"><img src="screenshots/terminal.png" width="180" alt="Terminal"><br>Terminal</td>
+  </tr>
+</table>
+
 ## Examples
 
 Adding something is one name in a list. An app's package name is in its store page's address
