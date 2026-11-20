@@ -6,48 +6,42 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## 0.1.15 (2026-11-20)
 
-- `nixup`, Nixup from a computer step by step: `nix run github:by-architect/Nixup#nixup` opens a menu (arrow keys
-  and Enter) that makes a phone's config from the phone (its apps and settings, read as `nixup-config create` reads
-  them) and then asks about what a phone cannot tell, each question saying what its option does and what the config
-  has now, and Enter skipping it: app updates (enable, disable or skip, for each source too), updates on mobile data,
-  a daily rebuild, strict mode, adb over the network, this computer's adb and SSH keys, SSH, Tailscale with its auth
-  key, ntfy topics, a CalDAV account, Syncthing, backups, Nix packages and a flake.nix. Each Nix package is looked up
-  before the next question, as the phone gets it: nixpkgs' build for 64-bit ARM, in cache.nixos.org (the phone builds
-  no package itself). One that cannot go on the phone is told with why, and the names are asked again: no such package
-  (with names like it), not for 64-bit ARM (the systems it is for), broken, unfree, insecure, or not in the cache for
-  ARM. The apps nixup-config found from Google Play can be listed in `android.packages.playstore` there and then, and a
-  sign-in to Google Play (as nixup-play-login, its token kept off the screen) puts the account's token next to the
-  config, so the phone needs no sign-in. A config is any module file, of any name (configuration.nix, a host's
-  default.nix), or a folder with one, alone or one of a flake's configurations: the flake it is in is found (in its
-  folder or one above, with its git submodules), which of its phones the file makes, and the Nixup its flake.lock pins.
-  Each question shows what the config has now and where that is set, as a build reads it through the flake (its other
-  modules, inputs and arguments), and an option another module sets, a value the file works out, or one the pinned
-  Nixup has not got, is pointed out and left as it is. A change is checked in the flake's configuration with the file
-  swapped for the changed one, and nothing is written next to the config before it is confirmed (a synced or git
-  folder sees nothing of it). Change a config asks the same about
-  a config you have: an answer changes that option where the file writes it (inside its set, its comment kept in its
-  column), or adds it next to the options it goes with, and nothing else in the file changes; the change is shown,
-  and checked against Nixup's options, before it is written, and secrets go into files of their own next to it,
-  readable by you alone. Build a config on a phone looks the folder over first (configuration.nix, flake.nix and its
-  configurations, flake.lock, the files it names and whether git tracks them), then builds it on the computer
-  (nixup-rebuild) or copies it to the phone and builds it there, or builds the config the phone has; a dry run shows
-  what would change, from a copy the phone keeps for that run only. The phone's generations can be gone back to, and
-  a Google Play sign-in puts its token in the config. The phone's panel and its generations say which config each
-  generation was built from (and on which computer), and which one the phone's own builds read, the one its app's
-  Config picked: after a build on a computer they differ, so building the phone's own config, or a daily rebuild,
-  is told to put that one in the computer's config's place (a daily rebuild can be given a flake address the phone
-  fetches instead). Copying a config to the phone names the files of the phone's folder that the copy replaces, and
-  the Google Play questions say whether the phone has an account signed in, which its Google Play apps need without
-  a token.
-- The terminal is an app of its own: it has its own icon on the home screen and its own place in the recent apps,
-  apart from Nixup's. The terminal button in Nixup's menu opens it, with the sessions it keeps running.
-- The phone's own update check (every 6 hours) can run on mobile data too: `android.updates.onlyOnUnmetered = false`.
-  By default it stays on Wi-Fi, as before. And it no longer waits for the next 6 hours when it could not run: as soon
-  as the phone joins a network it may use (Wi-Fi; with mobile data allowed, any network, as when it is back online, or
-  after a restart once it is unlocked), it checks, unless it checked by itself in the last hour. A small watch of the
-  module's notices the network coming (within 20 seconds, while the phone is awake); the Logs tab says such a check was
-  started by "the phone, on joining a network". A check that cannot run now (on mobile data, offline, a low battery, a
-  build or another update running) is skipped without a notification, and says why in apply.log.
+- `nixup`: set up and manage a phone from a computer, step by step, in one menu (arrow keys and Enter):
+  `nix run github:by-architect/Nixup#nixup`. Each question says what its option does and what the config has now,
+  and Enter skips it.
+  - **Make a config from a phone**: reads the phone's apps and settings over adb into a config that keeps the phone
+    as it is, then asks about what a phone cannot tell: app updates (for each source too), updates on mobile data, a
+    daily rebuild, strict mode, adb over the network, this computer's adb and SSH keys, SSH, Tailscale, ntfy, CalDAV,
+    Syncthing, backups, Nix packages and a flake.nix. A phone that already runs a Nixup config is told that the new
+    one has its apps and settings, not that config's services and secrets.
+  - **Nix packages** are looked up before the next question, as the phone gets them: one it cannot get is told with
+    why (no such package, with names like it; not for 64-bit ARM; broken; unfree; insecure; not in cache.nixos.org).
+  - **Google Play**: the apps that came from Google Play can be put in `android.packages.playstore`, and a sign-in on
+    the computer gives the config the account's token (never shown on the screen). It says whether the phone has an
+    account signed in, which its Google Play apps need without a token.
+  - **Change a config**: any config file (configuration.nix, a host's default.nix in a flake with other machines) or
+    its folder. It is read as a build reads it, through its flake, so each question shows where its value is set. An
+    answer changes only that option, where the file writes it; an option another module sets, a value the file works
+    out, or one the Nixup its flake.lock pins has not got, is pointed out and left as it is. The change is shown and
+    checked before anything is written, secrets go into files of their own (readable by you alone), and nixup's
+    comment on a line follows the answer.
+  - **Build a config on a phone**: the config is looked over first (its flake, flake.lock, the files it names, git),
+    then built on the computer (nixup-rebuild) or copied to the phone and built there; a dry run shows what would
+    change. Copying it names the files of the phone's folder it would replace.
+  - **Generations**: the phone's builds, each with the config and computer it was built from, and going back to one.
+  - The phone's panel says which config the phone runs and which one its own builds read (the app's Build, and a
+    daily rebuild). After a build on a computer they differ, and building the phone's own config, or turning on a
+    daily rebuild, warns that it would replace the computer's (a daily rebuild can take a flake address instead).
+- `nix run github:by-architect/Nixup#…` works with newer Nix (2.34): the flake has a flake.lock.
+- The terminal is an app of its own, with its own icon on the home screen and its own place in the recent apps. The
+  terminal button in Nixup's menu opens it, with the sessions it keeps running.
+- The update check (every 6 hours) can run on mobile data too: `android.updates.onlyOnUnmetered = false`. By default
+  it stays on Wi-Fi, as before.
+  - It no longer waits 6 hours when it could not run: as soon as the phone joins a network it may use (or after a
+    restart, once unlocked), it checks, unless it checked by itself in the last hour. The Logs tab says such a check
+    was started by "the phone, on joining a network".
+  - A check that cannot run now (on mobile data, offline, a low battery, a build or another update running) is
+    skipped without a notification, and says why in apply.log.
 
 ## 0.1.14 (2026-11-20)
 

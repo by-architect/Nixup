@@ -204,6 +204,8 @@ More, with every option: [the documentation](https://by-architect.github.io/Nixu
    nix run github:by-architect/Nixup#nixup
    ```
 
+   ![nixup's menu: the phone, the config, and what to do](screenshots/nixup.png)
+
 6. **Make a config from a phone**: pick the phone (allow Shell when Magisk asks on its screen). nixup reads its apps
    and settings into a config that keeps the phone as it is, then asks about the rest: updates, adb and SSH,
    Tailscale, backups, Nix packages and more (Enter skips a question). Nothing is written before you have seen it.
