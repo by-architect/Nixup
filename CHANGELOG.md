@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.15 (2026-11-20)
 
 - `nixup`, Nixup from a computer step by step: `nix run github:by-architect/Nixup#nixup` opens a menu (arrow keys
   and Enter) that makes a phone's config from the phone (its apps and settings, read as `nixup-config create` reads
