@@ -1,0 +1,74 @@
+# Puts new bug reports and feature requests on the Nixup Roadmap board
+# (https://github.com/users/by-architect/projects/2), in the Bugs or Features column by the label their issue
+# template adds, tagged Waiting. GitHub does not always add the template's label (some apps skip it), so the
+# [BUG] / [FEATURE REQUEST] title prefix is used as a fallback and the missing label is added.
+# Issues already on the board are left where they are, so moving a card by hand sticks.
+# The ROADMAP_TOKEN secret is a token with the "project" scope: GitHub's own token cannot change a user's project.
+
+name: Roadmap
+
+on:
+  issues:
+    types: [opened, labeled, edited]
+
+permissions:
+  issues: write
+
+concurrency:
+  group: roadmap-${{ github.event.issue.number }}
+
+jobs:
+  add-to-roadmap:
+    if: github.repository == 'by-architect/Nixup'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add the issue to its roadmap column
+        env:
+          GH_TOKEN: ${{ secrets.ROADMAP_TOKEN }}
+          ISSUE_ID: ${{ github.event.issue.node_id }}
+          LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
+          TITLE: ${{ github.event.issue.title }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          LABEL_TOKEN: ${{ github.token }}
+          PROJECT_ID: PVT_kwHOBaPFa84BrILt
+          COLUMN_FIELD: PVTSSF_lAHOBaPFa84BrILtzhpcQZY
+          PROGRESS_FIELD: PVTSSF_lAHOBaPFa84BrILtzhqrIbc
+          WAITING: c18bbf6e
+        run: |
+          column=$(jq -r '
+            if index("bug") then "dfe84659"
+            elif index("enhancement") then "e87fe78b"
+            else empty end' <<< "$LABELS")
+          if [ -z "$column" ]; then
+            title=$(tr '[:lower:]' '[:upper:]' <<< "$TITLE" | sed 's/^[[:space:]]*//')
+            case "$title" in
+              "[BUG]"*) column=dfe84659; label=bug ;;
+              "[FEATURE REQUEST]"*|"[FEATURE]"*) column=e87fe78b; label=enhancement ;;
+              *) echo "No roadmap label or title prefix on this issue."; exit 0 ;;
+            esac
+            GH_TOKEN="$LABEL_TOKEN" gh api "repos/$REPO/issues/$ISSUE_NUMBER/labels" -f "labels[]=$label" > /dev/null
+            echo "Added the missing $label label."
+          fi
+
+          on_board=$(gh api graphql -f query='query($id: ID!) { node(id: $id) { ... on Issue {
+              projectItems(first: 20) { nodes { project { id } } } } } }' -f id="$ISSUE_ID" \
+            --jq "[.data.node.projectItems.nodes[] | select(.project.id == \"$PROJECT_ID\")] | length")
+          if [ "$on_board" != "0" ]; then
+            echo "The issue is already on the roadmap."
+            exit 0
+          fi
+
+          item=$(gh api graphql -f query='mutation($project: ID!, $issue: ID!) {
+              addProjectV2ItemById(input: {projectId: $project, contentId: $issue}) { item { id } } }' \
+            -f project="$PROJECT_ID" -f issue="$ISSUE_ID" --jq '.data.addProjectV2ItemById.item.id')
+
+          set_option() {
+            gh api graphql -f query='mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                updateProjectV2ItemFieldValue(input: {projectId: $project, itemId: $item, fieldId: $field,
+                  value: {singleSelectOptionId: $option}}) { projectV2Item { id } } }' \
+              -f project="$PROJECT_ID" -f item="$item" -f field="$1" -f option="$2" > /dev/null
+          }
+          set_option "$COLUMN_FIELD" "$column"
+          set_option "$PROGRESS_FIELD" "$WAITING"
+          echo "Added to the roadmap."
