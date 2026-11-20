@@ -31,6 +31,8 @@ is built to cover all of these.
 
 - [Apps](https://by-architect.github.io/Nixup/docs.html#apps) from F-Droid-style repositories, developers'
   releases (GitHub, GitLab, Codeberg) and [Google Play](https://by-architect.github.io/Nixup/docs.html#google-play)
+- [Apps from Nix](https://by-architect.github.io/Nixup/docs.html#nix-apks): an APK that is a Nix package (a
+  `fetchurl` of a release, a build of the app, or a file next to the config), pinned like the rest of the config
 - [App settings](https://by-architect.github.io/Nixup/docs.html#app-settings) and
   [system settings](https://by-architect.github.io/Nixup/docs.html#system-settings)
 - [Packages and a terminal](https://by-architect.github.io/Nixup/docs.html#packages), users and

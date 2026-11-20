@@ -19,6 +19,9 @@ object NixApks {
         return apks.keys().asSequence().associateWith { apks.getString(it) }
     }
 
+    /** Whether the APK at [path] is in Nixup's store yet: a dry run fetches no Nix packages. */
+    fun fetched(data: File, path: String): Boolean = Etc.outside(data, path).exists()
+
     /** What a build does for app [id], whose APK is [path] in the store: install or update it, nothing, or a problem. */
     fun plan(data: File, id: String, path: String, installed: Device.Installed?): Releases.Plan {
         val file = apk(Etc.outside(data, path))

@@ -12,7 +12,8 @@ section after the version, and its text is what the Magisk app shows as the upda
   cache has it, a fetchurl's hash checked), and the engine installs it from Nixup's store: nothing is looked up or
   downloaded again. So the APK is pinned, as anything else in the config is, and a new one in the config (a flake
   input's update, a bumped hash) is the update. One older than the app installed (a rollback) is left, as Android
-  installs no older version over a newer one.
+  installs no older version over a newer one. A dry run, which fetches no Nix packages, lists an APK not fetched yet
+  as "to fetch first" rather than stopping on it.
 
 ## 0.1.13 (2026-11-14)
 

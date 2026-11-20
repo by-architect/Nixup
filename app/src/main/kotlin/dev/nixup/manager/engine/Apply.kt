@@ -90,7 +90,13 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
                 is Releases.Plan.Problem -> problems += plan.text
             }
         }
+        // A dry run fetches no Nix packages: an APK Nix has not fetched or built yet is the build's to fetch first.
+        val toFetch = ArrayList<String>()
         for ((id, path) in NixApks.apps(android)) {
+            if (dryRun && !NixApks.fetched(data, path)) {
+                toFetch += id
+                continue
+            }
             when (val plan = NixApks.plan(data, id, path, Device.installed(id) ?: strict.hidden(id))) {
                 is Releases.Plan.Install -> steps += plan.step
                 is Releases.Plan.Current -> upToDate += "$id ${plan.version}"
@@ -137,6 +143,10 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
             Out.line("To install (${toInstall.size}, ${download(toInstall)} to download):")
             toInstall.forEach { Out.line("  ${it.id}  ${it.version}  ${Out.size(it.size)}  (${it.name}, from ${it.repo})") }
         }
+        if (toFetch.isNotEmpty()) {
+            Out.line("To fetch first (${toFetch.size}, from Nix; a dry run fetches no Nix packages, so the build fetches their APKs, then installs each one newer than the app installed):")
+            toFetch.forEach { Out.line("  $it") }
+        }
         if (toUpdate.isNotEmpty()) {
             Out.line("To update (${toUpdate.size}, ${download(toUpdate)} to download):")
             toUpdate.forEach {
@@ -164,7 +174,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         // An app being removed (left the config, debloated, or on no list with strict) gets no settings.
         val leaving = removals.toSet() + debloat.removing + strict.removing
         // The apps strict brings back are installed by this build too.
-        val installing = toInstall.map { it.id }.toSet() + strict.bringingBack
+        val installing = toInstall.map { it.id }.toSet() + strict.bringingBack + toFetch.filter { Device.installed(it) == null }
         val settings = AppSettings(data)
         settings.plan(appSettings, installing, leaving, problems)
         val system = SystemSettings(data)
