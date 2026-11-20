@@ -4,6 +4,11 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
+## Unreleased
+
+- The terminal is an app of its own: it has its own icon on the home screen and its own place in the recent apps,
+  apart from Nixup's. The terminal button in Nixup's menu opens it, with the sessions it keeps running.
+
 ## 0.1.14 (2026-11-20)
 
 - Apps whose APK is a Nix package: `android.packages.nix = [ { id = "com.example.app"; apk = pkgs.fetchurl { … }; } ]`.
