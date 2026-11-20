@@ -264,7 +264,8 @@ class MainActivity : Activity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
-            R.id.menu_terminal -> startActivity(Intent(this, TerminalActivity::class.java))
+            // The terminal, in its own task: the app of its own the home screen has, not a screen of Nixup's.
+            R.id.menu_terminal -> startActivity(Intent(this, TerminalActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             R.id.menu_play_account -> playAccount()
             R.id.menu_specialisations -> specialisations()
             R.id.menu_notifications -> startActivity(

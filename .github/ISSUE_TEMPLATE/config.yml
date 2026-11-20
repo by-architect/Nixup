@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the documentation
+    url: https://by-architect.github.io/Nixup/docs.html
+    about: Every option, with examples, and how to make your first build.
+  - name: Report a security problem
+    url: https://github.com/by-architect/Nixup/security/advisories/new
+    about: Please report security problems privately, not in a public issue.

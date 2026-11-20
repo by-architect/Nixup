@@ -6,13 +6,8 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
-- Apps whose APK is a Nix package: `android.packages.nix = [ { id = "com.example.app"; apk = pkgs.fetchurl { … }; } ]`.
-  The APK can be a fetchurl of a release's APK, a build of the app, a folder with one APK, or a file of the config's
-  folder. The phone gets it as it gets the config's other Nix packages (built there or on the build machines when no
-  cache has it, a fetchurl's hash checked), and the engine installs it from Nixup's store: nothing is looked up or
-  downloaded again. So the APK is pinned, as anything else in the config is, and a new one in the config (a flake
-  input's update, a bumped hash) is the update. One older than the app installed (a rollback) is left, as Android
-  installs no older version over a newer one.
+- The terminal is an app of its own: it has its own icon on the home screen and its own place in the recent apps,
+  apart from Nixup's. The terminal button in Nixup's menu opens it, with the sessions it keeps running.
 - The phone's own update check (every 6 hours) can run on mobile data too: `android.updates.onlyOnUnmetered = false`.
   By default it stays on Wi-Fi, as before. And it no longer waits for the next 6 hours when it could not run: as soon
   as the phone joins a network it may use (Wi-Fi; with mobile data allowed, any network, as when it is back online, or
@@ -20,6 +15,17 @@ section after the version, and its text is what the Magisk app shows as the upda
   module's notices the network coming (within 20 seconds, while the phone is awake); the Logs tab says such a check was
   started by "the phone, on joining a network". A check that cannot run now (on mobile data, offline, a low battery, a
   build or another update running) is skipped without a notification, and says why in apply.log.
+
+## 0.1.14 (2026-11-20)
+
+- Apps whose APK is a Nix package: `android.packages.nix = [ { id = "com.example.app"; apk = pkgs.fetchurl { … }; } ]`.
+  The APK can be a fetchurl of a release's APK, a build of the app, a folder with one APK, or a file of the config's
+  folder. The phone gets it as it gets the config's other Nix packages (built there or on the build machines when no
+  cache has it, a fetchurl's hash checked), and the engine installs it from Nixup's store: nothing is looked up or
+  downloaded again. So the APK is pinned, as anything else in the config is, and a new one in the config (a flake
+  input's update, a bumped hash) is the update. One older than the app installed (a rollback) is left, as Android
+  installs no older version over a newer one. A dry run, which fetches no Nix packages, lists an APK not fetched yet
+  as "to fetch first" rather than stopping on it.
 
 ## 0.1.13 (2026-11-14)
 

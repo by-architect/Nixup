@@ -67,15 +67,24 @@
             </intent-filter>
         </activity>
 
-        <!-- The terminal: root's shell in Nixup's view, with the config's Nix packages. -->
+        <!-- The terminal: root's shell in Nixup's view, with the config's Nix packages. An app of its own on the home
+             screen and in the recent apps (its icon, its task), which Nixup's menu opens too. -->
         <activity
             android:name=".terminal.TerminalActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
-            android:exported="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_terminal_launcher"
             android:label="@string/terminal"
             android:launchMode="singleTask"
+            android:roundIcon="@mipmap/ic_terminal_launcher"
+            android:taskAffinity="dev.nixup.manager.terminal"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <!-- Google's sign-in page, for the account Google Play's apps come with. -->
         <activity

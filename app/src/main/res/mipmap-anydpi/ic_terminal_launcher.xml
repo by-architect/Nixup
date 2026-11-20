@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The terminal's own icon (it is an app of its own on the home screen): a window with a prompt
+     (drawable/ic_terminal_launcher_foreground), on Nixup's night blue; in one color where the launcher themes icons. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_terminal_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_terminal_launcher_monochrome" />
+</adaptive-icon>
