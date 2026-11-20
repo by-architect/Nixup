@@ -188,14 +188,33 @@ More, with every option: [the documentation](https://by-architect.github.io/Nixu
 
 - A rooted phone: Magisk (tested), KernelSU or APatch.
 - Android 11 or newer, 64-bit ARM (arm64).
+- To set it up from a computer, as below: Linux or macOS with [Nix](https://nixos.org/download) (flakes on) and
+  adb (`nix shell nixpkgs#android-tools` has it).
 
-## Install
+## Installation And Setup
 
 1. Download `nixup-v<version>.zip` from the [releases](https://github.com/by-architect/Nixup/releases).
 2. Magisk → Modules → Install from storage → pick the zip, then restart the phone.
-3. Open **Nixup**, allow root and notifications, and press **New** for a starter config.
+3. Open **Nixup**, and allow root and notifications.
+4. Turn on USB debugging (Settings → Developer options), plug the phone into your computer, and allow the computer
+   on the phone's screen.
+5. On the computer, start `nixup`, which takes you through the rest step by step:
 
-Then follow [Your first build](https://by-architect.github.io/Nixup/docs.html#first-build).
+   ```sh
+   nix run github:by-architect/Nixup#nixup
+   ```
+
+6. **Make a config from a phone**: pick the phone (allow Shell when Magisk asks on its screen). nixup reads its apps
+   and settings into a config that keeps the phone as it is, then asks about the rest: updates, adb and SSH,
+   Tailscale, backups, Nix packages and more (Enter skips a question). Nothing is written before you have seen it.
+7. Build it, which nixup offers next: **Dry run on the phone** shows what a build would change, changing nothing,
+   and **Build it** makes the phone follow the config (after a dry run: **Build a config on a phone**, in the menu).
+
+Later, **Change a config** in the same menu answers the questions again, and **Build a config on a phone** applies
+the change. What each step does: [From A Computer: nixup](#from-a-computer-nixup).
+
+Without a computer: press **New** in the app for a starter config, and follow
+[Your first build](https://by-architect.github.io/Nixup/docs.html#first-build).
 
 ## From A Computer: nixup
 
@@ -226,11 +245,11 @@ nix run github:by-architect/Nixup#nixup
   builds its own config, the one its app's Config picked. A dry run shows what would change.
 - **Generations**: the phone's builds so far, each with the config it was built from (and the computer, for one
   built on a computer), and going back to one.
+- **Google Play sign-in**: a token for the config, so the phone needs no sign-in.
 
 The phone's panel says which config its generation was built from, and which one the phone's own builds read (the
 app's Build, and a daily rebuild): after a build on a computer they are not the same, and the question about the daily
 rebuild says what it would build.
-- **Google Play sign-in**: a token for the config, so the phone needs no sign-in.
 
 The same steps without questions, for scripts: `nixup-config create`, `nixup-rebuild switch` and `nixup-play-login`
 (`nix run github:by-architect/Nixup#<name> -- --help`).
