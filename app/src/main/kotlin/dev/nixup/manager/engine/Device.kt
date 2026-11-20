@@ -500,12 +500,32 @@ object Device {
     /** The battery's level, in percent. */
     fun batteryLevel(): Int? = Regex("""level: (\d+)""").find(run("dumpsys", "battery").second)?.groupValues?.get(1)?.toIntOrNull()
 
-    /** Whether the network Android uses now is unmetered (Wi-Fi, as a rule; not mobile data). */
-    fun unmetered(): Boolean = try {
-        val connectivity = context?.getSystemService(ConnectivityManager::class.java)
-        connectivity?.getNetworkCapabilities(connectivity.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+    /** Whether the phone is online on an unmetered network (Wi-Fi, as a rule; not mobile data): see [online]. */
+    fun unmetered(): Boolean = online() == Online.UNMETERED
+
+    /** How the phone reaches the internet: on an unmetered network (Wi-Fi, as a rule), on metered ones only (mobile data), or not at all. */
+    enum class Online { UNMETERED, METERED, OFFLINE }
+
+    /**
+     * How the phone is online now, by the networks Android has for the internet and found to reach it: one of them
+     * unmetered (or unmetered for now, as some mobile plans are), only metered ones, or none (offline, or a network
+     * Android has not checked yet). Not a VPN's: it runs over those, and root's traffic does not go through it. Null when
+     * this cannot be told here.
+     */
+    @Suppress("DEPRECATION")
+    fun online(): Online? = try {
+        val connectivity = context?.getSystemService(ConnectivityManager::class.java) ?: return null
+        val networks = connectivity.allNetworks.mapNotNull { connectivity.getNetworkCapabilities(it) }.filter {
+            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
+                it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        }
+        when {
+            networks.any { it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) || it.hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED) } -> Online.UNMETERED
+            networks.isNotEmpty() -> Online.METERED
+            else -> Online.OFFLINE
+        }
     } catch (e: Throwable) {
-        false
+        null
     }
 
     /** Whether the phone is charging (or full, on a charger). */

@@ -9,10 +9,12 @@ import android.content.Context
 import android.util.Log
 
 /**
- * The periodic update check: every 6 hours, on Wi-Fi and with the battery not low, the module's update.sh runs as
- * root in auto mode. It installs the updates when the config's android.settings.repo.fdroid.autoupdatePackages is true,
- * and else only tells; its notifications come through UpdatesReceiver. The job only starts it, so a long update
- * does not hit the time a job may take.
+ * The periodic update check: every 6 hours, with the battery not low, the module's update.sh runs as root in auto
+ * mode. The module decides whether it checks now (on Wi-Fi, or on mobile data too with the config's
+ * android.updates.onlyOnUnmetered = false; not within an hour of its last check), and its network watch checks as soon
+ * as the phone joins such a network: so the job waits for no network itself. It installs the updates when the config's
+ * android.settings.repo.<repo>.autoupdatePackages is true, and else only tells; its notifications come through
+ * EventsReceiver. The job only starts it, so a long update does not hit the time a job may take.
  */
 class UpdateJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
@@ -29,10 +31,14 @@ class UpdateJob : JobService() {
         private const val ID = 1
         private const val HOUR = 3_600_000L
 
-        /** Schedules the check, unless it is already: scheduling it again would start its 6 hours over. */
+        /**
+         * Schedules the check, unless it is already: scheduling it again would start its 6 hours over. One an earlier
+         * app scheduled to wait for Wi-Fi is scheduled again without.
+         */
         fun schedule(context: Context) {
             val scheduler = context.getSystemService(JobScheduler::class.java)
-            if (scheduler.getPendingJob(ID) != null) return
+            val pending = scheduler.getPendingJob(ID)
+            if (pending != null && pending.requiredNetwork == null) return
             // Android may refuse a job (a missing permission, a limit): the app and its notifications go on without it.
             runCatching { scheduler.schedule(job(context)) }.onFailure { Log.w("Nixup", "the update check could not be scheduled", it) }
         }
@@ -40,7 +46,6 @@ class UpdateJob : JobService() {
         private fun job(context: Context): JobInfo =
             JobInfo.Builder(ID, ComponentName(context, UpdateJob::class.java))
                 .setPeriodic(6 * HOUR, HOUR)
-                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_UNMETERED)
                 .setRequiresBatteryNotLow(true)
                 .setPersisted(true)
                 .build()

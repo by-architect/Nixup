@@ -292,9 +292,9 @@ in
           default = false;
           description = ''
             Update the repository's apps (android.packages.<repo>) by themselves: the phone
-            looks for updates every 6 hours on Wi-Fi and installs them, with notifications.
-            When false it only tells, in a notification, that there are updates; the app's
-            Updates tab installs them.
+            looks for updates every 6 hours on Wi-Fi (android.updates.onlyOnUnmetered) and
+            installs them, with notifications. When false it only tells, in a notification,
+            that there are updates; the app's Updates tab installs them.
           '';
         };
       });
@@ -305,6 +305,21 @@ in
         (android.settings.repo.obtainium) and of those from Google Play
         (android.settings.repo.playstore). The phone's own settings are the other groups of
         android.settings (nix/system.nix, nix/lineage.nix).
+      '';
+    };
+
+    android.updates.onlyOnUnmetered = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Whether the phone's own update check (every 6 hours: the updates of the config's apps,
+        installed by themselves where android.settings.repo.<repo>.autoupdatePackages is true
+        and told about otherwise, and a newer Nixup) runs only on an unmetered network (Wi-Fi),
+        as system.autoUpgrade's android.autoUpgrade.onlyOnUnmetered; false: on mobile data too.
+        A check that comes while the phone is on no network it may use waits for one: as soon
+        as the phone joins one (Wi-Fi; with false, any network, as when it is back online), it
+        checks, unless it checked by itself in the last hour. The app's Check for updates and
+        Update run on any network.
       '';
     };
 

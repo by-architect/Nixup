@@ -102,6 +102,9 @@ Apps from F-Droid and other F-Droid-style repositories:
 
   # Updates installed by themselves (every 6 hours, on Wi-Fi); false only notifies
   android.settings.repo.fdroid.autoupdatePackages = true;
+
+  # The update check on mobile data too (Wi-Fi only by default); joining a network checks at once
+  android.updates.onlyOnUnmetered = false;
 }
 ```
 

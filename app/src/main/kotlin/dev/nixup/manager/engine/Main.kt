@@ -49,6 +49,12 @@ import kotlin.system.exitProcess
  *   updates                       lists the updates of the config's apps (and writes updates.json for the app)
  *   update [--auto] [apps...]     installs them, all or the ones named (with --auto: only for the repositories whose
  *                                 android.settings.repo.<repo>.autoupdatePackages is true)
+ *   update-due                    whether the phone's own update check (update.sh auto, from the app's job or the
+ *                                 network watch) runs now: the phone unlocked since it started, on a network
+ *                                 android.updates.onlyOnUnmetered lets it use, with the battery not low, not within an
+ *                                 hour of the last one; 0 when it does, 2 (having said why) when it waits
+ *   update-network                the update check's network watch's look, when the phone's networks changed: when the
+ *                                 phone has just joined a network the check may use, starts it (see Updates.watch)
  *   self-update [--install]       looks for a newer Nixup (the module's update.json), or installs it once it is
  *                                 checked (Nixup's module, newer, its app signed with the installed app's key)
  *   playstore-login               signs the phone in to Google Play with an account: reads its email address and the
@@ -141,6 +147,8 @@ object Main {
                     runCatching { SystemSettings(data).boot(android?.optJSONObject("system")) }.onFailure { Out.line("✘ System settings: ${it.message}") }
                     // A module installed since the last start is where Magisk moved it now.
                     runCatching { Etc.writeNixCommands(File(data, "etc"), android?.optJSONObject("nix")) }
+                    // The update check's network watch, with or without services: the phone checks once it is online.
+                    Updates.watch(data, boot = true)
                     Units(data).start()
                 }
                 "secrets" -> Secrets.stage(
@@ -165,6 +173,8 @@ object Main {
                     }.let { 0 }
                 "updates" -> Updates(data).check()
                 "update" -> Updates(data).update(files, auto = "--auto" in args)
+                "update-due" -> Updates(data).due()
+                "update-network" -> Updates(data).joined()
                 "self-update" -> SelfUpdate(data).let { if ("--install" in args) it.install() else it.check() }
                 "playstore-login" -> PlayStore.login(data, System.`in`)
                 "playstore-logout" -> PlayStore.logout(data)
@@ -326,5 +336,5 @@ object Main {
     private fun option(args: Array<String>, name: String): String? = args.firstOrNull { it.startsWith("--$name=") }?.removePrefix("--$name=")
 
     private fun usage(): Nothing =
-        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | builders <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | dns-update | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | path-fire <path unit> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>] | ntfy <settings>")
+        throw Stop("usage: index [--force] <file> | apply <profile.json> [--dry-run] [--force] [--secrets=<folder>] | paths <profile.json> | builders <profile.json> | secrets <file> <folder> [--store=<root>] | restore | support | dns | etc | services | updates | update [--auto] [apps...] | update-due | update-network | self-update [--install] | playstore-login | playstore-logout | playstore <apps...> [--files] | backup [--auto] [--parts=<parts>] [apps or folders...] | backups [app or folder] [--json] | backup-status [--json] | backup-restore <app or folder> [snapshot] [--parts=<parts>] [--to=<folder>] | backup-parts <app> <snapshot> | restic <arguments...> | units [--json] | dns-update | unit <start|stop|restart> <name> | timer-next <timer> | timer-fire <timer> | path-fire <path unit> | calendar <expression> [--count=<n>] [--after=<epoch seconds>] | audio-out [--format=<rate:bits:channels>] [--latency-file=<file>] | ntfy <settings>")
 }

@@ -118,12 +118,12 @@ run_open() {
 run_end() { event "$RUN_KIND" "$@"; }
 
 # Below the app on the screen, so the phone does not stutter while it runs: what the phone runs by
-# itself (job, boot, resume) on Android's background cores, at the lowest priority and the idle share
-# of the storage; what somebody waits for (the app, adb, ssh) on all cores but the biggest, at nice
-# 10. What the run starts (the engine, Nix, restic, git) keeps it.
+# itself (job, network, boot, resume) on Android's background cores, at the lowest priority and the
+# idle share of the storage; what somebody waits for (the app, adb, ssh) on all cores but the
+# biggest, at nice 10. What the run starts (the engine, Nix, restic, git) keeps it.
 run_priority() {
   case "$BY" in
-    job | boot | resume) set=background nice=19 io="-c 3" ;;
+    job | network | boot | resume) set=background nice=19 io="-c 3" ;;
     *) set=foreground nice=10 io="-c 2 -n 7" ;;
   esac
   for c in "/dev/cpuset/$set/cgroup.procs" "/dev/cpuset/$set/tasks"; do

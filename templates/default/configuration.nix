@@ -90,7 +90,7 @@
   };
 
   # Updates of each source's apps: true installs them by itself (every 6 hours, on Wi-Fi), false
-  # only notifies (the app's Updates tab installs them).
+  # only notifies (the app's Updates tab installs them). The phone checks at once when it joins Wi-Fi.
   android.settings.repo = {
     fdroid.autoupdatePackages = false;
     izzyondroid.autoupdatePackages = false;
@@ -99,6 +99,7 @@
     obtainium.autoupdatePackages = true;
     playstore.autoupdatePackages = false;
   };
+  android.updates.onlyOnUnmetered = true;         # false: checks on mobile data too (then joining any network checks)
 
   # The phone's other apps (sideloaded, debug builds, and Google Play apps not listed above) come
   # from no repository here, so Nixup leaves them as they are. F-Droid has its own builds of

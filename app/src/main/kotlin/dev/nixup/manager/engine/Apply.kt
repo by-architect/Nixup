@@ -313,11 +313,15 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         apps.getJSONObject(app).optJSONArray("defaultFor")?.let { roles -> (0 until roles.length()).any { roles.getString(it) == "home" } } == true
     }
 
-    /** The versions for the generation, the updates list (the build may have installed some of them), and Obtainium's list. */
+    /**
+     * The versions for the generation, the updates list (the build may have installed some of them), Obtainium's list,
+     * and the update check's network watch, from the first build on.
+     */
     private fun finish(profile: File, ids: List<String>, fromReleases: List<Releases.App>) {
         installer.writeResolved(ids)
         Updates(data, profile).list(quiet = true)
         releases.tellObtainium(fromReleases)
+        Updates.watch(data, profile)
     }
 
     // (An app from Nix is in Nixup's store already: nothing of it to download.)
@@ -339,6 +343,7 @@ class Apply(private val repos: Map<String, FDroid>, private val data: File, priv
         // The activation scripts' undos, in Nixup's view, before the services and the view go.
         failed += Activation(data).undoAll()
         failed += Units(data).removeAll()
+        Updates.unwatch(data)
         failed += Adb(data).restore()
         releases.tellObtainium(emptyList())
         for (id in installer.readOwned()) {

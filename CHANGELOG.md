@@ -13,6 +13,13 @@ section after the version, and its text is what the Magisk app shows as the upda
   downloaded again. So the APK is pinned, as anything else in the config is, and a new one in the config (a flake
   input's update, a bumped hash) is the update. One older than the app installed (a rollback) is left, as Android
   installs no older version over a newer one.
+- The phone's own update check (every 6 hours) can run on mobile data too: `android.updates.onlyOnUnmetered = false`.
+  By default it stays on Wi-Fi, as before. And it no longer waits for the next 6 hours when it could not run: as soon
+  as the phone joins a network it may use (Wi-Fi; with mobile data allowed, any network, as when it is back online, or
+  after a restart once it is unlocked), it checks, unless it checked by itself in the last hour. A small watch of the
+  module's notices the network coming (within 20 seconds, while the phone is awake); the Logs tab says such a check was
+  started by "the phone, on joining a network". A check that cannot run now (on mobile data, offline, a low battery, a
+  build or another update running) is skipped without a notification, and says why in apply.log.
 
 ## 0.1.13 (2026-11-14)
 

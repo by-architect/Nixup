@@ -4,7 +4,8 @@
 
     <!-- Notifications about installs and updates; the module also grants it when it installs the app. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- The periodic update check stays scheduled across restarts, and waits for Wi-Fi. -->
+    <!-- The periodic update check stays scheduled across restarts; the calendar sync and Google's sign-in page look at
+         the network. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The terminal's sessions keep running while it is closed, with a notification. -->

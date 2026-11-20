@@ -293,6 +293,7 @@ object Logs {
         "" -> null
         "app" -> context.getString(R.string.by_app)
         "job" -> context.getString(R.string.by_job)
+        "network" -> context.getString(R.string.by_network)
         "boot" -> context.getString(R.string.by_boot)
         "action" -> context.getString(R.string.by_action)
         "resume" -> context.getString(R.string.by_resume)

@@ -133,8 +133,9 @@ in
       type = types.bool;
       default = true;
       description = ''
-        Whether system.autoUpgrade builds only on an unmetered network (Wi-Fi), as the app's update check does: an upgrade
-        can download a lot. A time that comes on mobile data is skipped.
+        Whether system.autoUpgrade builds only on an unmetered network (Wi-Fi), as the app's update check does unless
+        android.updates.onlyOnUnmetered is false: an upgrade can download a lot. A time that comes on mobile data is
+        skipped.
       '';
     };
 

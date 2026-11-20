@@ -269,6 +269,7 @@
     <string name="kind_other">Other</string>
     <string name="by_app">you, in the app</string>
     <string name="by_job">the phone, by itself</string>
+    <string name="by_network">the phone, on joining a network</string>
     <string name="by_boot">the phone\'s start</string>
     <string name="by_action">Magisk\'s Action button</string>
     <string name="by_shell">the terminal</string>
