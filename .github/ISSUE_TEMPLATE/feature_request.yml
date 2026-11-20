@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an idea or an improvement for Nixup.
+title: "[FEATURE REQUEST] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing your idea. Please [search the existing issues](https://github.com/by-architect/Nixup/issues?q=is%3Aissue) first; if someone asked for it already, add a thumbs up reaction to their issue instead. Reactions help us see what people want most.
+
+        Keep `[FEATURE REQUEST]` at the start of the title and add a short summary after it, for example `[FEATURE REQUEST] programs.git, as NixOS has it`.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve?
+      description: Tell us what you are trying to do, and what makes it hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How would you like it to work? If NixOS or Home Manager has an option for it, how would it look in configuration.nix?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways you considered
+      description: Workarounds you use now, or how other tools like Nix-on-Droid do it.
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Your device, links or screenshots are welcome.

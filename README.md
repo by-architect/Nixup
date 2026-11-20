@@ -192,6 +192,35 @@ More, with every option: [the documentation](https://by-architect.github.io/Nixu
 
 Then follow [Your first build](https://by-architect.github.io/Nixup/docs.html#first-build).
 
+## Roadmap
+
+What is done and what comes next is on the [Nixup Roadmap](https://github.com/users/by-architect/projects/2)
+board. It has a column for each version (the releases so far, then the next one) and one each for feature
+requests and bug reports that are not planned for a version yet. Every card has a tag that says where it is:
+
+| Tag          | Means                                   |
+|--------------|-----------------------------------------|
+| `Waiting`    | Not started yet                         |
+| `Working on` | Being made now                          |
+| `Done`       | Finished, in its version's release      |
+
+When a request is planned, its card moves to the version it will come in.
+
+## Issues
+
+Open an [issue](https://github.com/by-architect/Nixup/issues/new/choose) with one of the two forms, which start the
+title with its kind:
+
+| Title starts with   | For                                              |
+|---------------------|--------------------------------------------------|
+| `[BUG]`             | Something is broken or does not work as expected |
+| `[FEATURE REQUEST]` | An idea or an improvement                        |
+
+New issues show up on the roadmap board by themselves, tagged `Waiting`: bug reports in the Bugs column, feature
+requests in the Features column. Please search the existing issues first; if yours is already there, add a thumbs
+up reaction to it instead of opening a new one. Security problems should be reported privately, as a
+[security advisory](https://github.com/by-architect/Nixup/security/advisories/new).
+
 ## License
 
 [GPL-3.0](LICENSE). Nixup includes Termux's terminal code (Apache 2.0) and Nix-on-Droid's terminal options
