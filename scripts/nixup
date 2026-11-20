@@ -3,7 +3,10 @@
 # questions about what a phone cannot tell: updates, access, services, backups, Nix packages, each looked up first as
 # the phone gets it, and a Google Play sign-in for the account's token), changes a config by asking again, builds a
 # config on a phone (on this computer, or on the phone itself) and takes the phone back to an earlier generation. Each
-# step says what it does, and what it would change is shown before anything changes.
+# step says what it does, and what it would change is shown before anything changes. A config is any module file
+# (configuration.nix, a host's default.nix, …), alone or one of a flake's configurations (with other machines in it,
+# shared modules, secrets): it is read as a build reads it, through the flake, so what other files set and what the
+# Nixup its flake.lock pins has not got are seen, and left as they are.
 #
 #   nixup                the menu
 #   nixup create         make a config from a phone
@@ -265,9 +268,9 @@ eds() {
 # --- What the menu's steps share (each runs on its own, so it goes through a file): the phone and the config folder.
 WORK="$(mktemp -d)"
 PHONE_SERIAL="" PHONE_MODEL="" PHONE_ANDROID="" PHONE_NAME="" PHONE_APP="" PHONE_ROOT="" PHONE_MODULE=""
-PHONE_PENDING="" PHONE_SOURCE="" PHONE_GEN="" PHONE_REMOTE="" CONFIG_DIR=""
+PHONE_PENDING="" PHONE_SOURCE="" PHONE_GEN="" PHONE_REMOTE="" CONFIG_PATH=""
 state_vars=(PHONE_SERIAL PHONE_MODEL PHONE_ANDROID PHONE_NAME PHONE_APP PHONE_ROOT PHONE_MODULE PHONE_PENDING PHONE_SOURCE
-  PHONE_GEN PHONE_REMOTE CONFIG_DIR)
+  PHONE_GEN PHONE_REMOTE CONFIG_PATH)
 save_state() {
   local v
   for v in "${state_vars[@]}"; do printf '%s=%s\n' "$v" "${!v//$'\n'/ }"; done > "$WORK/state"
@@ -279,16 +282,7 @@ load_state() {
     case " ${state_vars[*]} " in *" $k "*) printf -v "$k" '%s' "$v" ;; esac
   done < "$WORK/state"
 }
-# Files a step leaves next to a config while it works (gone when it ends, however it ends).
-litter() { printf '%s\n' "$1" >> "$WORK/litter"; }
-sweep() {
-  local f
-  [[ -f $WORK/litter ]] || return 0
-  while IFS= read -r f; do rm -f "$f"; done < "$WORK/litter"
-  rm -f "$WORK/litter"
-}
 cleanup() {
-  sweep
   if ((fancy)); then printf '\e[?25h' >&2; fi
   rm -rf "$WORK"
 }
@@ -303,7 +297,6 @@ trap interrupted INT
 
 # The config folder of the last time, kept as lib-phone.sh keeps the phone's address.
 phone_state="${XDG_CONFIG_HOME:-$HOME/.config}/nixup"
-remember_dir() { mkdir -p "$phone_state" && printf '%s\n' "$1" > "$phone_state/config-folder"; }
 
 need() { command -v "$1" > /dev/null || die "there is no $1 here: $2"; }
 with_timeout() { if command -v timeout > /dev/null; then timeout "$@"; else shift; "$@"; fi; }
@@ -488,7 +481,8 @@ module_run() {
   phone_root "d=/data/adb/modules_update/nixup; [ -f \$d/build.sh ] || d=/data/adb/modules/nixup; [ -f \$d/build.sh ] || exit 3; $1"
 }
 
-# --- The config folder.
+# --- The config: a module file of any name (configuration.nix, a host's default.nix, …), or a folder with one, and the
+# flake it is part of, when it is.
 
 # full_path <typed>: a typed path as a whole one (~ and relative paths too), without . and .. in it.
 full_path() {
@@ -507,27 +501,26 @@ full_path() {
   done
   printf '/%s' "$(IFS=/; printf '%s' "${kept[*]}")"
 }
-# The folder nixup starts with: this one when it has a config, else the last one, else none.
-first_dir() {
+# The config nixup starts with: this folder, when it has a configuration.nix or a flake.nix; else the last one.
+first_config() {
   local last
   if [[ -f $PWD/configuration.nix || -f $PWD/flake.nix ]]; then printf '%s' "$PWD"; return 0; fi
-  last="$(cat "$phone_state/config-folder" 2> /dev/null || true)"
-  if [[ -n $last && ( -f $last/configuration.nix || -f $last/flake.nix ) ]]; then printf '%s' "$last"; fi
+  last="$(cat "$phone_state/config" 2> /dev/null || cat "$phone_state/config-folder" 2> /dev/null || true)"
+  if [[ -n $last && -e $last ]]; then printf '%s' "$last"; fi
   return 0
 }
-dir_row() {
-  local what=()
-  if [[ -z $CONFIG_DIR ]]; then kv Config "${c_d}${s_ring} no folder picked yet${c_r}"; return 0; fi
-  [[ ! -f $CONFIG_DIR/configuration.nix ]] || what+=(configuration.nix)
-  [[ ! -f $CONFIG_DIR/flake.nix ]] || what+=(flake.nix)
-  if ((${#what[@]})); then
-    kv Config "${c_ok}${s_dot}${c_r} $(pretty "$CONFIG_DIR") ${c_d}(${what[*]})${c_r}"
-  else
-    kv Config "${c_warn}${s_dot}${c_r} $(pretty "$CONFIG_DIR") ${c_d}(no config in it yet)${c_r}"
-  fi
+remember_config() { mkdir -p "$phone_state" && printf '%s\n' "$1" > "$phone_state/config"; }
+config_row() {
+  local p=$CONFIG_PATH f
+  local -a what=()
+  if [[ -z $p ]]; then kv Config "${c_d}${s_ring} none picked yet${c_r}"; return 0; fi
+  if [[ -f $p ]]; then kv Config "${c_ok}${s_dot}${c_r} $(pretty "$p")"; return 0; fi
+  for f in configuration.nix default.nix flake.nix; do [[ ! -f $p/$f ]] || what+=("$f"); done
+  if ((${#what[@]})); then kv Config "${c_ok}${s_dot}${c_r} $(pretty "$p") ${c_d}(${what[*]})${c_r}"
+  else kv Config "${c_warn}${s_dot}${c_r} $(pretty "$p") ${c_d}(no config in it yet)${c_r}"; fi
 }
 
-# The configurations a flake.nix names (nixupConfigurations.<name> = …), as written.
+# The configurations a flake.nix names (nixupConfigurations.<name> = …), as written (when Nix cannot be asked).
 flake_names() {
   grep -v '^[[:space:]]*#' "$1" | grep -oE '(nixup|seraph)Configurations\.("[^"]+"|[A-Za-z0-9_-]+)' \
     | sed -E 's/^[a-z]+Configurations\.//; s/^"(.*)"$/\1/' | sort -u || true
@@ -542,85 +535,268 @@ lock_line() {
   day="$(date -d "@$t" +%F 2> /dev/null || date -r "$t" +%F 2> /dev/null || true)"
   printf 'Nixup at %s%s' "${rev:0:7}" "${day:+, $day}"
 }
-# The files a configuration.nix names (./tailscale.key, ../keys/x), past its comments.
+# The files a config's file names (./tailscale.key, ../../modules/ssh.nix), past its comments.
 named_files() {
   sed -e 's/^[[:space:]]*#.*$//' -e 's/[[:space:]]#.*$//' "$1" | grep -oE '(^|[^A-Za-z0-9_.~/-])\.\.?/[A-Za-z0-9._+/-]+' \
     | sed -E 's/^[^.]//' | sort -u || true
 }
 
-# look_config <dir>: what the folder has, and what a build of it needs, in a panel: CFG_FILE (its configuration.nix),
-# CFG_FLAKE (its flake.nix) and CFG_NAMES (the flake's configurations) for the steps after.
+# resolve_config <path>: the config at a path typed: the file (any .nix but flake.nix: configuration.nix, a host's
+# default.nix), or a folder's (its configuration.nix, else its default.nix, else its other .nix file, asked when there
+# are several), and the flake it is part of: a flake.nix of Nixup's in its folder or one above it, as far as the top of
+# its git repository. Sets CFG_FILE (none for a flake.nix given alone), CFG_DIR, and of the flake: CFG_FLAKE, CFG_ROOT,
+# CFG_REF (as Nix fetches it: git+file:… with its submodules, or path:…), CFG_CLI (as nixup-rebuild --flake takes it),
+# CFG_REL (the file in it), CFG_PHONES (its nixupConfigurations), CFG_NIXUP (the Nixup its flake.lock pins) and CFG_NAME
+# (the configuration made from the file). Status 1: no config there.
+resolve_config() {
+  local p=$1 f d top levels=0 name seg machine="" hostname="" item
+  local -a files=() segs=() q=() items=()
+  CFG_FILE="" CFG_DIR="" CFG_FLAKE="" CFG_ROOT="" CFG_REF="" CFG_CLI="" CFG_REL="" CFG_NIXUP="" CFG_NAME=""
+  CFG_PHONES=() CFG_MACHINES=()
+  if [[ -f $p ]]; then
+    CFG_DIR="$(dirname "$p")"
+    if [[ $(basename "$p") == flake.nix ]]; then CFG_FLAKE=$p; else CFG_FILE=$p; fi
+  elif [[ -d $p ]]; then
+    CFG_DIR=$p
+    for f in configuration.nix default.nix; do
+      if [[ -f $p/$f ]]; then CFG_FILE=$p/$f; break; fi
+    done
+    if [[ -z $CFG_FILE && ! -f $p/flake.nix ]]; then
+      mapfile -t files < <(find "$p" -maxdepth 1 -type f -name '*.nix' | sort)
+      ((${#files[@]})) || return 1
+      if ((${#files[@]} == 1)); then
+        CFG_FILE=${files[0]}
+      else
+        for f in "${files[@]}"; do items+=("$f|$(basename "$f")|$(wc -l < "$f") lines"); done
+        menu "Which of them is the config?" "${items[@]}"
+        [[ $PICKED != back ]] || return 1
+        CFG_FILE=$PICKED
+      fi
+    fi
+  else
+    return 1
+  fi
+
+  # The flake it is part of.
+  top="$(git -C "$CFG_DIR" rev-parse --show-toplevel 2> /dev/null || true)"
+  d=$CFG_DIR
+  while :; do
+    if [[ -f $d/flake.nix ]] && grep -qE 'nixupConfigurations|seraphConfigurations|nixupSystem|seraphSystem' "$d/flake.nix"; then
+      CFG_FLAKE=$d/flake.nix
+      break
+    fi
+    if [[ -n $top ]]; then [[ $d != "$top" ]] || break
+    else levels=$((levels + 1)); ((levels < 4)) || break; fi
+    [[ $d != / ]] || break
+    d="$(dirname "$d")"
+  done
+  [[ -n $CFG_FLAKE ]] || return 0
+  CFG_ROOT="$(dirname "$CFG_FLAKE")"
+  top="$(git -C "$CFG_ROOT" rev-parse --show-toplevel 2> /dev/null || true)"
+  CFG_CLI=$CFG_ROOT
+  if [[ -n $top ]]; then
+    CFG_REF="git+file://$top"
+    [[ $top == "$CFG_ROOT" ]] || q+=("dir=${CFG_ROOT#"$top"/}")
+    if [[ -f $top/.gitmodules ]]; then q+=(submodules=1); CFG_CLI+="?submodules=1"; fi
+    ((${#q[@]} == 0)) || CFG_REF+="?$(IFS='&'; printf '%s' "${q[*]}")"
+  else
+    CFG_REF="path:$CFG_ROOT"
+  fi
+  [[ -z $CFG_FILE || $CFG_FILE != "$CFG_ROOT"/* ]] || CFG_REL=${CFG_FILE#"$CFG_ROOT"/}
+
+  # Its phones and machines, as Nix evaluates the flake (its names may be made, as one for each host's folder).
+  flake_info
+  [[ -n $CFG_FILE ]] || return 0
+  ((${#CFG_PHONES[@]})) || return 0
+  [[ -n $CFG_REL ]] || return 0
+  # The configuration made from the file: one named as a folder on its way, or as the file (hosts/samsung/default.nix:
+  # samsung), else as its networking.hostName, else the only one; else asked. One of the flake's NixOS machines' is not
+  # a phone's.
+  IFS=/ read -ra segs <<< "${CFG_REL%.nix}"
+  for name in "${CFG_PHONES[@]}"; do
+    for seg in "${segs[@]}"; do [[ $name != "$seg" ]] || CFG_NAME=$name; done
+  done
+  if [[ -z $CFG_NAME ]]; then
+    for name in "${CFG_MACHINES[@]}"; do
+      for seg in "${segs[@]}"; do [[ $name != "$seg" ]] || machine=$name; done
+    done
+    [[ -z $machine ]] || die "$(pretty "$CFG_FILE") is $machine's, one of the flake's NixOS machines (nixosConfigurations), not a phone's: nixup works on phones' configs, the flake's nixupConfigurations (${CFG_PHONES[*]})"
+    hostname="$(sed -n 's/^[[:space:]]*networking\.hostName[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$CFG_FILE" | head -n 1)"
+    for name in "${CFG_PHONES[@]}"; do [[ $name != "$hostname" ]] || CFG_NAME=$name; done
+  fi
+  if [[ -z $CFG_NAME ]] && ((${#CFG_PHONES[@]} == 1)); then CFG_NAME=${CFG_PHONES[0]}; fi
+  if [[ -z $CFG_NAME ]]; then
+    items=()
+    for name in "${CFG_PHONES[@]}"; do items+=("$name|$name|${CFG_CLI}#$name"); done
+    items+=("-|None of them|the file alone, with Nixup's options (its flake's arguments are not there then)")
+    menu "Which of the flake's phones is made from $(basename "$CFG_FILE")?" "${items[@]}"
+    case $PICKED in back) return 1 ;; -) ;; *) CFG_NAME=$PICKED ;; esac
+  fi
+  return 0
+}
+# flake_info: CFG_PHONES, CFG_MACHINES and CFG_NIXUP of the flake at CFG_REF, from Nix (else the names as written).
+flake_info() {
+  local out kind rest
+  if command -v nix > /dev/null; then
+    say "  ${c_d}Asking the flake for its phones (Nix evaluates it: the first time, it may fetch its inputs)…${c_r}"
+    out="$(NIXUP_HELPER="$here/nixup.nix" NIXUP_REF="$CFG_REF" nixx eval --raw --impure --expr \
+      'import (builtins.getEnv "NIXUP_HELPER") { info = true; flakeRef = builtins.getEnv "NIXUP_REF"; }' 2> "$WORK/info.err" || true)"
+  fi
+  while IFS=$'\t' read -r kind rest; do
+    case $kind in
+      phones) read -ra CFG_PHONES <<< "$rest" ;;
+      machines) read -ra CFG_MACHINES <<< "$rest" ;;
+      nixup) CFG_NIXUP=$rest ;;
+    esac
+  done <<< "${out:-}"
+  if [[ -z ${out:-} ]]; then
+    mapfile -t CFG_PHONES < <(flake_names "$CFG_FLAKE")
+    warn "Nix could not evaluate the flake here$(err_line "$WORK/info.err"): its phones are read from flake.nix as written."
+  fi
+}
+# err_line <file>: ": " and Nix's error in it, its last line, when it has one.
+err_line() {
+  local e
+  e="$(sed -n 's/^ *error: //p' "$1" 2> /dev/null | tail -n 1)"
+  [[ -z $e ]] || printf ' (%s)' "$e"
+}
+
+# pick_config <question> <default>: the config typed (a file, or a folder with one), resolved; kept for the menu's
+# other steps.
+pick_config() {
+  local p
+  ask "$1" "$2" "$(pretty "$2")"
+  p="$(full_path "$ANSWER")"
+  [[ -e $p ]] || die "there is no $(pretty "$p")"
+  resolve_config "$p" || die "there is no config in $(pretty "$p"): no configuration.nix, default.nix, flake.nix or other .nix file"
+  CONFIG_PATH=$p
+  save_state
+  remember_config "$p"
+}
+
+# stage_for <file>: where the file is changed while the questions are asked, in STAGE: a folder of this run's that
+# stands for the file's own, every file and folder around it a link to the real one (up to its flake's top, or as far
+# up as the file's ../ paths reach), so that the copy reads the same files by its relative paths (../../modules/ssh.nix,
+# ./secret.key) as the file does, and nothing is written next to the config before you say so (a synced or git folder
+# sees nothing of it).
+stage_for() {
+  local file=$1 dir root rel part here there up=0 n
+  dir="$(dirname "$file")"
+  if [[ -n $CFG_ROOT && $dir == "$CFG_ROOT"* ]]; then
+    root=$CFG_ROOT
+  else
+    root=$dir
+    if [[ -f $file ]]; then
+      while IFS= read -r rel; do
+        n=0
+        while [[ $rel == ../* ]]; do n=$((n + 1)); rel=${rel#../}; done
+        ((n <= up)) || up=$n
+      done < <(named_files "$file")
+    fi
+    while ((up > 0)) && [[ $root != / ]]; do root="$(dirname "$root")"; up=$((up - 1)); done
+  fi
+  rel=${dir#"$root"}
+  rel=${rel#/}
+  here=$WORK/stage-$BASHPID
+  rm -rf "$here"
+  mkdir -p "$here"
+  there=$root
+  while :; do
+    link_all "$there" "$here" "${rel%%/*}"
+    [[ -n $rel ]] || break
+    part=${rel%%/*}
+    if [[ $rel == */* ]]; then rel=${rel#*/}; else rel=""; fi
+    here=$here/$part there=$there/$part
+    mkdir -p "$here"
+  done
+  STAGE=$here/.$(basename "$file").nixup
+}
+# link_all <folder> <into> <but>: a link in <into> to each of the folder's files and folders, but the one named <but>.
+link_all() {
+  local e
+  [[ -d $1 ]] || return 0
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [[ -e $e || -L $e ]] || continue
+    [[ -z $3 || $(basename "$e") != "$3" ]] || continue
+    ln -s "$e" "$2/$(basename "$e")"
+  done
+}
+
+# tracked <file>: git tracks the file (in one of the repository's submodules too), as a flake of it sees it.
+tracked() {
+  local top file
+  top="$(git -C "$CFG_DIR" rev-parse --show-toplevel 2> /dev/null)" || return 1
+  file="$(full_path "$1")"
+  [[ $file == "$top"/* ]] || return 1
+  [[ -n $(git -C "$top" ls-files --recurse-submodules -- "${file#"$top"/}" 2> /dev/null | head -n 1) ]]
+}
+
+# look_config: what the config is (resolve_config's), and what a build of it needs, in a panel.
 look_config() {
-  local dir=$1 lines made lock git_root f rel state missing=0 untracked=0
+  local lines made lock git_root f rel state missing=0 untracked=0 outside=0
   local -a files=() shown=()
-  CFG_FILE="" CFG_FLAKE="" CFG_NAMES=()
-  [[ ! -f $dir/configuration.nix ]] || CFG_FILE=$dir/configuration.nix
-  [[ ! -f $dir/flake.nix ]] || CFG_FLAKE=$dir/flake.nix
-  git_root="$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null || true)"
-  panel "The config: $(pretty "$dir")"
+  git_root="$(git -C "$CFG_DIR" rev-parse --show-toplevel 2> /dev/null || true)"
+  panel "The config: $(pretty "${CFG_FILE:-$CFG_FLAKE}")"
   if [[ -n $CFG_FILE ]]; then
     lines=$(wc -l < "$CFG_FILE")
     made="$(sed -n 's/^# This phone.s config, made by `nixup-config create` from \(.*\) (.*/made from \1/p; 3q' "$CFG_FILE" | head -n 1)"
-    kv configuration.nix "${c_ok}${s_ok}${c_r} $((lines)) lines${made:+ · $made}"
-  else
-    kv configuration.nix "${c_d}${s_no} none${c_r}"
+    kv "file" "${c_ok}${s_ok}${c_r} $(basename "$CFG_FILE") · $((lines)) lines${made:+ · $made}"
   fi
   if [[ -n $CFG_FLAKE ]]; then
-    mapfile -t CFG_NAMES < <(flake_names "$CFG_FLAKE")
-    if ((${#CFG_NAMES[@]})); then
-      kv flake.nix "${c_ok}${s_ok}${c_r} configurations: ${CFG_NAMES[*]}$(named_after)"
+    if [[ -n $CFG_NAME ]]; then
+      kv "flake" "${c_ok}${s_ok}${c_r} $(pretty "$CFG_ROOT") · it makes ${c_b}$CFG_NAME${c_r}$( ((${#CFG_PHONES[@]} < 2)) || printf ' (its phones: %s)' "${CFG_PHONES[*]}")"
+    elif ((${#CFG_PHONES[@]})); then
+      kv "flake" "${c_ok}${s_ok}${c_r} $(pretty "$CFG_ROOT") · its phones: ${CFG_PHONES[*]}$(named_after)"
     else
-      kv flake.nix "${c_ok}${s_ok}${c_r} ${c_d}(its configurations are found when it is built)${c_r}"
+      kv "flake" "${c_ok}${s_ok}${c_r} $(pretty "$CFG_ROOT") ${c_d}(its phones are found when it is built)${c_r}"
     fi
-    if [[ -f $dir/flake.lock ]]; then
-      lock="$(lock_line "$dir/flake.lock")"
+    if [[ -f $CFG_ROOT/flake.lock ]]; then
+      lock="$(lock_line "$CFG_ROOT/flake.lock")"
       kv flake.lock "${c_ok}${s_ok}${c_r} ${lock:-there}"
     else
       kv flake.lock "${c_d}${s_ring} none yet: the first build pins its inputs${c_r}"
     fi
   fi
   if [[ -n $git_root ]]; then
-    state="$(git -C "$dir" status --porcelain -- . 2> /dev/null | wc -l || true)"
-    kv git "${c_ok}${s_ok}${c_r} in $(pretty "$git_root")$( ((state == 0)) || printf ' · %d changes not committed' "$state")"
+    state="$(git -C "$CFG_DIR" status --porcelain -- . 2> /dev/null | wc -l || true)"
+    kv git "${c_ok}${s_ok}${c_r} in $(pretty "$git_root")$( ((state == 0)) || printf ' · %d changes not committed here' "$state")"
   fi
   # The files it names: there, and (for a flake in git) seen by the flake, which sees only what git tracks.
   if [[ -n $CFG_FILE ]]; then
     mapfile -t files < <(named_files "$CFG_FILE")
     for rel in "${files[@]}"; do
-      f=$dir/$rel
+      f=$CFG_DIR/$rel
+      [[ $rel != ../* ]] || outside=1
       if [[ ! -e $f ]]; then
         shown+=("${c_err}${rel} ${s_no} missing${c_r}"); missing=$((missing + 1))
-      elif [[ -n $CFG_FLAKE && -n $git_root ]] && ! git -C "$dir" ls-files --error-unmatch -- "$rel" > /dev/null 2>&1; then
+      elif [[ -n $CFG_FLAKE && -n $git_root ]] && ! tracked "$f"; then
         shown+=("${c_warn}${rel} ${s_warn} not in git${c_r}"); untracked=$((untracked + 1))
       else
         shown+=("${rel} ${c_ok}${s_ok}${c_r}")
       fi
     done
     if ((${#shown[@]})); then kv "files" "${shown[*]}"; fi
-    if [[ -n $CFG_FLAKE && -n $git_root ]] && ! git -C "$dir" ls-files --error-unmatch -- configuration.nix > /dev/null 2>&1; then
+    if [[ -n $CFG_FLAKE && -n $git_root ]] && ! tracked "$CFG_FILE"; then
       untracked=$((untracked + 1))
-      kv "" "${c_warn}${s_warn} configuration.nix is not in git${c_r}"
+      kv "" "${c_warn}${s_warn} $(basename "$CFG_FILE") is not in git${c_r}"
     fi
   fi
   [[ -z $PHONE_SOURCE ]] || kv "the phone" "${c_d}builds${c_r} $PHONE_SOURCE"
   panel_end
+  CFG_OUTSIDE=$outside
   ((missing == 0)) || warn "A file the config names is missing: a build stops on it. Put it there, or take it out of the config."
-  ((untracked == 0)) || note "A flake in a git repository sees only the files git tracks: git add them first (and keep a repository with secrets in it private), or build its configuration.nix alone, which reads files where they are." 4
+  ((untracked == 0)) || note "A flake in a git repository sees only the files git tracks: git add them first (and keep a repository with secrets in it private)." 4
+  if [[ -n $CFG_FLAKE && -n $CFG_FILE && -z $CFG_NAME ]] && ((${#CFG_PHONES[@]})); then
+    note "(The file is changed alone, with Nixup's options: none of the flake's phones is made from it.)" 4
+  fi
 }
-# " (named after this phone)", when one of CFG_NAMES is the phone's device name, as nixup-rebuild picks it.
+# " (… is named after this phone)", when one of CFG_PHONES is the phone's device name, as nixup-rebuild picks it.
 named_after() {
   local name
   [[ -n $PHONE_NAME ]] || return 0
-  for name in "${CFG_NAMES[@]}"; do
+  for name in "${CFG_PHONES[@]}"; do
     if [[ $name == "$PHONE_NAME" ]]; then printf ' %s(%s is named after this phone)%s' "$c_d" "$name" "$c_r"; return 0; fi
   done
-}
-
-# pick_config_dir <question> <default>: a folder typed, in DIR.
-pick_config_dir() {
-  ask "$1" "$2" "$(pretty "$2")"
-  DIR="$(full_path "$ANSWER")"
-  [[ ! -f $DIR ]] || DIR="$(dirname "$DIR")"
 }
 
 # --- Changing a configuration.nix. Each answer changes its option where the file writes it, or adds the option
@@ -633,8 +809,24 @@ pick_config_dir() {
 # PLAN_NOTE a comment for a line nixup adds; PLAN_SAY the answer in words, for the review. PLAN_FILES: files written
 # next to the config (secrets, readable by you alone), each with its text in PLAN_FILE_FROM.
 plan_reset() { PLAN_OP=() PLAN_PATH=() PLAN_VALUE=() PLAN_NEW=() PLAN_NOTE=() PLAN_SAY=() PLAN_FILES=() PLAN_FILE_FROM=(); }
-plan_set() { PLAN_OP+=(set) PLAN_PATH+=("$1") PLAN_VALUE+=("$2") PLAN_NEW+=("") PLAN_NOTE+=("$3") PLAN_SAY+=("$4"); }
-plan_add() { PLAN_OP+=(add) PLAN_PATH+=("$1") PLAN_VALUE+=("$2") PLAN_NEW+=("$3") PLAN_NOTE+=("$4") PLAN_SAY+=("$5"); }
+plan_set() {
+  missing_option "$1" || return 0
+  PLAN_OP+=(set) PLAN_PATH+=("$1") PLAN_VALUE+=("$2") PLAN_NEW+=("") PLAN_NOTE+=("$3") PLAN_SAY+=("$4")
+}
+plan_add() {
+  missing_option "$1" || return 0
+  PLAN_OP+=(add) PLAN_PATH+=("$1") PLAN_VALUE+=("$2") PLAN_NEW+=("$3") PLAN_NOTE+=("$4") PLAN_SAY+=("$5")
+}
+# missing_option <path>: false (said) when the Nixup the config is built with has not got the option, which a line
+# for it would break the build on (its flake.lock pins an older one): it is left out.
+missing_option() {
+  local -a names
+  if [[ -n ${QIDX[$1]:-} ]] && ! has_option "$1"; then
+    read -ra names <<< "$1"
+    note "($(nix_attrpath "${names[@]}") is not in the Nixup this config is built with${CFG_NIXUP:+ ($CFG_NIXUP)}: left out.)"
+    return 1
+  fi
+}
 plan_file() {
   local from
   from="$(mktemp "$WORK/file.XXXXXX")"
@@ -646,7 +838,7 @@ plan_file_copy() { PLAN_FILES+=("$1") PLAN_FILE_FROM+=("$2"); }
 plan_reset
 
 declare -A PLACE=() SRC_COUNT=() SRC_IDS=() QIDX=() SIBLING=()
-VKIND=() VTEXT=() SOURCES=() SHAPE=other
+VKIND=() VTEXT=() SOURCES=() SHAPE=other FORM=short
 # places <file> <path>...: where the file writes each path (names split by spaces) and what it gives it, from
 # nixup.nix: PLACE["<i> <depth>"] (line and column), VKIND[i], VTEXT[i], SIBLING[i] (where the last binding of an
 # unwritten path's set starts); SHAPE; SOURCES, SRC_COUNT, SRC_IDS (its lists of android.packages).
@@ -667,10 +859,11 @@ places() {
     sed -n '/error:/,$p' "$WORK/places.err" | grep -v '^ *… while' | head -n 12 | indent
     return 1
   }
-  PLACE=() VKIND=() VTEXT=() SOURCES=() SRC_COUNT=() SRC_IDS=() SIBLING=() SHAPE=other
+  PLACE=() VKIND=() VTEXT=() SOURCES=() SRC_COUNT=() SRC_IDS=() SIBLING=() SHAPE=other FORM=short
   while IFS=$'\t' read -r kind a b c d; do
     case $kind in
       shape) SHAPE=$a ;;
+      form) FORM=$a ;;
       at) PLACE["$a $b"]="$c $d" ;;
       value) VKIND[a]=$b VTEXT[a]=${c:-} ;;
       source) SOURCES+=("$a") SRC_COUNT[$a]=$b SRC_IDS[$a]=${c:-} ;;
@@ -680,13 +873,15 @@ places() {
 }
 
 # check_config <file> <missing ok: yes|no> <path>...: the file parses, and each path evaluates with Nixup's options
-# (with the file's other definitions of it); with yes, a path the config has no value at is no error. Status 3: it does
-# not parse; 1: a path does not evaluate (Nix's error in $WORK/check.err either way, for check_error).
+# (with the config's other definitions of it); with yes, a path the config has no value at is no error. In a flake's
+# configuration (CFG_NAME) it is the flake's, with the file (CFG_REL) replaced by <file>, as a build of the changed
+# flake has it (none: the flake as it is); else the file alone. Status 3: it does not parse; 1: a path does not
+# evaluate (Nix's error in $WORK/check.err either way, for check_error).
 check_config() {
   local file=$1 missing=false p name json="[" pkgs=false
   [[ $2 != yes ]] || missing=true
   shift 2
-  nix-instantiate --parse "$file" > /dev/null 2> "$WORK/check.err" || return 3
+  if [[ -n $file ]]; then nix-instantiate --parse "$file" > /dev/null 2> "$WORK/check.err" || return 3; fi
   for p in "$@"; do
     json+="["
     for name in $p; do json+="$(nix_str "$name"),"; done
@@ -694,6 +889,13 @@ check_config() {
     [[ $p != "environment systemPackages" ]] || pkgs=true
   done
   printf '%s' "${json%,}]" > "$WORK/check.json"
+  if [[ -n $CFG_NAME ]]; then
+    NIXUP_HELPER="$here/nixup.nix" NIXUP_FILE="$file" NIXUP_PATHS="$WORK/check.json" NIXUP_REF="$CFG_REF" NIXUP_NAME="$CFG_NAME" \
+      NIXUP_REL="$CFG_REL" nixx eval --raw --impure --expr \
+      "import (builtins.getEnv \"NIXUP_HELPER\") { file = builtins.getEnv \"NIXUP_FILE\"; pathsFile = builtins.getEnv \"NIXUP_PATHS\"; check = true; flakeRef = builtins.getEnv \"NIXUP_REF\"; configName = builtins.getEnv \"NIXUP_NAME\"; relFile = builtins.getEnv \"NIXUP_REL\"; missingOk = $missing; }" \
+      > /dev/null 2> "$WORK/check.err"
+    return
+  fi
   # (nixpkgs as a folder, read without the store's daemon or writing to it, where it can be found so)
   find_nixpkgs
   local -a look=(nixx eval "${NIXPKGS[@]}")
@@ -871,6 +1073,7 @@ edit_file() {
   for k in "${!PLAN_OP[@]}"; do
     [[ -z ${later[$k]:-} ]] || continue
     read -ra PATHN <<< "${PLAN_PATH[k]}"
+    [[ $FORM != full ]] || PATHN=(config "${PATHN[@]}")
     n=${#PATHN[@]}
     if [[ -n ${PLACE["$k $n"]:-} ]]; then
       # Written: its value changes where it is.
@@ -1052,6 +1255,7 @@ apply_plan() {
     return 1
   fi
   : > "$WORK/dropped"
+  # shellcheck disable=SC2030 # (bytes, in the subshell only)
   (export LC_ALL=C; edit_file "$file" "$out") || { bad "nixup could not change the file."; return 1; }
   while IFS=$'\t' read -r k why; do DROPPED[$k]=$why; done < "$WORK/dropped"
 }
@@ -1079,8 +1283,12 @@ QPATHS=(
   "services ntfy enable" "services ntfy topics" "services caldav enable" "services syncthing enable"
   "android backup repository" "environment systemPackages" "nix gc automatic" "android playstore account"
   "android playstore tokenFile" "nix distributedBuilds" "nix settings substituters" "nixpkgs config allowUnfree"
+  "android autoUpgrade onlyOnUnmetered" "android autoUpgrade onlyWhileCharging" "android strict keep"
+  "services ntfy unifiedPush enable" "services caldav accounts main" "android backup passwordFile"
+  "android backup apps" "android backup defaults autoRestore"
 )
-# look_options <file>: places for the questions (the paths above, and each source's updates).
+# look_options <file>: the questions' options in the file (places: the paths above, and each source's updates), and
+# as the config gives them (look_effective).
 look_options() {
   local i s
   local -a all=()
@@ -1092,51 +1300,215 @@ look_options() {
   places "$1" "${all[@]}" || return 1
   QIDX=()
   for i in "${!all[@]}"; do QIDX[${all[i]}]=$i; done
+  literals "$1" "${all[@]}"
+  look_effective "$1" "${all[@]}"
 }
-# What the file gives path, in words: now_bool <path> <words for true> <words for false> <Nixup's default: true|false>.
+# literals <file> <path>...: whether the file writes each path's value as itself (true, 5555, "text", ./file, a list
+# or set as written), in LITERAL by index: no for one it works out (hostConfig.adb.port, lib.mkDefault true, "${x}"),
+# which Nix's look at it cannot tell apart once it is evaluated: the file's text tells.
+declare -A LITERAL=()
+literals() {
+  local i v out
+  LITERAL=()
+  # shellcheck disable=SC2030,SC2031 # (bytes, in the subshell only)
+  out="$(export LC_ALL=C; literal_lines "$@")"
+  while read -r i v; do [[ -z $i ]] || LITERAL[$i]=$v; done <<< "$out"
+}
+literal_lines() {
+  local file=$1 p i=0 n line col at
+  local -a names
+  shift
+  IFS= read -r -d '' ED < "$file" || true
+  mapfile -t LINE_AT < <(awk '{ print o; o += length($0) + 1 }' "$file")
+  for p in "$@"; do
+    read -ra names <<< "$p"
+    n=${#names[@]}
+    [[ $FORM != full ]] || n=$((n + 1))
+    if [[ -n ${PLACE["$i $n"]:-} ]]; then
+      read -r line col <<< "${PLACE["$i $n"]}"
+      at=$((LINE_AT[line - 1] + col - 1))
+      if ed_names "$at" && ed_value "$AT" && is_literal "${ED:V0:V1-V0}"; then echo "$i yes"; else echo "$i no"; fi
+    fi
+    i=$((i + 1))
+  done
+}
+re_literal='^(true|false|null|-?[0-9]+(\.[0-9]+)?|"([^"\\$]|\\.|\$[^{])*"|\.{1,2}/[A-Za-z0-9._+/-]+)$'
+is_literal() {
+  [[ $1 =~ $re_literal ]] && return 0
+  [[ $1 == \[*\] || $1 == \{*\} ]] && return 0
+  [[ $1 =~ ^with[[:space:]]+[A-Za-z_.]+[[:space:]]*\;[[:space:]]*\[.*\]$ ]] && return 0
+  return 1
+}
+
+# look_effective <file> <path>...: each path as the config gives it, through its modules: its flake's configuration
+# (CFG_NAME: the flake as it is, with the file's other modules, inputs and arguments), or the file alone with its
+# imports. LOOKED is 1 when the config could be evaluated so; then, by path: HAS (yes, or no: not in the Nixup it is
+# built with), EKIND and ETEXT (its value, as VKIND and VTEXT), EFROM (the files that set it, split by the unit
+# separator) and EPRIO (their priority). SELF: the file, as EFROM names it.
+LOOKED=0 SELF=""
+HAS=() EKIND=() ETEXT=() EFROM=() EPRIO=()
+look_effective() {
+  local file=$1 p name json="[" out kind a b c
+  shift
+  LOOKED=0 HAS=() EKIND=() ETEXT=() EFROM=() EPRIO=()
+  command -v nix > /dev/null || return 0
+  for p in "$@"; do
+    json+="["
+    for name in $p; do json+="$(nix_str "$name"),"; done
+    json="${json%,}],"
+  done
+  printf '%s' "${json%,}]" > "$WORK/look.json"
+  say "  ${c_d}Reading what the config gives them, through its modules…${c_r}"
+  if [[ -n $CFG_NAME ]]; then
+    SELF=$CFG_REL
+    out="$(NIXUP_HELPER="$here/nixup.nix" NIXUP_REF="$CFG_REF" NIXUP_NAME="$CFG_NAME" NIXUP_PATHS="$WORK/look.json" nixx eval --raw --impure --expr \
+      'import (builtins.getEnv "NIXUP_HELPER") { look = true; flakeRef = builtins.getEnv "NIXUP_REF"; configName = builtins.getEnv "NIXUP_NAME"; pathsFile = builtins.getEnv "NIXUP_PATHS"; }' \
+      2> "$WORK/look.err" || true)"
+  else
+    SELF=$file
+    local -a lookup=(nixx eval "${NIXPKGS[@]}")
+    if nixpkgs_path; then lookup=(nix_lookup -I nixpkgs="$NIXPKGS_PATH"); fi
+    out="$(NIXUP_HELPER="$here/nixup.nix" NIXUP_FILE="$file" NIXUP_DIR="$nixup_dir" NIXUP_PATHS="$WORK/look.json" "${lookup[@]}" --raw --impure --expr \
+      'import (builtins.getEnv "NIXUP_HELPER") { look = true; file = builtins.getEnv "NIXUP_FILE"; nixupDir = builtins.getEnv "NIXUP_DIR"; pathsFile = builtins.getEnv "NIXUP_PATHS"; }' \
+      2> "$WORK/look.err" || true)"
+  fi
+  while IFS=$'\t' read -r kind a b c; do
+    case $kind in
+      looked) LOOKED=1 ;;
+      nixup) CFG_NIXUP=$a ;;
+      has) HAS[a]=$b ;;
+      eff) EKIND[a]=$b ETEXT[a]=${c:-} ;;
+      from) EFROM[a]+="${b}"$'\037' ;;
+      prio) EPRIO[a]=$b ;;
+    esac
+  done <<< "$out"
+  if ((LOOKED == 0)); then
+    note "(The config could not be evaluated here$(err_line "$WORK/look.err"): what it has now is read from the file alone, and what other files set is not seen.)" 4
+  fi
+}
+
+# where_set <path>: where the config sets path: " (line N)" here, " (set in <files>)", " (Nixup's default)".
+where_set() {
+  local i=${QIDX[$1]} f others="" n=0 mine=0 nixup_only=1
+  if ((LOOKED == 0)); then at_line "$1"; return 0; fi
+  if [[ -z ${EFROM[i]:-} ]]; then printf " (Nixup's default)"; return 0; fi
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    if [[ $f == "$SELF" ]]; then mine=1; continue; fi
+    [[ $f == nixup:* ]] || nixup_only=0
+    n=$((n + 1))
+    ((n > 2)) || others+=", $(file_name "$f")"
+  done < <(printf '%s' "${EFROM[i]}" | tr '\037' '\n')
+  others=${others#, }
+  ((n <= 2)) || others+=" and $((n - 2)) more"
+  if [[ -z $others && ${LITERAL[$i]:-yes} == no ]]; then printf ' (worked out at line %s)' "$(at_line "$1" | tr -dc '0-9')"
+  elif [[ -z $others ]]; then at_line "$1"
+  elif ((${EPRIO[i]:-100} > 100)) && ((nixup_only)); then printf " (Nixup's default)"
+  elif ((${EPRIO[i]:-100} > 100)); then printf ' (a default, from %s)' "$others"
+  elif ((mine)); then printf ' (set here%s and in %s)' "$(at_line "$1" | sed 's/^ (/, /; s/)$//')" "$others"
+  else printf ' (set in %s)' "$others"
+  fi
+}
+# A file as EFROM names it, in words: Nixup's own, a flake's input's, the flake's, or a whole path.
+file_name() {
+  case $1 in
+    nixup:*) printf "Nixup's %s" "${1#nixup:}" ;;
+    /*) pretty "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+# other_files <path>: the files that set path besides this one, in words (none: nothing).
+other_files() {
+  local i=${QIDX[$1]} f out=""
+  ((LOOKED)) || return 0
+  while IFS= read -r f; do
+    [[ -n $f && $f != "$SELF" ]] || continue
+    out+=", $(file_name "$f")"
+  done < <(printf '%s' "${EFROM[i]:-}" | tr '\037' '\n')
+  printf '%s' "${out#, }"
+}
+# value_of <path>: the kind and text of path's value (KIND, TEXT): the config's when it was evaluated, else the file's.
+value_of() {
+  local i=${QIDX[$1]}
+  if ((LOOKED)) && [[ ${HAS[i]:-} == yes ]]; then KIND=${EKIND[i]:-unset} TEXT=${ETEXT[i]:-}
+  else KIND=${VKIND[i]} TEXT=${VTEXT[i]}; fi
+}
+# What the config gives path, in words: now_bool <path> <words for true> <words for false> <Nixup's default: true|false>.
 now_bool() {
-  local i=${QIDX[$1]} words
-  case ${VKIND[i]} in
-    bool) if [[ ${VTEXT[i]} == true ]]; then words=$2; else words=$3; fi; printf '%s%s' "$words" "$(at_line "$1")" ;;
+  local words
+  if ! has_option "$1"; then printf "not in the Nixup this config is built with%s" "${CFG_NIXUP:+ ($CFG_NIXUP)}"; return 0; fi
+  value_of "$1"
+  case $KIND in
+    bool) if [[ $TEXT == true ]]; then words=$2; else words=$3; fi; printf '%s%s' "$words" "$(where_set "$1")" ;;
     unset) if [[ $4 == true ]]; then words=$2; else words=$3; fi; printf "%s (Nixup's default)" "$words" ;;
-    *) printf 'written as an expression%s' "$(at_line "$1")" ;;
+    *) printf 'written as an expression%s' "$(where_set "$1")" ;;
   esac
 }
 now_value() {
-  local i=${QIDX[$1]}
-  case ${VKIND[i]} in
+  if ! has_option "$1"; then printf "not in the Nixup this config is built with%s" "${CFG_NIXUP:+ ($CFG_NIXUP)}"; return 0; fi
+  value_of "$1"
+  case $KIND in
     unset) printf '%s' "$2" ;;
-    null) printf 'none%s' "$(at_line "$1")" ;;
-    bool | int | string | path) printf '%s%s' "${VTEXT[i]}" "$(at_line "$1")" ;;
-    list) printf '%s item(s)%s' "$(list_count "${VTEXT[i]}")" "$(at_line "$1")" ;;
-    items) printf '%s item(s)%s' "${VTEXT[i]}" "$(at_line "$1")" ;;
-    *) printf 'written as an expression%s' "$(at_line "$1")" ;;
+    null) printf 'none%s' "$(where_set "$1")" ;;
+    bool | int | string | path) printf '%s%s' "$TEXT" "$(where_set "$1")" ;;
+    list) printf '%s item(s)%s' "$(list_count "$TEXT")" "$(where_set "$1")" ;;
+    items) printf '%s item(s)%s' "$TEXT" "$(where_set "$1")" ;;
+    *) printf 'written as an expression%s' "$(where_set "$1")" ;;
   esac
 }
+# at_line <path>: " (line N)", when the file writes path.
 at_line() {
   local -a p
   read -ra p <<< "$1"
-  local place=${PLACE["${QIDX[$1]} ${#p[@]}"]:-}
+  local depth=${#p[@]}
+  [[ $FORM != full ]] || depth=$((depth + 1))
+  local place=${PLACE["${QIDX[$1]} $depth"]:-}
   [[ -z $place ]] || printf ' (line %s)' "${place%% *}"
 }
 list_count() { if [[ -z $1 ]]; then echo 0; else printf '%s' "$1" | tr '\037' '\n' | wc -l | tr -d ' '; fi; }
-# An option the file writes as an expression (lib.mkForce …, a variable) stays as it is: nixup does not change it.
-writable() {
-  if [[ ${VKIND[${QIDX[$1]}]} == other ]]; then
-    note "It is written as an expression$(at_line "$1"), which nixup leaves as it is: change it there by hand."
+# has_option <path>: the Nixup the config is built with has the option (as far as is known).
+has_option() {
+  local i=${QIDX[$1]:-}
+  [[ -n $i ]] || return 0
+  ((LOOKED == 0)) || [[ ${HAS[i]:-yes} == yes ]]
+}
+# editable <path> <set|add>: nixup may change path in this file, or says why not (under the question): the Nixup the
+# config is built with has not got the option; the file writes it as an expression (a variable, lib.mkForce …); or
+# another file sets it, which a value here would conflict with (set), or whose default list a list here would replace
+# (add). A list another file sets as a plain one takes items from here too: they are joined.
+editable() {
+  local i=${QIDX[$1]} others
+  if ! has_option "$1"; then
+    note "Not in the Nixup this config is built with${CFG_NIXUP:+ ($CFG_NIXUP, as its flake.lock pins it)}: update that first (nix flake update nixup, in its flake) to have it."
     return 1
   fi
+  if [[ ${VKIND[i]} == other || ${LITERAL[$i]:-yes} == no ]]; then
+    note "The file works it out$(at_line "$1" | sed 's/ (line \(.*\))/ at line \1/'), from a variable, a function or another option: nixup leaves it as it is (change it there by hand)."
+    return 1
+  fi
+  others="$(other_files "$1")"
+  if [[ -n $others && $2 == set ]] && ((${EPRIO[i]:-100} <= 100)); then
+    note "It is set in $others: change it there (a value here would conflict with it)."
+    return 1
+  fi
+  if [[ -n $others && $2 == add ]] && ((${EPRIO[i]:-100} > 100)); then
+    note "Its list is a default from $others, which a list here would replace: add to it there."
+    return 1
+  fi
+  return 0
 }
-# A list (VTEXT's) has an item whose first two words are $2's (a key, whatever its comment).
+# list_has <path> <item>: the config's list (else the file's) has an item whose first two words are the item's (a key,
+# whatever its comment).
 list_has() {
-  local i=${QIDX[$1]} item
+  local item
   local -a want got
   read -ra want <<< "$2"
-  [[ ${VKIND[i]} == list && -n ${VTEXT[i]} ]] || return 1
+  value_of "$1"
+  [[ $KIND == list && -n $TEXT ]] || return 1
   while IFS= read -r item; do
     read -ra got <<< "$item"
     [[ ${got[0]:-} != "${want[0]}" || ${got[1]:-} != "${want[1]:-}" ]] || return 0
-  done < <(printf '%s\n' "${VTEXT[i]}" | tr '\037' '\n')
+  done < <(printf '%s\n' "$TEXT" | tr '\037' '\n')
   return 1
 }
 source_name() {
@@ -1330,16 +1702,18 @@ play_sign_in() {
 }
 # What the config has for Google Play's account, in words (never the token itself).
 now_token() {
-  local i=${QIDX["android playstore tokenFile"]} a=${QIDX["android playstore account"]} words
-  case ${VKIND[i]} in
-    path) words="a token from $(pretty "${VTEXT[i]}")$(at_line "android playstore tokenFile")" ;;
+  local words account
+  value_of "android playstore tokenFile"
+  case $KIND in
+    path) words="a token from $(pretty "$TEXT")$(where_set "android playstore tokenFile")" ;;
     string)
-      if [[ ${VTEXT[i]} == aas_et/* ]]; then words="a token, given as text$(at_line "android playstore tokenFile")"
-      else words="a token from ${VTEXT[i]} on the phone$(at_line "android playstore tokenFile")"; fi ;;
+      if [[ $TEXT == aas_et/* ]]; then words="a token, given as text$(where_set "android playstore tokenFile")"
+      else words="a token from $TEXT on the phone$(where_set "android playstore tokenFile")"; fi ;;
     unset | null) words="no token: the phone signs in itself (Nixup app: ⋮ → Google Play account)" ;;
-    *) words="written as an expression$(at_line "android playstore tokenFile")" ;;
+    *) words="written as an expression$(where_set "android playstore tokenFile")" ;;
   esac
-  [[ ${VKIND[a]} != string ]] || words+="; account ${VTEXT[a]}"
+  value_of "android playstore account"
+  [[ $KIND != string ]] || words+="; account $TEXT"
   printf '%s' "$words"
 }
 
@@ -1423,7 +1797,7 @@ questions() {
     eds
     [[ $KEY != e ]] || PLAY_LIST=1
   fi
-  if writable "android playstore tokenFile"; then
+  if editable "android playstore tokenFile" set; then
     question "Sign in to Google Play here, for the account's token?" \
       "Then the phone needs no sign-in: the token is kept next to the config (./google-play.token, readable by you alone) and each build puts it on the phone. A window with Google's own sign-in page opens (or your browser, with the steps to follow). Better an account of its own: Google may block one that downloads with an unofficial client." \
       "$(now_token)"
@@ -1448,10 +1822,11 @@ questions() {
     for s in "${srcs[@]}"; do
       t="android settings repo $s autoupdatePackages"
       case $all in
+        e | d) editable "$t" set || continue ;;&
         e) plan_set "$t" true "$(source_name "$s")'s apps update by themselves" "$(source_name "$s"): updates installed by themselves" ;;
         d) plan_set "$t" false "$(source_name "$s")'s updates are only told about" "$(source_name "$s"): updates only told about" ;;
         p)
-          writable "$t" || continue
+          editable "$t" set || continue
           n=${SRC_COUNT[$s]:-0}
           [[ $s != playstore ]] || ((PLAY_LIST == 0)) || n=${#play[@]}
           printf -v words '%-24s' "$(source_name "$s") (${n/\?/some} apps)"
@@ -1471,7 +1846,7 @@ questions() {
   question "Look for updates on mobile data too?" \
     "Off: only on Wi-Fi, and a check that falls on mobile data waits for Wi-Fi. On: on mobile data too, and right away whenever the phone comes online." \
     "$(now_bool "android updates onlyOnUnmetered" "Wi-Fi only" "mobile data too" true)"
-  if writable "android updates onlyOnUnmetered"; then
+  if editable "android updates onlyOnUnmetered" set; then
     eds
     case $KEY in
       e) plan_set "android updates onlyOnUnmetered" false "the update check runs on mobile data too" "Updates are looked for on mobile data too" ;;
@@ -1482,7 +1857,7 @@ questions() {
   question "Build the whole config again by itself, every day?" \
     "As NixOS's system.autoUpgrade: at a time of day the phone builds its config again with everything at its newest (the app's Upgrade), and applies it." \
     "$(now_bool "system autoUpgrade enable" on off false)"
-  if writable "system autoUpgrade enable"; then
+  if editable "system autoUpgrade enable" set; then
     eds
     case $KEY in
       e)
@@ -1502,7 +1877,7 @@ questions() {
   question "Remove the apps the config does not list?" \
     "Strict mode: each build hides every app installed by hand that no list of the config has. It stays on the phone with its data, and comes back as it was when strict is off again. Nixup, the root app, the keyboard and the launcher in use always stay." \
     "$(now_bool "android strict enable" on off false)"
-  if writable "android strict enable"; then
+  if editable "android strict enable" set; then
     eds
     case $KEY in
       e)
@@ -1520,7 +1895,7 @@ questions() {
   question "adb over the network, from each start of the phone?" \
     "With a port (5555 is adb's own), adb connect <phone>:5555 works over Wi-Fi or Tailscale, with no cable and no pairing. Only computers the phone lets in can use it: the trusted ones, or one you allow on its screen." \
     "$(now_value "android adb port" "off (Nixup's default)")"
-  if writable "android adb port"; then
+  if editable "android adb port" set; then
     eds
     case $KEY in
       e)
@@ -1538,7 +1913,7 @@ questions() {
     if list_has "android adb trustedKeys" "$key"; then
       say ""
       ok "This computer's adb key is trusted already (android.adb.trustedKeys)."
-    elif writable "android adb trustedKeys"; then
+    elif editable "android adb trustedKeys" add; then
       question "Let this computer in without asking?" \
         "Adds this computer's adb key (~/.android/adbkey.pub) to android.adb.trustedKeys: the phone lets it in without asking \"Allow USB debugging?\", also after Android forgets it (unused for 7 days) or its adb keys are reset."
       key as s "${c_acc}a${c_r} add it  ${c_acc}s${c_r} skip ${c_d}(Enter)${c_r}"
@@ -1554,7 +1929,7 @@ questions() {
   question "An SSH server on the phone?" \
     "ssh root@<phone> gets root's shell, with the config's Nix packages, as the app's terminal has it; it lets in keys only. Through Tailscale it reaches the phone from anywhere." \
     "$(now_bool "services openssh enable" on off false)"
-  if writable "services openssh enable"; then
+  if editable "services openssh enable" set; then
     eds
     case $KEY in
       e)
@@ -1571,7 +1946,7 @@ questions() {
         else
           note "(No SSH key here, in ~/.ssh: users.users.root.openssh.authorizedKeys.keys takes your public keys.)"
         fi
-        if writable "services openssh listenAddresses"; then
+        if editable "services openssh listenAddresses" set; then
           say "    ${c_b}Who reaches it?${c_r}"
           key ta t "${c_acc}t${c_r} only the tailnet, through Tailscale (127.0.0.1) ${c_d}(Enter)${c_r}  ${c_acc}a${c_r} any network, Wi-Fi too"
           if [[ $KEY == t ]]; then
@@ -1589,12 +1964,12 @@ questions() {
   question "Tailscale, run by Nixup?" \
     "Joins the phone to your tailnet, run by root next to the Tailscale app (no VPN slot taken): the phone, its adb and its SSH server can then be reached from your other devices, anywhere." \
     "$(now_bool "services tailscale enable" on off false)"
-  if writable "services tailscale enable"; then
+  if editable "services tailscale enable" set; then
     eds
     case $KEY in
       e)
         plan_set "services tailscale enable" true "Tailscale, run by root" "Tailscale on"
-        if writable "services tailscale authKeyFile"; then
+        if editable "services tailscale authKeyFile" set; then
           secret "Auth key (tskey-…), so it logs in by itself; Enter: none (it logs in with a link, which its log shows)"
           if [[ $ANSWER == tskey-* ]]; then
             plan_file tailscale.key "$ANSWER"
@@ -1611,7 +1986,7 @@ questions() {
   question "Notifications from ntfy topics, with no ntfy app?" \
     "The phone listens to topics and shows each message as a notification: send one from anywhere with curl -d \"Backup done\" ntfy.sh/<topic>. Anyone who knows a topic's name on ntfy.sh can read it: pick one nobody guesses." \
     "$(now_bool "services ntfy enable" on off false)"
-  if writable "services ntfy enable"; then
+  if editable "services ntfy enable" set; then
     eds
     case $KEY in
       e)
@@ -1631,7 +2006,7 @@ questions() {
   question "Calendars and contacts from a CalDAV/CardDAV server?" \
     "Nixup's app syncs them into Android's Calendar and Contacts itself (DAVx⁵'s sync, no DAVx⁵ app): Nextcloud, Radicale, Baïkal, Fastmail, …" \
     "$(now_bool "services caldav enable" on off false)"
-  if writable "services caldav enable"; then
+  if editable "services caldav enable" set; then
     eds
     case $KEY in
       e)
@@ -1658,7 +2033,7 @@ questions() {
   question "Syncthing?" \
     "Syncthing, run by root, set up from the config: its devices and folders are services.syncthing.settings, which the template has an example of." \
     "$(now_bool "services syncthing enable" on off false)"
-  if writable "services syncthing enable"; then
+  if editable "services syncthing enable" set; then
     eds
     case $KEY in
       e) plan_set "services syncthing enable" true "Syncthing, run by root (settings: its devices and folders)" "Syncthing on" ;;
@@ -1670,7 +2045,7 @@ questions() {
   question "Back up the phone's apps?" \
     "Each listed app is backed up after it was used; a build that installs one brings its data back. The repository can be on an SD card, or a server (sftp:, rest:, s3:, …)." \
     "$(now_value "android backup repository" "off (Nixup's default)")"
-  if writable "android backup repository"; then
+  if editable "android backup repository" set; then
     eds
     case $KEY in
       e)
@@ -1710,7 +2085,7 @@ questions() {
   question "Nix packages for the terminal?" \
     "Programs from nixpkgs for root's shell, by their names in nixpkgs (search.nixos.org): htop git vim rsync python3 ffmpeg … Each is looked up before it goes in, as the phone gets it: built for 64-bit ARM, and in cache.nixos.org, since the phone builds no package itself." \
     "$(now_value "environment systemPackages" "none")"
-  if writable "environment systemPackages"; then
+  if editable "environment systemPackages" add; then
     passed=""
     while :; do
       if [[ -n $passed ]]; then ask "Packages to add, split by spaces (Enter: the ones that passed)" "$passed"
@@ -1737,7 +2112,7 @@ questions() {
   question "Free up space by itself?" \
     "Every night (at 03:15) Nix removes the packages that no build of the phone uses any more, as NixOS's nix.gc." \
     "$(now_bool "nix gc automatic" on off false)"
-  if writable "nix gc automatic"; then
+  if editable "nix gc automatic" set; then
     eds
     case $KEY in
       e) plan_set "nix gc automatic" true "removes what nothing uses, at 03:15" "Space is freed up every night" ;;
@@ -1745,7 +2120,7 @@ questions() {
     esac
   fi
 
-  if [[ $mode == create ]]; then
+  if [[ $mode == create && ! -f $CFG_DIR/flake.nix ]]; then
     page "The config itself" "configuration.nix is the config either way; a flake.nix next to it pins what it is built with."
     question "A flake.nix too?" \
       "As /etc/nixos/flake.nix for NixOS: Nixup's version is pinned in flake.lock (a build with Upgrade moves it on), and other flakes can be its inputs. Without it, the phone builds configuration.nix with the newest Nixup and nixpkgs."
@@ -1775,46 +2150,53 @@ review() {
   panel_end
   if ! cmp -s "$1" "$2"; then
     say ""
-    say "  ${c_b}The change to configuration.nix${c_r}"
+    say "  ${c_b}The change to $(basename "${CFG_FILE:-configuration.nix}")${c_r}"
     show_diff "$1" "$2"
   fi
 }
 
-# write_config <after> <dir> [phone name]: the config into the folder (the one there kept as configuration.nix.old),
-# the secret files next to it, and flake.nix when one was asked for.
+# write_config <after> <file> [phone name]: the config into its file (the one there kept as <file>.old), the secret
+# files next to it, and flake.nix when one was asked for (create).
 write_config() {
-  local after=$1 dir=$2 name=${3:-} k f git_root
+  local after=$1 file=$2 name=${3:-} dir k f git_root
+  local -a secrets=()
+  dir="$(dirname "$file")"
   mkdir -p "$dir"
-  if [[ -f $dir/configuration.nix ]] && ! cmp -s "$after" "$dir/configuration.nix"; then
-    cp -p "$dir/configuration.nix" "$dir/configuration.nix.old"
-    ok "The old one: $(pretty "$dir/configuration.nix.old")"
+  if [[ -f $file ]] && ! cmp -s "$after" "$file"; then
+    cp -p "$file" "$file.old"
+    ok "The old one: $(pretty "$file.old")"
   fi
-  cat "$after" > "$dir/configuration.nix"
-  ok "Wrote $(pretty "$dir/configuration.nix")"
+  cat "$after" > "$file"
+  ok "Wrote $(pretty "$file")"
   for k in "${!PLAN_FILES[@]}"; do
     f=$dir/${PLAN_FILES[k]}
     (umask 077; cp "${PLAN_FILE_FROM[k]}" "$f"; chmod 600 "$f")
     ok "Wrote $(pretty "$f") (secret: readable by you alone)"
+    secrets+=("${PLAN_FILES[k]}")
   done
-  if ((${#PLAN_FILES[@]})); then
+  if ((${#secrets[@]})); then
     git_root="$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null || true)"
-    [[ -z $git_root ]] || warn "The folder is in git: keep the secret files out of a repository others can read."
+    if [[ -n $git_root && -n $CFG_FLAKE ]]; then
+      warn "A flake in git sees only the files git tracks: git add ${secrets[*]} for its builds to find them, and keep that repository private."
+    elif [[ -n $git_root ]]; then
+      warn "The folder is in git: keep ${secrets[*]} out of a repository others can read."
+    fi
   fi
   if ((MAKE_FLAKE)) && [[ ! -f $dir/flake.nix ]]; then
-    flake_text "${name:-phone}" > "$dir/flake.nix"
+    flake_text "${name:-phone}" "$(basename "$file")" > "$dir/flake.nix"
     ok "Wrote $(pretty "$dir/flake.nix") (its configuration: \"${name:-phone}\")"
   fi
-  remember_dir "$dir"
+  remember_config "$file"
 }
-# A flake.nix for the phone named $1, as Nixup's template has it.
+# A flake.nix for the phone named $1, made from its file $2, as Nixup's template has it.
 flake_text() {
-  local attr
+  local attr module=${2:-configuration.nix}
   attr="$(nix_attrpath "$1")"
   cat << EOF
 # This phone's config as a flake, as /etc/nixos/flake.nix is for NixOS: Nixup's options come
 # from github:by-architect/Nixup, at the version flake.lock pins (a build with update moves
 # it to the newest). With this flake.nix picked in the app's Config, a build reads it;
-# configuration.nix is the config either way.
+# $module is the config either way.
 {
   description = $(nix_str "$1, configured by Nixup");
 
@@ -1823,18 +2205,18 @@ flake_text() {
   outputs = { nixup, ... }: {
     # Named after the phone (its device name): with more phones here, each builds its own.
     nixupConfigurations.$attr = nixup.lib.nixupSystem {
-      modules = [ ./configuration.nix ];
+      modules = [ ./$module ];
     };
   };
 }
 EOF
 }
 
-# answer_and_write <create|edit> <stage> <dir> <before> <step> <steps>: the questions (step <step> of the flow's
-# <steps>), then the change made, checked and shown (the next step), and written when you say so. The stage is the file
-# being changed, next to the config (so relative paths in it hold).
+# answer_and_write <create|edit> <stage> <target> <before> <step> <steps>: the questions (step <step> of the flow's
+# <steps>), then the change made, checked and shown (the next step), and written into <target> when you say so. The
+# stage is the file being changed, next to the target (so relative paths in it hold); <before> is the file as it was.
 answer_and_write() {
-  local mode=$1 stage=$2 dir=$3 before=$4 status k
+  local mode=$1 stage=$2 target=$3 before=$4 status k was
   local -a paths=()
   while :; do
     paths=()
@@ -1849,14 +2231,19 @@ answer_and_write() {
     apply_plan "$stage" "$WORK/after.nix" || return 1
     cp "$WORK/start.nix" "$stage"
     cp "$WORK/after.nix" "$stage.check"
-    litter "$stage.check"
     for k in "${!PLAN_OP[@]}"; do [[ -n ${DROPPED[$k]:-} ]] || paths+=("${PLAN_PATH[k]}"); done
     status=0
     if ((${#paths[@]})); then check_config "$stage.check" no "${paths[@]}" || status=$?; fi
     if ((status == 1)); then
-      # The file before the change too? Then it is the config, not the change: it cannot be evaluated alone here.
+      # The config before the change too? Then it is the config, not the change: it cannot be evaluated here. (A
+      # flake's configuration as it is; and two modules of the same file, the flake's and the changed copy's imports,
+      # are the swap's own doing, not the change's.)
       cp "$WORK/check.err" "$WORK/check.change.err"
-      if check_config "$before" yes "${paths[@]}"; then status=3; else status=2; fi
+      was=$before
+      [[ -z $CFG_NAME ]] || was=""
+      if grep -q 'is already declared in' "$WORK/check.err"; then status=2
+      elif check_config "$was" yes "${paths[@]}"; then status=3
+      else status=2; fi
       cp "$WORK/check.change.err" "$WORK/check.err"
     fi
     if ((status == 3)); then
@@ -1874,26 +2261,30 @@ answer_and_write() {
       ok "Nothing changes: the config stays as it is."
       return 0
     fi
-    if ((status == 2)); then
-      warn "This config cannot be evaluated alone here (it may need its flake's arguments): only its syntax was checked. A dry run checks the rest."
+    if ((status == 2)) && [[ -n $CFG_NAME ]]; then
+      warn "The config could not be evaluated here$(err_line "$WORK/check.err"): only the change's syntax was checked. A dry run checks the rest."
+    elif ((status == 2)); then
+      warn "This file cannot be evaluated alone here (it may need its flake's arguments)$(err_line "$WORK/check.err"): only its syntax was checked. A dry run checks the rest."
+    elif ((${#paths[@]})) && [[ -n $CFG_NAME ]]; then
+      ok "It evaluates in the flake's $CFG_NAME, with Nixup's options (and the flake's other modules)."
     elif ((${#paths[@]})); then
       ok "It evaluates with Nixup's options."
     fi
     say ""
-    menu "Write it?" "write|Write it|into $(pretty "$dir")" "again|Answer again|the questions from the start" "cancel|Cancel|nothing is written"
+    menu "Write it?" "write|Write it|into $(pretty "$target")" "again|Answer again|the questions from the start" "cancel|Cancel|nothing is written"
     case $PICKED in
       write) break ;;
       again) continue ;;
       *) return 1 ;;
     esac
   done
-  write_config "$WORK/after.nix" "$dir" "${PHONE_NAME:-$PHONE_MODEL}"
+  write_config "$WORK/after.nix" "$target" "${PHONE_NAME:-$PHONE_MODEL}"
 }
 
 # --- The menu's steps. Each runs on its own (an error, or q, ends it and the menu comes back).
 
 flow_create() {
-  local dir default over=0 stage made_dir=0 out
+  local target file dir default
   FLOW="Make a config from a phone"
   need nix "nix (https://nixos.org/download), which makes the config"
   step 1 5 "The phone"
@@ -1901,27 +2292,41 @@ flow_create() {
   ensure_phone || return 1
 
   step 2 5 "Where the config goes"
-  default=${CONFIG_DIR:-$PWD}
+  note "A folder (the config is its configuration.nix), or the file itself, named as you like (like ~/Matrix/hosts/pixel/default.nix)." 4
+  default=${CONFIG_PATH:-$PWD}
+  [[ ! -f $default ]] || default="$(dirname "$default")"
   if [[ -f $default/configuration.nix ]]; then
     default=$PWD/$(printf '%s' "${PHONE_NAME:-${PHONE_MODEL:-phone}}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9._-')
   fi
   while :; do
-    pick_config_dir "The folder for the config" "$default"
-    dir=$DIR
-    if [[ -f $dir/configuration.nix ]]; then
-      warn "$(pretty "$dir") has a configuration.nix already."
+    ask "The folder for the config, or its file" "$default" "$(pretty "$default")"
+    target="$(full_path "$ANSWER")"
+    if [[ $target == *.nix && ! -d $target ]]; then file=$target; else file=$target/configuration.nix; fi
+    if [[ $(basename "$file") == flake.nix ]]; then
+      warn "flake.nix is a flake's own file: the config goes in a file of its own, which the flake's modules name."
+      continue
+    fi
+    if [[ -f $file ]]; then
+      warn "$(pretty "$file") is there already."
       menu "" "edit|Change that one instead|it keeps all it says: nixup only asks its questions" \
-        "over|Make a new one over it|from the phone; the old one is kept as configuration.nix.old" "other|Pick another folder|"
+        "over|Make a new one over it|from the phone; the old one is kept as $(basename "$file").old" "other|Pick another place|"
       case $PICKED in
-        edit) CONFIG_DIR=$dir; save_state; flow_edit_dir "$dir"; return ;;
-        over) over=1; break ;;
+        edit)
+          resolve_config "$file" || die "nixup cannot read $(pretty "$file") as a config"
+          CONFIG_PATH=$file
+          save_state
+          remember_config "$file"
+          flow_edit_config
+          return ;;
+        over) break ;;
         other) continue ;;
         *) return 1 ;;
       esac
     fi
     break
   done
-  ok "$(pretty "$dir")"
+  dir="$(dirname "$file")"
+  ok "$(pretty "$file")"
 
   step 3 5 "Reading the phone"
   note "nixup-config reads its settings, its apps and where each came from (F-Droid, IzzyOnDroid, Google Play, …), and writes a config that keeps the phone as it is: building it changes nothing on the phone." 4
@@ -1932,29 +2337,27 @@ flow_create() {
   fi
   made_summary "$WORK/made.nix"
 
-  [[ -d $dir ]] || made_dir=1
-  mkdir -p "$dir"
-  stage=$dir/.configuration.nix.nixup
-  litter "$stage"
-  cp "$WORK/made.nix" "$stage"
-  CONFIG_DIR=$dir
+  # A new file is no flake's configuration yet (its flake's modules name it once you add it there): it is the file alone.
+  CFG_FILE=$file CFG_DIR=$dir CFG_FLAKE="" CFG_ROOT="" CFG_REF="" CFG_CLI="" CFG_REL="" CFG_NIXUP="" CFG_NAME=""
+  CFG_PHONES=() CFG_MACHINES=()
+  stage_for "$file"
+  cp "$WORK/made.nix" "$STAGE"
+  CONFIG_PATH=$file
   save_state
 
-  if ! answer_and_write create "$stage" "$dir" "$WORK/made.nix" 4 5; then
-    rm -f "$stage"
-    if ((made_dir)); then rmdir "$dir" 2> /dev/null || true; fi
+  if ! answer_and_write create "$STAGE" "$file" "$WORK/made.nix" 4 5; then
     say ""
     warn "Nothing was written."
     return 1
   fi
-  rm -f "$stage"
-  look_config "$dir"
+  resolve_config "$file" || true
+  look_config
   say ""
   note "Build it on the phone to make the phone follow it: with a dry run first, nothing changes, and it shows what a build would change (it should be nothing, but your answers)." 2
   menu "Build it now?" "dry|Dry run on the phone|what a build would change; nothing changes" "build|Build it|choose how, then the phone follows the config" "no|Not now|"
   case $PICKED in
-    dry) require_module && BUILD_PRESET=dry flow_build_dir "$dir" 1 ;;
-    build) require_module && flow_build_dir "$dir" 1 ;;
+    dry) require_module && BUILD_PRESET=dry flow_build_config 1 ;;
+    build) require_module && flow_build_config 1 ;;
   esac
 }
 
@@ -2004,30 +2407,22 @@ flow_edit() {
   FLOW="Change a config"
   need nix "nix (https://nixos.org/download), which reads and checks the config"
   step 1 3 "Which config"
-  pick_config_dir "The config's folder" "${CONFIG_DIR:-$PWD}"
-  flow_edit_dir "$DIR"
+  note "Its file (configuration.nix, a host's default.nix, any), or a folder with one. When the file is part of a flake, the flake is read too: what its other modules set, and the Nixup its flake.lock pins." 4
+  pick_config "The config (a file, or its folder)" "${CONFIG_PATH:-$PWD}"
+  flow_edit_config
 }
-flow_edit_dir() {
-  local dir=$1 stage
+# flow_edit_config: the config (resolve_config's) changed by answering the questions.
+flow_edit_config() {
   FLOW="Change a config"
-  [[ -f $dir/configuration.nix ]] || {
-    if [[ -f $dir/flake.nix ]]; then die "$(pretty "$dir") has a flake.nix but no configuration.nix: nixup changes a configuration.nix (change the flake's modules by hand)"; fi
-    die "there is no configuration.nix in $(pretty "$dir"): Make a config from a phone first"
-  }
-  CONFIG_DIR=$dir
-  save_state
-  remember_dir "$dir"
-  look_config "$dir"
-  stage=$dir/.configuration.nix.nixup
-  litter "$stage"
-  cp "$dir/configuration.nix" "$stage"
-  if ! answer_and_write edit "$stage" "$dir" "$dir/configuration.nix" 2 3; then
-    rm -f "$stage"
+  [[ -n $CFG_FILE ]] || die "$(pretty "$CFG_FLAKE") is a flake.nix, which names the files its configurations are made of: give the one to change (its configuration.nix, or a host's default.nix)"
+  look_config
+  stage_for "$CFG_FILE"
+  cp "$CFG_FILE" "$STAGE"
+  if ! answer_and_write edit "$STAGE" "$CFG_FILE" "$CFG_FILE" 2 3; then
     say ""
     warn "Nothing was written."
     return 1
   fi
-  rm -f "$stage"
 }
 
 flow_build() {
@@ -2038,61 +2433,72 @@ flow_build() {
   step 2 4 "The config"
   local -a items=()
   [[ -z $PHONE_SOURCE ]] || items+=("phone|The config the phone builds now|$PHONE_SOURCE")
-  items=("folder|A config folder on this computer|${CONFIG_DIR:+$(pretty "$CONFIG_DIR")}" "${items[@]}")
+  items=("config|A config on this computer|${CONFIG_PATH:+$(pretty "$CONFIG_PATH")}" "${items[@]}")
   menu "Which config?" "${items[@]}"
   case $PICKED in
     phone) build_run phone "" "" "" ;;
-    folder)
-      pick_config_dir "The config's folder" "${CONFIG_DIR:-$PWD}"
-      flow_build_dir "$DIR" 1 1 ;;
+    config)
+      pick_config "The config (a file, or its folder)" "${CONFIG_PATH:-$PWD}"
+      flow_build_config 1 1 ;;
     *) return 1 ;;
   esac
 }
-# flow_build_dir <dir> [1: the phone was picked already] [1: and this step's title shown]: the folder's config built on
-# the phone.
-flow_build_dir() {
-  local dir=$1 file="" name="" where mode phone_folder=""
+# flow_build_config [1: the phone was picked already] [1: and this step's title shown]: the config (resolve_config's)
+# built on the phone: the flake's configuration made from the file, a flake.nix's phone, or the file alone.
+flow_build_config() {
+  local dir file name="" where mode phone_folder="" alone=0 n why=""
+  local -a items=()
   FLOW="Build a config on a phone"
-  if [[ ${2:-} != 1 ]]; then
+  if [[ ${1:-} != 1 ]]; then
     step 1 4 "The phone"
     ensure_phone module || return 1
   fi
-  [[ ${3:-} == 1 ]] || step 2 4 "The config"
-  [[ -f $dir/configuration.nix || -f $dir/flake.nix ]] || die "there is no configuration.nix or flake.nix in $(pretty "$dir")"
-  CONFIG_DIR=$dir
-  save_state
-  remember_dir "$dir"
-  look_config "$dir"
-  # What to build: the flake (one of its configurations), or its configuration.nix alone.
-  if [[ -n $CFG_FLAKE && -n $CFG_FILE ]]; then
-    menu "Build which?" "flake|The flake|flake.nix${CFG_NAMES[*]:+: ${CFG_NAMES[*]}}, with the inputs flake.lock pins" \
-      "file|configuration.nix alone|with the newest Nixup and nixpkgs (no flake.lock)"
-    case $PICKED in flake) file=flake.nix ;; file) file=configuration.nix ;; *) return 1 ;; esac
-  elif [[ -n $CFG_FLAKE ]]; then
-    file=flake.nix
+  [[ ${2:-} == 1 ]] || step 2 4 "The config"
+  look_config
+  # Next to its flake.nix (Nixup's own layout), the file can be built alone too.
+  if [[ -n $CFG_FILE && -n $CFG_NAME && $CFG_DIR == "$CFG_ROOT" ]]; then
+    menu "Build which?" "flake|The flake's $CFG_NAME|with the inputs its flake.lock pins" \
+      "file|$(basename "$CFG_FILE") alone|with the newest Nixup and nixpkgs (no flake.lock)"
+    case $PICKED in flake) ;; file) alone=1 ;; *) return 1 ;; esac
+  fi
+  if [[ -n $CFG_FILE ]] && [[ -z $CFG_NAME || $alone == 1 ]]; then
+    dir=$CFG_DIR file="$(basename "$CFG_FILE")"
   else
-    file=configuration.nix
+    dir=$CFG_ROOT file=flake.nix name=$CFG_NAME
+    if [[ -z $name ]]; then
+      ((${#CFG_PHONES[@]})) || die "$(pretty "$CFG_FLAKE") makes no phone's config (it has no nixupConfigurations)"
+      if ((${#CFG_PHONES[@]} == 1)); then
+        name=${CFG_PHONES[0]}
+      else
+        for n in "${CFG_PHONES[@]}"; do
+          if [[ $n == "$PHONE_NAME" ]]; then items=("$n|$n|named after this phone" "${items[@]}"); else items+=("$n|$n|"); fi
+        done
+        menu "Which of its phones?" "${items[@]}"
+        [[ $PICKED != back ]] || return 1
+        name=$PICKED
+      fi
+    fi
   fi
-  if [[ $file == flake.nix ]] && ((${#CFG_NAMES[@]} > 1)); then
-    local -a items=()
-    local n
-    for n in "${CFG_NAMES[@]}"; do
-      if [[ $n == "$PHONE_NAME" ]]; then items=("$n|$n|named after this phone" "${items[@]}"); else items+=("$n|$n|"); fi
-    done
-    menu "Which of its configurations?" "${items[@]}"
-    [[ $PICKED != back ]] || return 1
-    name=$PICKED
-  fi
-  ok "$file${name:+ → $name}"
+  ok "$(pretty "$dir/$file")${name:+ → $name}"
 
   step 3 4 "How"
-  if command -v nix > /dev/null; then
+  # On the phone, the folder goes into its storage: only a folder of the config's own, with all it needs in it.
+  if [[ $file == flake.nix && $CFG_ROOT != "$CFG_DIR" && -n $CFG_FILE ]]; then
+    why="its flake is $(pretty "$CFG_ROOT"), with more in it than this config (all of it would go into the phone's storage: other machines' files and secrets too)"
+  elif ((${CFG_OUTSIDE:-0})); then
+    why="it names files outside its folder (../), which a copy of its folder has not got"
+  fi
+  if ! command -v nix > /dev/null; then
+    [[ -z $why ]] || die "it cannot be built on the phone ($why), and there is no nix here to build it"
+    note "(There is no nix here, so the phone builds it: the folder is copied into its storage first.)" 4
+    PICKED=phone
+  elif [[ -n $why ]]; then
+    note "It is built on this computer: $why." 4
+    PICKED=pc
+  else
     menu "Where is it built?" \
       "pc|On this computer|nixup-rebuild: Nix here builds it, the phone applies it; secrets go straight to root" \
       "phone|On the phone|the folder is copied into the phone's storage, and the phone builds it"
-  else
-    note "(There is no nix here, so the phone builds it: the folder is copied into its storage first.)" 4
-    PICKED=phone
   fi
   case $PICKED in pc | phone) where=$PICKED ;; *) return 1 ;; esac
   if [[ -n ${BUILD_PRESET:-} ]]; then
@@ -2140,6 +2546,7 @@ phone_folder_ask() {
 # build_run <pc|phone> <dir> <file> <name> <mode> [phone folder]: the build, after a last look at what it does.
 build_run() {
   local where=$1 dir=$2 file=$3 name=$4 mode=${5:-} phone_folder=${6:-} what status=0
+  local -a args=()
   if [[ $where == phone && -z $dir && -z $mode ]]; then
     step 3 4 "How"
     menu "What should it do?" "switch|Build and apply|switch: the phone becomes what its config says" \
@@ -2152,6 +2559,13 @@ build_run() {
     dry) what="a dry run: show what a build would change, change nothing" ;;
     update) what="upgrade: build and apply it with everything at its newest" ;;
   esac
+  # On this computer: nixup-rebuild, with the flake's configuration (as nixup-rebuild takes a flake: its submodules too)
+  # or the file alone.
+  if [[ $where == pc && -n $dir ]]; then
+    case $mode in switch) args=(switch) ;; dry) args=(dry-activate) ;; update) args=(switch --upgrade) ;; esac
+    args+=(--target-host "adb:$PHONE_SERIAL")
+    if [[ $file == flake.nix ]]; then args+=(--flake "${CFG_CLI:-$dir}${name:+#$name}"); else args+=(--file "$dir/$file"); fi
+  fi
   step 4 4 "Build"
   panel "Ready"
   kv Phone "${PHONE_MODEL:-the phone} ($PHONE_SERIAL)"
@@ -2165,6 +2579,7 @@ build_run() {
     else kv Where "on the phone, from $phone_folder (copied there; the phone builds it from now on)"; fi
   fi
   kv Does "$what"
+  ((${#args[@]} == 0)) || kv Runs "nixup-rebuild $(printf '%q ' "${args[@]}")"
   panel_end
   confirm "Start?" y || return 1
   say ""
@@ -2173,11 +2588,6 @@ build_run() {
   if [[ -z $dir ]]; then
     module_run "sh \$d/build.sh adb $mode" || status=$?
   elif [[ $where == pc ]]; then
-    local -a args=()
-    case $mode in switch) args=(switch) ;; dry) args=(dry-activate) ;; update) args=(switch --upgrade) ;; esac
-    args+=(--target-host "adb:$PHONE_SERIAL")
-    if [[ $file == flake.nix ]]; then args+=(--flake "$dir${name:+#$name}"); else args+=(--file "$dir/configuration.nix"); fi
-    say "  ${c_d}nixup-rebuild ${args[*]}${c_r}"
     "$here/nixup-rebuild" "${args[@]}" || status=$?
   else
     phone_copy_build "$dir" "$file" "$name" "$mode" "$phone_folder" || status=$?
@@ -2213,21 +2623,23 @@ phone_copy_build() {
   adb -s "$PHONE_SERIAL" push "$staged" /data/local/tmp/nixup-config > /dev/null || die "could not copy the folder to the phone"
   if [[ $mode == dry ]]; then
     say "  ${c_d}A dry run of a copy of the folder, which goes when it is done${c_r}"
-    module_run "sh \$d/build.sh adb dry --source=/data/local/tmp/nixup-config/$file${name:+#$name}; s=\$?; rm -rf /data/local/tmp/nixup-config; exit \$s" || status=$?
+    module_run "sh \$d/build.sh adb dry --source=$(phone_quote "/data/local/tmp/nixup-config/$file${name:+#$name}"); s=\$?; rm -rf /data/local/tmp/nixup-config; exit \$s" || status=$?
     return "$status"
   fi
   # On the phone, as root: the copy checked; the folder there (unless it is too big to be the config's own) kept, then
-  # replaced, and what it had put back should that fail; and the copy made the config the phone builds.
+  # replaced, and what it had put back should that fail; and the copy made the config the phone builds. (The file's
+  # name and the configuration's, quoted: a phone's name can be anything, like Neo's Pixel.)
   cat > "$WORK/replace.sh" << EOF
 new=/data/local/tmp/nixup-config old=/data/adb/nixup/config.old target='$target'
-[ -f "\$new/$file" ] || exit 4
+file=$(phone_quote "$file") picked=$(phone_quote "$file${name:+#$name}")
+[ -f "\$new/\$file" ] || exit 4
 if [ -d "\$target" ]; then
   kb=\$(du -sk "\$target" | cut -f1)
   [ "\${kb:-0}" -le 51200 ] || exit 7
 fi
 mkdir -p /data/adb/nixup && rm -rf "\$old" && { [ ! -d "\$target" ] || cp -r "\$target" "\$old"; } || exit 5
 if rm -rf "\$target" && mkdir -p "\${target%/*}" && cp -r "\$new" "\$target"; then rm -rf "\$new"; else rm -rf "\$target"; [ ! -d "\$old" ] || cp -r "\$old" "\$target"; exit 6; fi
-printf '%s\n' "\$target/$file${name:+#$name}" > /data/adb/nixup/source && rm -f /data/adb/nixup/build-from
+printf '%s\n' "\$target/\$picked" > /data/adb/nixup/source && rm -f /data/adb/nixup/build-from
 EOF
   adb -s "$PHONE_SERIAL" push "$WORK/replace.sh" /data/local/tmp/nixup-config.sh > /dev/null || die "could not copy the folder to the phone"
   phone_root "sh /data/local/tmp/nixup-config.sh" || status=$?
@@ -2311,51 +2723,64 @@ done' | tr -d '\r' || true)"
 }
 
 flow_play() {
-  local dir token account=""
+  local p dir token account="" stage
   FLOW="Google Play sign-in"
   need curl "curl, which asks Google for the account's token"
   step 1 3 "Where the token goes"
-  note "A Google account's token lets the phone download the config's Google Play apps with no sign-in on it. It acts as the account itself: it is kept next to the config, readable by you alone, and goes to the phone with each build." 4
-  pick_config_dir "The config's folder" "${CONFIG_DIR:-$PWD}"
-  dir=$DIR
+  note "A Google account's token lets the phone download the config's Google Play apps with no sign-in on it. It acts as the account itself: it is kept next to the config's file, readable by you alone, and goes to the phone with each build." 4
+  ask "The config (a file, or its folder)" "${CONFIG_PATH:-$PWD}" "$(pretty "${CONFIG_PATH:-$PWD}")"
+  p="$(full_path "$ANSWER")"
+  CFG_FILE="" CFG_NAME=""
+  if [[ -e $p ]] && resolve_config "$p"; then
+    CONFIG_PATH=$p
+    save_state
+    remember_config "$p"
+    dir=$CFG_DIR
+  else
+    # No config there yet: the token alone, for one to come.
+    [[ ! -f $p ]] || p="$(dirname "$p")"
+    dir=$p
+  fi
   mkdir -p "$dir"
   token=$dir/google-play.token
   step 2 3 "Sign in"
   note "A window with Google's own sign-in page opens (or your browser, with steps to follow). Better an account of its own: Google may block one that downloads with an unofficial client." 4
   say ""
+  in_step=1
   play_sign_in "$token" || die "the sign-in did not finish (why is above)"
   account=$PLAY_ACCOUNT
   ok "Signed in to Google Play${account:+ as $account}: the token is in $(pretty "$token"), readable by you alone."
   if git -C "$dir" rev-parse --show-toplevel > /dev/null 2>&1; then
-    warn "The folder is in git: keep google-play.token out of a repository others can read."
+    warn "The folder is in git: keep google-play.token out of a repository others can read (a flake there sees it only once git tracks it)."
   fi
   step 3 3 "In the config"
-  if [[ ! -f $dir/configuration.nix ]]; then
-    note "There is no configuration.nix in $(pretty "$dir") yet: once there is, it takes android.playstore.tokenFile = ./google-play.token;" 4
+  if [[ -z $CFG_FILE ]]; then
+    note "There is no config's file there to put it in: one takes it with android.playstore.tokenFile = ./google-play.token;" 4
     return 0
   fi
-  CONFIG_DIR=$dir
-  save_state
+  stage_for "$CFG_FILE"
+  stage=$STAGE
+  cp "$CFG_FILE" "$stage"
+  look_options "$stage" || return 1
   plan_reset
   MAKE_FLAKE=0 PLAY_LIST=0
+  editable "android playstore tokenFile" set || return 1
   plan_set "android playstore tokenFile" ./google-play.token "secret: no sign-in on the phone" "Google Play's token: ./google-play.token"
-  [[ -z $account ]] || plan_set "android playstore account" "$(nix_str "$account")" "builds stop if another account is signed in" "Google Play's account: $account"
-  local stage=$dir/.configuration.nix.nixup
-  litter "$stage"
-  cp "$dir/configuration.nix" "$stage"
+  if [[ -n $account ]] && editable "android playstore account" set; then
+    plan_set "android playstore account" "$(nix_str "$account")" "builds stop if another account is signed in" "Google Play's account: $account"
+  fi
   apply_plan "$stage" "$WORK/after.nix" || return 1
-  rm -f "$stage"
-  if cmp -s "$dir/configuration.nix" "$WORK/after.nix"; then ok "The config has it already."; return 0; fi
-  review "$dir/configuration.nix" "$WORK/after.nix"
+  if cmp -s "$CFG_FILE" "$WORK/after.nix"; then ok "The config has it already."; return 0; fi
+  review "$CFG_FILE" "$WORK/after.nix"
   confirm "Put it in the config?" y || return 1
-  write_config "$WORK/after.nix" "$dir"
+  write_config "$WORK/after.nix" "$CFG_FILE"
 }
 
 # --- The menu.
 main_screen() {
   banner
   phone_rows
-  dir_row
+  config_row
   local tools=""
   tools+="adb $(command -v adb > /dev/null && yes_mark yes || yes_mark no)  "
   tools+="nix $(command -v nix > /dev/null && yes_mark yes || yes_mark no)  "
@@ -2369,13 +2794,12 @@ run_step() {
   in_step=1
   ("$@") || status=$?
   in_step=0
-  sweep
   load_state
   if ((status == 130)); then say ""; warn "Stopped."; fi
   pause
 }
 
-CONFIG_DIR="$(first_dir)"
+CONFIG_PATH="$(first_config)"
 save_state
 if [[ $action != menu ]]; then
   in_step=1
@@ -2399,7 +2823,7 @@ while :; do
     "generations|Generations|the phone's builds so far; go back to an earlier one" \
     "play|Google Play sign-in|a token for the config, so the phone needs no sign-in" \
     "phone|Pick the phone|another phone, or one over the network" \
-    "folder|Pick the config folder|another folder of configs"
+    "config|Pick the config|a file of any name, or a folder with one"
   case $PICKED in
     create) run_step flow_create ;;
     edit) run_step flow_edit ;;
@@ -2407,11 +2831,7 @@ while :; do
     generations) run_step flow_generations ;;
     play) run_step flow_play ;;
     phone) in_step=1; (pick_phone) || true; in_step=0; load_state ;;
-    folder)
-      pick_config_dir "The config's folder" "${CONFIG_DIR:-$PWD}"
-      CONFIG_DIR=$DIR
-      save_state
-      [[ ! -f $DIR/configuration.nix && ! -f $DIR/flake.nix ]] || remember_dir "$DIR" ;;
+    config) in_step=1; (pick_config "The config (a file, or its folder)" "${CONFIG_PATH:-$PWD}") || pause; in_step=0; load_state ;;
     back) break ;;
   esac
 done

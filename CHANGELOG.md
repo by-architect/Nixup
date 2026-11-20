@@ -17,7 +17,14 @@ section after the version, and its text is what the Magisk app shows as the upda
   (with names like it), not for 64-bit ARM (the systems it is for), broken, unfree, insecure, or not in the cache for
   ARM. The apps nixup-config found from Google Play can be listed in `android.packages.playstore` there and then, and a
   sign-in to Google Play (as nixup-play-login, its token kept off the screen) puts the account's token next to the
-  config, so the phone needs no sign-in. Change a config asks the same about
+  config, so the phone needs no sign-in. A config is any module file, of any name (configuration.nix, a host's
+  default.nix), or a folder with one, alone or one of a flake's configurations: the flake it is in is found (in its
+  folder or one above, with its git submodules), which of its phones the file makes, and the Nixup its flake.lock pins.
+  Each question shows what the config has now and where that is set, as a build reads it through the flake (its other
+  modules, inputs and arguments), and an option another module sets, a value the file works out, or one the pinned
+  Nixup has not got, is pointed out and left as it is. A change is checked in the flake's configuration with the file
+  swapped for the changed one, and nothing is written next to the config before it is confirmed (a synced or git
+  folder sees nothing of it). Change a config asks the same about
   a config you have: an answer changes that option where the file writes it (inside its set, its comment kept in its
   column), or adds it next to the options it goes with, and nothing else in the file changes; the change is shown,
   and checked against Nixup's options, before it is written, and secrets go into files of their own next to it,

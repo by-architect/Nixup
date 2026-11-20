@@ -211,12 +211,16 @@ nix run github:by-architect/Nixup#nixup
   updates on mobile data, a daily rebuild, adb over the network, this computer's adb and SSH keys, SSH, Tailscale,
   ntfy, CalDAV, Syncthing, backups, Nix packages (each looked up first: built for 64-bit ARM, and in cache.nixos.org),
   a Google Play sign-in for the account's token, and a flake.nix too.
-- **Change a config**: the same questions about a config you have, each showing what it has now. An answer changes
-  that option where the file writes it, and nothing else; you see the change, checked against Nixup's options,
-  before it is written.
-- **Build a config on a phone**: the folder is looked over first (configuration.nix, flake.nix and its
-  configurations, flake.lock, the files it names, git), then built on the computer and applied on the phone, or
-  copied to the phone and built there; or the phone builds the config it has. A dry run shows what would change.
+- **Change a config**: the same questions about a config you have: its file, of any name (configuration.nix, or a
+  host's default.nix in a flake with other machines and shared modules), or its folder. Each shows what the config
+  has now and where that is set, as a build reads it, through its flake. An answer changes that option where the file
+  writes it, and nothing else; an option another module sets, a value the file works out (from secrets, say), or one
+  the Nixup its flake.lock pins has not got, is pointed out and left as it is. You see the change, checked in the
+  flake's configuration with Nixup's options, before anything is written.
+- **Build a config on a phone**: the config is looked over first (its flake and which of its phones it makes,
+  flake.lock, the files it names, git and its submodules), then built on the computer and applied on the phone
+  (`nixup-rebuild --flake '<flake>?submodules=1#<phone>'`), or copied to the phone and built there when its folder
+  has all it needs; or the phone builds the config it has. A dry run shows what would change.
 - **Generations**: the phone's builds so far, and going back to one.
 - **Google Play sign-in**: a token for the config, so the phone needs no sign-in.
 
