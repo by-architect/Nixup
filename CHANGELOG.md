@@ -32,7 +32,13 @@ section after the version, and its text is what the Magisk app shows as the upda
   configurations, flake.lock, the files it names and whether git tracks them), then builds it on the computer
   (nixup-rebuild) or copies it to the phone and builds it there, or builds the config the phone has; a dry run shows
   what would change, from a copy the phone keeps for that run only. The phone's generations can be gone back to, and
-  a Google Play sign-in puts its token in the config.
+  a Google Play sign-in puts its token in the config. The phone's panel and its generations say which config each
+  generation was built from (and on which computer), and which one the phone's own builds read, the one its app's
+  Config picked: after a build on a computer they differ, so building the phone's own config, or a daily rebuild,
+  is told to put that one in the computer's config's place (a daily rebuild can be given a flake address the phone
+  fetches instead). Copying a config to the phone names the files of the phone's folder that the copy replaces, and
+  the Google Play questions say whether the phone has an account signed in, which its Google Play apps need without
+  a token.
 - The terminal is an app of its own: it has its own icon on the home screen and its own place in the recent apps,
   apart from Nixup's. The terminal button in Nixup's menu opens it, with the sessions it keeps running.
 - The phone's own update check (every 6 hours) can run on mobile data too: `android.updates.onlyOnUnmetered = false`.

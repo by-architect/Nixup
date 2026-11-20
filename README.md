@@ -210,7 +210,9 @@ nix run github:by-architect/Nixup#nixup
   settings, then asks about what a phone cannot tell: app updates (enable, disable or skip, for each source too),
   updates on mobile data, a daily rebuild, adb over the network, this computer's adb and SSH keys, SSH, Tailscale,
   ntfy, CalDAV, Syncthing, backups, Nix packages (each looked up first: built for 64-bit ARM, and in cache.nixos.org),
-  a Google Play sign-in for the account's token, and a flake.nix too.
+  a Google Play sign-in for the account's token (it says whether the phone has an account signed in, which its Google
+  Play apps need otherwise), and a flake.nix too. A phone that runs a config of Nixup's already is told about: one
+  made from the phone has its apps and settings, not that config's services and secrets.
 - **Change a config**: the same questions about a config you have: its file, of any name (configuration.nix, or a
   host's default.nix in a flake with other machines and shared modules), or its folder. Each shows what the config
   has now and where that is set, as a build reads it, through its flake. An answer changes that option where the file
@@ -220,8 +222,14 @@ nix run github:by-architect/Nixup#nixup
 - **Build a config on a phone**: the config is looked over first (its flake and which of its phones it makes,
   flake.lock, the files it names, git and its submodules), then built on the computer and applied on the phone
   (`nixup-rebuild --flake '<flake>?submodules=1#<phone>'`), or copied to the phone and built there when its folder
-  has all it needs; or the phone builds the config it has. A dry run shows what would change.
-- **Generations**: the phone's builds so far, and going back to one.
+  has all it needs (the files the phone's folder has besides are named before they are replaced); or the phone
+  builds its own config, the one its app's Config picked. A dry run shows what would change.
+- **Generations**: the phone's builds so far, each with the config it was built from (and the computer, for one
+  built on a computer), and going back to one.
+
+The phone's panel says which config its generation was built from, and which one the phone's own builds read (the
+app's Build, and a daily rebuild): after a build on a computer they are not the same, and the question about the daily
+rebuild says what it would build.
 - **Google Play sign-in**: a token for the config, so the phone needs no sign-in.
 
 The same steps without questions, for scripts: `nixup-config create`, `nixup-rebuild switch` and `nixup-play-login`

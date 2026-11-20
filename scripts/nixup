@@ -199,13 +199,16 @@ menu_draw() {
   printf '\r\e[2K    %s%s move · Enter pick · 1-%d · q back%s\n' "$c_d" "$s_keys" "$n" "$c_r" >&2
 }
 
-# key <keys> <default> <choices>: one of keys, pressed (Enter: default), in KEY; the choices are shown first.
+# key <keys> <default> <choices>: one of keys, pressed (Enter: default), in KEY; the choices are shown first. KEY_EOF: 1
+# when nothing could be read (the terminal is gone, or the file of answers ended): the default, unanswered.
 key() {
   local k
+  KEY_EOF=0
   printf '    %s %s›%s ' "$3" "$c_acc" "$c_r" >&2
   while :; do
     k=""
-    if ((live)); then IFS= read -rsn1 k <&3 || k=$2; else IFS= read -r k <&3 || k=$2; k=${k:0:1}; fi
+    if ((live)); then IFS= read -rsn1 k <&3 || { k=$2; KEY_EOF=1; }
+    else IFS= read -r k <&3 || { k=$2; KEY_EOF=1; }; k=${k:0:1}; fi
     [[ -n $k ]] || k=$2
     k=${k,,}
     [[ $k == [[:alnum:]] && $1 == *"$k"* ]] && break
@@ -231,11 +234,11 @@ secret() {
   ANSWER=""
   if ((live)); then IFS= read -rs ANSWER <&3 || true; say "${c_d}(hidden)${c_r}"; else IFS= read -r ANSWER <&3 || true; typed "(hidden)"; fi
 }
-# confirm <question> <y|n>: true for yes.
+# confirm <question> <y|n>: true for yes (not when nothing was answered: no terminal to answer on).
 confirm() {
   printf '    %s%s%s\n' "$c_b" "$1" "$c_r" >&2
   key yn "$2" "${c_acc}y${c_r} yes  ${c_acc}n${c_r} no  ${c_d}(Enter: $2)${c_r}"
-  if [[ $KEY == y ]]; then answered yes; return 0; fi
+  if [[ $KEY == y ]] && ((KEY_EOF == 0)); then answered yes; return 0; fi
   answered no
   return 1
 }
@@ -268,9 +271,9 @@ eds() {
 # --- What the menu's steps share (each runs on its own, so it goes through a file): the phone and the config folder.
 WORK="$(mktemp -d)"
 PHONE_SERIAL="" PHONE_MODEL="" PHONE_ANDROID="" PHONE_NAME="" PHONE_APP="" PHONE_ROOT="" PHONE_MODULE=""
-PHONE_PENDING="" PHONE_SOURCE="" PHONE_GEN="" PHONE_REMOTE="" CONFIG_PATH=""
+PHONE_PENDING="" PHONE_SOURCE="" PHONE_GEN="" PHONE_GEN_FROM="" PHONE_GEN_ON="" PHONE_REMOTE="" PHONE_PLAY="" CONFIG_PATH=""
 state_vars=(PHONE_SERIAL PHONE_MODEL PHONE_ANDROID PHONE_NAME PHONE_APP PHONE_ROOT PHONE_MODULE PHONE_PENDING PHONE_SOURCE
-  PHONE_GEN PHONE_REMOTE CONFIG_PATH)
+  PHONE_GEN PHONE_GEN_FROM PHONE_GEN_ON PHONE_REMOTE PHONE_PLAY CONFIG_PATH)
 save_state() {
   local v
   for v in "${state_vars[@]}"; do printf '%s=%s\n' "$v" "${!v//$'\n'/ }"; done > "$WORK/state"
@@ -361,7 +364,8 @@ phones_seen() {
 adb_sees() { adb devices 2> /dev/null | awk 'NR > 1 && $2 == "device" { print $1 }' | grep -qxF "$1"; }
 
 # What the phone says without root (its model, Android, name, Nixup's app), then with root (Nixup's module, the config
-# it builds, its generation).
+# its own builds read, its generation and what that was built from: PHONE_GEN_ON is the PC that built it, none when the
+# phone did; PHONE_PLAY: the Google account signed in for Nixup's Google Play apps, its address alone).
 phone_facts() {
   local out k v
   out="$(adb -s "$PHONE_SERIAL" shell -T 'echo "model=$(getprop ro.product.model)"; echo "android=$(getprop ro.build.version.release)"; echo "name=$(settings get global device_name)"; echo "app=$(dumpsys package dev.nixup.manager 2> /dev/null | sed -n "s/^ *versionName=//p" | head -n 1)"' < /dev/null 2> /dev/null | tr -d '\r' || true)"
@@ -376,9 +380,13 @@ echo "module=$(sed -n "s/^version=//p" $d/module.prop 2> /dev/null)"
 [ -d /data/adb/modules_update/nixup ] && echo pending=yes
 [ -f $d/remote.sh ] && echo remote=yes
 echo "source=$(head -n 1 /data/adb/nixup/source 2> /dev/null)"
-echo "generation=$(cat /data/adb/nixup/generations/last 2> /dev/null)"'
+echo "play=$(head -n 1 /data/adb/nixup/secrets/google-play 2> /dev/null)"
+g=/data/adb/nixup/generations; c=$(cat $g/last 2> /dev/null)
+echo "generation=$c"
+[ -n "$c" ] && echo "from=$(head -n 1 $g/$c/source 2> /dev/null)" && echo "on=$(head -n 1 $g/$c/built-on 2> /dev/null)"'
   out="$(with_timeout 60 adb -s "$PHONE_SERIAL" shell -T "su -c $(phone_quote "$facts")" < /dev/null 2> /dev/null | tr -d '\r' || true)"
-  PHONE_ROOT=no PHONE_MODULE="" PHONE_PENDING="" PHONE_SOURCE="" PHONE_GEN="" PHONE_REMOTE=""
+  PHONE_ROOT=no PHONE_MODULE="" PHONE_PENDING="" PHONE_SOURCE="" PHONE_GEN="" PHONE_GEN_FROM="" PHONE_GEN_ON="" PHONE_REMOTE=""
+  PHONE_PLAY=""
   while IFS='=' read -r k v; do
     case $k in
       root) [[ $v != 0 ]] || PHONE_ROOT=yes ;;
@@ -387,6 +395,9 @@ echo "generation=$(cat /data/adb/nixup/generations/last 2> /dev/null)"'
       remote) PHONE_REMOTE=$v ;;
       source) PHONE_SOURCE=$v ;;
       generation) PHONE_GEN=$v ;;
+      from) PHONE_GEN_FROM=$v ;;
+      on) PHONE_GEN_ON=$v ;;
+      play) [[ $v != *@* ]] || PHONE_PLAY=$v ;;
     esac
   done <<< "$out"
   save_state
@@ -416,8 +427,43 @@ phone_rows() {
     kv "" "root $(yes_mark yes) · Nixup's module $(yes_mark no) ${c_d}(install it in Magisk, from Nixup's releases)${c_r}"
   else
     kv "" "root $(yes_mark yes) · Nixup $PHONE_MODULE $(yes_mark yes)${PHONE_PENDING:+ ${c_warn}(an update waits for a restart)${c_r}} · generation ${PHONE_GEN:-none yet}"
-    if [[ -n $PHONE_SOURCE ]]; then kv "" "${c_d}builds${c_r} $PHONE_SOURCE"; else kv "" "${c_d}builds no config yet${c_r}"; fi
+    if [[ -n $PHONE_GEN_ON ]]; then
+      # (Built on a PC: the phone's own builds read another config, the one its app's Config picked.)
+      kv "" "${c_d}from${c_r} $(gen_words "$PHONE_GEN_FROM" "$PHONE_GEN_ON")"
+      [[ -z $PHONE_SOURCE ]] || kv "" "${c_d}the app's Build reads${c_r} $PHONE_SOURCE"
+    elif [[ -n $PHONE_SOURCE ]]; then kv "" "${c_d}builds${c_r} $PHONE_SOURCE"
+    else kv "" "${c_d}builds no config yet${c_r}"; fi
   fi
+}
+# gen_words <source> <PC>: a generation's source in words, and the PC that built it (unless the source says it).
+gen_words() {
+  local w
+  w="$(source_words "$1")"
+  [[ -z $2 || $w == *"$2"* ]] || w+="${w:+, }built on $2"
+  printf '%s' "$w"
+}
+# fit <text> <width>: the text, or when it is longer its end, from a / on (…/branches/main#samsung), cut to width.
+fit() {
+  local t=$1 rest
+  while ((${#t} > $2)); do
+    rest=${t#…/}
+    [[ $rest == */* ]] || break
+    t="…/${rest#*/}"
+  done
+  ((${#t} <= $2)) || t="${t:0:$2-1}…"
+  printf '%s' "$t"
+}
+# source_words <source>: what a generation was built from, as the phone keeps it, said shorter: a flake's folder without
+# git+file:// and ?submodules=1, ~ for the home folder, and a commit by its first 7 digits.
+source_words() {
+  local s=$1 tail="" name=""
+  if [[ $s == *" ("* ]]; then tail=" (${s#* (}" s=${s%% (*}; fi
+  if [[ $s == *#* ]]; then name=${s##*#} s=${s%#*}; fi
+  s=${s#git+file://} s=${s#path:}
+  s=${s%%\?*}
+  [[ $s != /* ]] || s="$(pretty "$s")"
+  if [[ $tail =~ (commit [0-9a-f]{7})[0-9a-f]+ ]]; then tail=${tail/"${BASH_REMATCH[0]}"/"${BASH_REMATCH[1]}"}; fi
+  printf '%s%s%s' "$s" "${name:+#$name}" "$tail"
 }
 
 # Which phone: picked from the ones adb sees, or one connected over the network. Status 1: none (q).
@@ -478,7 +524,16 @@ require_module() {
 # A command as root on the phone, from the newest Nixup module (the update waiting for a restart, else the running
 # one, in $d), with what it says shown as it comes.
 module_run() {
-  phone_root "d=/data/adb/modules_update/nixup; [ -f \$d/build.sh ] || d=/data/adb/modules/nixup; [ -f \$d/build.sh ] || exit 3; $1"
+  phone_root "d=/data/adb/modules_update/nixup; [ -f \$d/build.sh ] || d=/data/adb/modules/nixup; [ -f \$d/build.sh ] || exit 3; $1" | shorten
+}
+# What a build says, as it comes, with a line too long to read cut short (the profile it applies, as JSON: the phone's
+# log keeps it whole); kept in $WORK/build.out too.
+shorten() {
+  awk -v w=$((COLS - 6)) -v out="$WORK/build.out" '{
+    line = $0
+    if (length(line) > 3 * w) line = substr(line, 1, w - 24) "… (" length($0) " characters)"
+    print line; print line >> out; fflush()
+  }'
 }
 
 # --- The config: a module file of any name (configuration.nix, a host's default.nix, …), or a folder with one, and the
@@ -781,7 +836,11 @@ look_config() {
       kv "" "${c_warn}${s_warn} $(basename "$CFG_FILE") is not in git${c_r}"
     fi
   fi
-  [[ -z $PHONE_SOURCE ]] || kv "the phone" "${c_d}builds${c_r} $PHONE_SOURCE"
+  if [[ -n $PHONE_GEN_FROM ]]; then
+    kv "the phone" "${c_d}runs generation $PHONE_GEN, from${c_r} $(gen_words "$PHONE_GEN_FROM" "$PHONE_GEN_ON")"
+  elif [[ -n $PHONE_SOURCE ]]; then
+    kv "the phone" "${c_d}builds${c_r} $PHONE_SOURCE"
+  fi
   panel_end
   CFG_OUTSIDE=$outside
   ((missing == 0)) || warn "A file the config names is missing: a build stops on it. Put it there, or take it out of the config."
@@ -1089,7 +1148,7 @@ edit_file() {
         indent=${ED:0:V0}
         indent=${indent##*$'\n'}
         indent=${indent%%[![:space:]]*}
-        replace_at "$V0" "$V1" "${PLAN_VALUE[k]//$'\n'/$'\n'$indent}"
+        replace_at "$V0" "$V1" "${PLAN_VALUE[k]//$'\n'/$'\n'$indent}" "${PLAN_NOTE[k]}"
         continue
       fi
       # add: into its list, each item unless it is there already.
@@ -1201,22 +1260,55 @@ list_text() {
   while IFS= read -r line; do out+=$'\n'"  $line"; done <<< "$2"
   printf '%s[%s\n]' "$1" "$out"
 }
-# replace_at <from> <to> <text>: the text from..to (a value) becomes <text>, and a comment after its ";" on that line
-# stays in its column (as far as there is room: 3 spaces at least, or as few as it had).
-re_semi='^([[:space:]]*;)( +)#'
+# replace_at <from> <to> <text> [note]: the text from..to (a value) becomes <text>, and a comment after its ";" on that
+# line stays in its column (as far as there is room: 3 spaces at least, or as few as it had); one nixup wrote for an
+# earlier answer (nixup_note) becomes [note], this answer's.
+re_semi="^([[:space:]]*;)( +)# ?([^"$'\n'"]*)"
 replace_at() {
-  local from=$1 to=$2 text=$3 spaces keep least pad
+  local from=$1 to=$2 text=$3 note=${4:-} spaces keep least pad old
   if [[ $text != *$'\n'* && ${ED:from:to-from} != *$'\n'* && ${ED:to:300} =~ $re_semi ]]; then
     spaces=${#BASH_REMATCH[2]}
+    old=${BASH_REMATCH[3]}
+    old=${old%"${old##*[![:space:]]}"}
     least=3
     ((spaces >= 3)) || least=$spaces
     keep=$((spaces - ${#text} + to - from))
     ((keep >= least)) || keep=$least
     printf -v pad '%*s' "$keep" ''
-    r_at+=("$from") r_end+=($((to + ${#BASH_REMATCH[1]} + spaces))) r_text+=("${text}${BASH_REMATCH[1]}${pad}")
+    if [[ -n $note && $old != "$note" ]] && nixup_note "$old"; then
+      r_at+=("$from") r_end+=($((to + ${#BASH_REMATCH[0]}))) r_text+=("${text}${BASH_REMATCH[1]}${pad}# ${note}")
+    else
+      r_at+=("$from") r_end+=($((to + ${#BASH_REMATCH[1]} + spaces))) r_text+=("${text}${BASH_REMATCH[1]}${pad}")
+    fi
   else
     r_at+=("$from") r_end+=("$to") r_text+=("$text")
   fi
+}
+# The comments questions() writes after an answer's line that say the answer (each answer's, of each question), as
+# patterns: one of them on a line nixup changes is its own, which the new answer's replaces.
+nixup_notes=(
+  "*'s apps update by themselves" "*'s updates are only told about"
+  "the update check runs on mobile data too" "the update check waits for Wi-Fi"
+  "builds again by itself" "no builds by itself"
+  "the apps no list has are removed" "apps installed by hand stay"
+  "adb connect <phone>:*, from boot on" "adb over USB only"
+  "sshd, at boot and with each build" "no SSH server"
+  "127.0.0.1: the tailnet reaches it, Wi-Fi does not" "every address: Wi-Fi reaches it too"
+  "Tailscale, run by root" "no Tailscale of Nixup's"
+  "listens to the topics" "no ntfy topics"
+  "the accounts, synced both ways" "no calendars and contacts sync"
+  "Syncthing, run by root (settings: its devices and folders)" "no Syncthing"
+  "the restic repository" "no backups"
+  "removes what nothing uses, at 03:15" "nothing removed by itself"
+  "secret: no sign-in on the phone" "secret: the phone needs no sign-in"
+)
+nixup_note() {
+  local p
+  for p in "${nixup_notes[@]}"; do
+    # shellcheck disable=SC2053 # (a pattern)
+    [[ $1 == $p ]] && return 0
+  done
+  return 1
 }
 # set_written <k> <depth>: plan item k's path's first <depth> names are a set written as one ({ … }).
 set_written() {
@@ -1285,7 +1377,7 @@ QPATHS=(
   "android playstore tokenFile" "nix distributedBuilds" "nix settings substituters" "nixpkgs config allowUnfree"
   "android autoUpgrade onlyOnUnmetered" "android autoUpgrade onlyWhileCharging" "android strict keep"
   "services ntfy unifiedPush enable" "services caldav accounts main" "android backup passwordFile"
-  "android backup apps" "android backup defaults autoRestore"
+  "android backup apps" "android backup defaults autoRestore" "system autoUpgrade flake"
 )
 # look_options <file>: the questions' options in the file (places: the paths above, and each source's updates), and
 # as the config gives them (look_effective).
@@ -1474,8 +1566,10 @@ has_option() {
 }
 # editable <path> <set|add>: nixup may change path in this file, or says why not (under the question): the Nixup the
 # config is built with has not got the option; the file writes it as an expression (a variable, lib.mkForce …); or
-# another file sets it, which a value here would conflict with (set), or whose default list a list here would replace
-# (add). A list another file sets as a plain one takes items from here too: they are joined.
+# another file sets it, which a value here would conflict with (set), or whose default list (lib.mkDefault) a list here
+# would replace (add). A list another file sets as a plain one takes items from here too: they are joined. (The
+# option's own default, which Nix counts as a definition of its file at priority 1500, is no other file's: a value
+# here replaces it, as on NixOS.)
 editable() {
   local i=${QIDX[$1]} others
   if ! has_option "$1"; then
@@ -1491,7 +1585,7 @@ editable() {
     note "It is set in $others: change it there (a value here would conflict with it)."
     return 1
   fi
-  if [[ -n $others && $2 == add ]] && ((${EPRIO[i]:-100} > 100)); then
+  if [[ -n $others && $2 == add ]] && ((${EPRIO[i]:-100} > 100 && ${EPRIO[i]:-100} < 1500)); then
     note "Its list is a default from $others, which a list here would replace: add to it there."
     return 1
   fi
@@ -1700,7 +1794,8 @@ play_sign_in() {
   ((status == 0)) && [[ -s $1 ]] || return 1
   PLAY_ACCOUNT="$(sed -n 's/^Signed in to Google Play as \(.*\)\. Its token.*/\1/p' "$out" 2> /dev/null | head -n 1)"
 }
-# What the config has for Google Play's account, in words (never the token itself).
+# now_token <create|edit>: what the config has for Google Play's account, in words (never the token itself), and the
+# account signed in on the config's phone.
 now_token() {
   local words account
   value_of "android playstore tokenFile"
@@ -1714,7 +1809,17 @@ now_token() {
   esac
   value_of "android playstore account"
   [[ $KIND != string ]] || words+="; account $TEXT"
+  if config_phone "$1"; then
+    if [[ -n $PHONE_PLAY ]]; then words+="; ${PHONE_MODEL:-the phone} is signed in as $PHONE_PLAY"
+    else words+="; ${PHONE_MODEL:-the phone} has no account signed in"; fi
+  fi
   printf '%s' "$words"
+}
+# config_phone <create|edit>: the picked phone is the config's (made from it, or its flake's configuration named after
+# it), and is read as root.
+config_phone() {
+  [[ -n $PHONE_SERIAL && $PHONE_ROOT == yes ]] || return 1
+  [[ $1 == create || (-n $CFG_NAME && $CFG_NAME == "$PHONE_NAME") ]]
 }
 
 # The answer to "Sign in to Google Play here?": a sign-in now (its token kept for the config), a token of this run's
@@ -1757,6 +1862,22 @@ play_question() {
   fi
 }
 
+# play_check <create|edit>: for the config's apps from Google Play, the account they come with: a token (the config's,
+# or one signed in for just now), else the one signed in on the phone (the picked phone, when the config is its: made
+# from it, or its flake's configuration named after it), whose builds stop without one.
+play_check() {
+  local k
+  for k in "${!PLAN_PATH[@]}"; do [[ ${PLAN_PATH[k]} != "android playstore tokenFile" ]] || return 0; done
+  value_of "android playstore tokenFile"
+  [[ $KIND == unset || $KIND == null ]] || return 0
+  config_phone "$1" || return 0
+  if [[ -n $PHONE_PLAY ]]; then
+    ok "${PHONE_MODEL:-The phone} is signed in to Google Play as $PHONE_PLAY: its builds download the apps with that account."
+  else
+    warn "No Google account is signed in on ${PHONE_MODEL:-the phone} for Nixup: a build stops on the apps from Google Play until one is (Nixup app: ⋮ → Google Play account), or the config has a token (a sign-in here)."
+  fi
+}
+
 # The apps nixup-config found installed from Google Play, which it writes as comments under "From Google Play".
 play_ids() {
   awk '/^  # From Google Play:/ { on = 1; next } on && /^  #   "/ { match($0, /"[^"]+"/); print substr($0, RSTART + 1, RLENGTH - 2); next } on && !/^  # / { on = 0 }' "$1"
@@ -1783,7 +1904,7 @@ play_list() {
 # leaves its option as the file has it. MAKE_FLAKE and PLAY_LIST (create): a flake.nix too, and the apps from Google
 # Play listed.
 questions() {
-  local mode=$1 file=$2 s n all key_file key t ids=() srcs=() play=() words passed status names=()
+  local mode=$1 file=$2 s n all key_file key t flake_given ids=() srcs=() play=() words passed status names=()
   plan_reset
   MAKE_FLAKE=0 PLAY_LIST=0
   look_options "$file" || return 1
@@ -1800,9 +1921,10 @@ questions() {
   if editable "android playstore tokenFile" set; then
     question "Sign in to Google Play here, for the account's token?" \
       "Then the phone needs no sign-in: the token is kept next to the config (./google-play.token, readable by you alone) and each build puts it on the phone. A window with Google's own sign-in page opens (or your browser, with the steps to follow). Better an account of its own: Google may block one that downloads with an unofficial client." \
-      "$(now_token)"
+      "$(now_token "$mode")"
     play_question
   fi
+  if ((PLAY_LIST)) || [[ ${SRC_COUNT[playstore]:-0} != 0 ]]; then play_check "$mode"; fi
 
   page "App updates" "How the phone keeps the config's apps up to date: every 6 hours it looks for new versions."
   for s in "${SOURCES[@]}"; do
@@ -1858,6 +1980,22 @@ questions() {
     "As NixOS's system.autoUpgrade: at a time of day the phone builds its config again with everything at its newest (the app's Upgrade), and applies it." \
     "$(now_bool "system autoUpgrade enable" on off false)"
   if editable "system autoUpgrade enable" set; then
+    # (The phone builds it, from the config its app picked, or a flake it fetches: not this file, unless it was copied
+    # there; built on a computer, the other config would take this one's place each day.)
+    value_of "system autoUpgrade flake"
+    flake_given=0
+    [[ $KIND != string ]] || flake_given=1
+    if ((flake_given == 0)); then
+      t=""
+      if config_phone "$mode"; then
+        if [[ -n $PHONE_SOURCE ]]; then t=" (on ${PHONE_MODEL:-the phone} now: $PHONE_SOURCE)"
+        else t=" (${PHONE_MODEL:-the phone} has none picked yet: the build would stop)"; fi
+      fi
+      # (A flake with more in it than this config is never copied to the phone: its address alone.)
+      if [[ -n $CFG_NAME && $CFG_ROOT != "$CFG_DIR" ]]; then words="only from a flake address the phone can fetch (asked next)"
+      else words="once a build on the phone has copied its folder there (Build, On the phone), or from a flake address the phone can fetch (asked next)"; fi
+      note "The phone does this build itself, with the config its app's Config picked$t, not this file on your computer: built from here, this config would be replaced by that one each day. It builds this one $words."
+    fi
     eds
     case $KEY in
       e)
@@ -1866,6 +2004,14 @@ questions() {
         ask "At what time (24h, or like \"daily\")" "$t"
         plan_set "system autoUpgrade enable" true "builds again by itself" "The config is built again every day at $ANSWER"
         plan_set "system autoUpgrade dates" "$(nix_str "$ANSWER")" "when (systemd's calendar times, like \"daily\")" ""
+        if ((flake_given == 0)) && editable "system autoUpgrade flake" set; then
+          ask "The flake it builds, an address the phone fetches (like github:you/phones#${CFG_NAME:-${PHONE_NAME:-phone}}; Enter: the config its app picked)" "" ""
+          if [[ -n $ANSWER ]]; then
+            plan_set "system autoUpgrade flake" "$(nix_str "$ANSWER")" "the flake the phone fetches and builds" "It is built from $ANSWER"
+          elif config_phone "$mode" && [[ -n $PHONE_SOURCE ]]; then
+            warn "Then each day ${PHONE_MODEL:-the phone} builds $PHONE_SOURCE, which takes this config's place unless it is this config's copy."
+          fi
+        fi
         if confirm "Only on Wi-Fi? (an upgrade can download a lot)" y; then t=true; else t=false; fi
         plan_set "android autoUpgrade onlyOnUnmetered" "$t" "false: on mobile data too" ""
         if confirm "Only while it charges?" n; then t=true; else t=false; fi
@@ -1913,15 +2059,17 @@ questions() {
     if list_has "android adb trustedKeys" "$key"; then
       say ""
       ok "This computer's adb key is trusted already (android.adb.trustedKeys)."
-    elif editable "android adb trustedKeys" add; then
+    else
       question "Let this computer in without asking?" \
         "Adds this computer's adb key (~/.android/adbkey.pub) to android.adb.trustedKeys: the phone lets it in without asking \"Allow USB debugging?\", also after Android forgets it (unused for 7 days) or its adb keys are reset."
-      key as s "${c_acc}a${c_r} add it  ${c_acc}s${c_r} skip ${c_d}(Enter)${c_r}"
-      if [[ $KEY == a ]]; then
-        answered "${c_ok}add it"
-        plan_add "android adb trustedKeys" "$(nix_str "$key")" "" "computers let in without asking" "This computer's adb key is trusted"
-      else
-        answered "${c_d}skip"
+      if editable "android adb trustedKeys" add; then
+        key as s "${c_acc}a${c_r} add it  ${c_acc}s${c_r} skip ${c_d}(Enter)${c_r}"
+        if [[ $KEY == a ]]; then
+          answered "${c_ok}add it"
+          plan_add "android adb trustedKeys" "$(nix_str "$key")" "" "computers let in without asking" "This computer's adb key is trusted"
+        else
+          answered "${c_d}skip"
+        fi
       fi
     fi
   fi
@@ -2330,6 +2478,10 @@ flow_create() {
 
   step 3 5 "Reading the phone"
   note "nixup-config reads its settings, its apps and where each came from (F-Droid, IzzyOnDroid, Google Play, …), and writes a config that keeps the phone as it is: building it changes nothing on the phone." 4
+  if [[ -n $PHONE_GEN_FROM ]]; then
+    warn "${PHONE_MODEL:-The phone} runs a config of Nixup's already: generation $PHONE_GEN, from $(gen_words "$PHONE_GEN_FROM" "$PHONE_GEN_ON")."
+    note "One made from the phone has its apps and settings, not that config's services, users and secrets (its SSH server, Tailscale, …), which a build of it takes away. To change that config, Change a config is the step." 4
+  fi
   say ""
   if ! "$here/nixup-config" create --target-host "adb:$PHONE_SERIAL" --output "$WORK/made.nix" --force 2>&1 \
     | sed -e "s|$WORK/made.nix|it|g" -e '/^Look it over/d' | indent; then
@@ -2432,7 +2584,7 @@ flow_build() {
   ensure_phone module || return 1
   step 2 4 "The config"
   local -a items=()
-  [[ -z $PHONE_SOURCE ]] || items+=("phone|The config the phone builds now|$PHONE_SOURCE")
+  [[ -z $PHONE_SOURCE ]] || items+=("phone|The phone's own config|$PHONE_SOURCE, which the app's Build reads${PHONE_GEN_ON:+ (it runs one built on $PHONE_GEN_ON now)}")
   items=("config|A config on this computer|${CONFIG_PATH:+$(pretty "$CONFIG_PATH")}" "${items[@]}")
   menu "Which config?" "${items[@]}"
   case $PICKED in
@@ -2511,15 +2663,17 @@ flow_build_config() {
   fi
   if [[ $where == phone && $mode != dry ]]; then
     note "The folder is copied into the phone's storage, which the phone builds from then on (the app's Config shows it). Its files, secrets too, are where apps with storage access can read them; built on this computer, secrets go to root's folder alone." 4
-    phone_folder_ask || return 1
+    phone_folder_ask "$dir" || return 1
     phone_folder=$PHONE_FOLDER
   fi
   build_run "$where" "$dir" "$file" "$name" "$mode" "$phone_folder"
 }
 
-# The folder on the phone a config is copied into, in PHONE_FOLDER: by default the one the phone builds from now.
+# phone_folder_ask <dir>: the folder on the phone the config's folder <dir> is copied into, in PHONE_FOLDER: by default
+# the one the phone builds from now. What is in it that <dir> has not got goes, so it is said first.
 phone_folder_ask() {
-  local default=/storage/emulated/0/Nixup picked inside
+  local dir=$1 default=/storage/emulated/0/Nixup picked inside f
+  local -a gone=()
   picked=${PHONE_SOURCE%%#*}
   [[ $picked != /storage/* ]] || default=${picked%/*}
   while :; do
@@ -2539,13 +2693,31 @@ phone_folder_ask() {
         warn "$PHONE_FOLDER is a folder Android keeps for everything: give the config one of its own, like $PHONE_FOLDER/Nixup."
         continue ;;
     esac
+    gone=()
+    while IFS= read -r f; do
+      [[ -n $f && ! -e $dir/$f ]] || continue
+      gone+=("$f")
+    done < <(phone_root "cd $(phone_quote "$PHONE_FOLDER") 2> /dev/null && find . -type f 2> /dev/null | sed 's|^\./||' | sort" | tr -d '\r')
+    if ((${#gone[@]})); then
+      warn "$PHONE_FOLDER has ${#gone[@]} file(s) that $(pretty "$dir") has not: ${gone[*]:0:4}$( ((${#gone[@]} <= 4)) || printf ', …')"
+      note "The copy replaces the folder, so they go (kept in /data/adb/nixup/config.old until the next copy)." 4
+      menu "" "other|Another folder|for the config alone" "go|Replace them all the same|"
+      case $PICKED in
+        go) ;;
+        other)
+          default="${PHONE_FOLDER%/*}/Nixup-$(basename "$dir" | tr -cd 'A-Za-z0-9._-')"
+          [[ $default != "$PHONE_FOLDER" ]] || default+=-2
+          continue ;;
+        *) return 1 ;;
+      esac
+    fi
     break
   done
 }
 
 # build_run <pc|phone> <dir> <file> <name> <mode> [phone folder]: the build, after a last look at what it does.
 build_run() {
-  local where=$1 dir=$2 file=$3 name=$4 mode=${5:-} phone_folder=${6:-} what status=0
+  local where=$1 dir=$2 file=$3 name=$4 mode=${5:-} phone_folder=${6:-} what status=0 runs
   local -a args=()
   if [[ $where == phone && -z $dir && -z $mode ]]; then
     step 3 4 "How"
@@ -2570,7 +2742,7 @@ build_run() {
   panel "Ready"
   kv Phone "${PHONE_MODEL:-the phone} ($PHONE_SERIAL)"
   if [[ -z $dir ]]; then
-    kv Config "the one the phone builds now: $PHONE_SOURCE"
+    kv Config "the phone's own: $PHONE_SOURCE"
     kv Where "on the phone"
   else
     kv Config "$(pretty "$dir/$file")${name:+ → $name}"
@@ -2579,16 +2751,20 @@ build_run() {
     else kv Where "on the phone, from $phone_folder (copied there; the phone builds it from now on)"; fi
   fi
   kv Does "$what"
-  ((${#args[@]} == 0)) || kv Runs "nixup-rebuild $(printf '%q ' "${args[@]}")"
+  if ((${#args[@]})); then printf -v runs '%q ' "${args[@]}"; kv Runs "nixup-rebuild ${runs% }"; fi
   panel_end
+  if [[ -z $dir && -n $PHONE_GEN_ON && $mode != dry ]]; then
+    warn "${PHONE_MODEL:-The phone} runs generation $PHONE_GEN now, from $(gen_words "$PHONE_GEN_FROM" "$PHONE_GEN_ON"): this build applies $PHONE_SOURCE in its place (a dry run shows what that changes)."
+  fi
   confirm "Start?" y || return 1
   say ""
   say "  ${c_d}$(rule $((COLS - 4)))${c_r}"
   in_step=1
+  : > "$WORK/build.out"
   if [[ -z $dir ]]; then
     module_run "sh \$d/build.sh adb $mode" || status=$?
   elif [[ $where == pc ]]; then
-    "$here/nixup-rebuild" "${args[@]}" || status=$?
+    "$here/nixup-rebuild" "${args[@]}" | shorten || status=$?
   else
     phone_copy_build "$dir" "$file" "$name" "$mode" "$phone_folder" || status=$?
   fi
@@ -2604,7 +2780,9 @@ build_run() {
   fi
   say ""
   bad "The build stopped (status $status): why is above."
-  if [[ $where == phone || -z $dir ]] && confirm "Show the end of the phone's log of it?" y; then
+  # (The phone's log, when what it said stopped coming before its reason: adb lost the phone.)
+  if [[ $where == phone || -z $dir ]] && ! grep -q '^FAILED' "$WORK/build.out" 2> /dev/null \
+    && confirm "Show the end of the phone's log of it?" y; then
     phone_root 'f=$(ls -t /data/adb/nixup/logs/*-build-*.log 2> /dev/null | head -n 1); [ -n "$f" ] && { echo "$f"; tail -n 40 "$f"; }' | indent || true
   fi
   return 1
@@ -2613,14 +2791,14 @@ build_run() {
 # The folder copied into the phone (a dry run: into a folder of its own, for that run only; else into phone_folder,
 # then made the config the phone builds), and built there with the module's build.sh, as its Build button does.
 phone_copy_build() {
-  local dir=$1 file=$2 name=$3 mode=$4 target=$5 staged=$WORK/push status=0
+  local dir=$1 file=$2 name=$3 mode=$4 target=$5 staged=$WORK/push status=0 out
   rm -rf "$staged"
   mkdir -p "$staged"
   # Hidden files (.git) and result links stay here.
   tar -C "$dir" --exclude='./.*' --exclude='./result*' -cf - . | tar -C "$staged" -xf -
   [[ -f $staged/$file ]] || die "could not gather the folder's files"
   adb -s "$PHONE_SERIAL" shell "rm -rf /data/local/tmp/nixup-config /data/local/tmp/nixup-config.sh" < /dev/null
-  adb -s "$PHONE_SERIAL" push "$staged" /data/local/tmp/nixup-config > /dev/null || die "could not copy the folder to the phone"
+  out="$(adb -s "$PHONE_SERIAL" push "$staged" /data/local/tmp/nixup-config 2>&1)" || die "could not copy the folder to the phone: $out"
   if [[ $mode == dry ]]; then
     say "  ${c_d}A dry run of a copy of the folder, which goes when it is done${c_r}"
     module_run "sh \$d/build.sh adb dry --source=$(phone_quote "/data/local/tmp/nixup-config/$file${name:+#$name}"); s=\$?; rm -rf /data/local/tmp/nixup-config; exit \$s" || status=$?
@@ -2641,7 +2819,7 @@ mkdir -p /data/adb/nixup && rm -rf "\$old" && { [ ! -d "\$target" ] || cp -r "\$
 if rm -rf "\$target" && mkdir -p "\${target%/*}" && cp -r "\$new" "\$target"; then rm -rf "\$new"; else rm -rf "\$target"; [ ! -d "\$old" ] || cp -r "\$old" "\$target"; exit 6; fi
 printf '%s\n' "\$target/\$picked" > /data/adb/nixup/source && rm -f /data/adb/nixup/build-from
 EOF
-  adb -s "$PHONE_SERIAL" push "$WORK/replace.sh" /data/local/tmp/nixup-config.sh > /dev/null || die "could not copy the folder to the phone"
+  out="$(adb -s "$PHONE_SERIAL" push "$WORK/replace.sh" /data/local/tmp/nixup-config.sh 2>&1)" || die "could not copy the folder to the phone: $out"
   phone_root "sh /data/local/tmp/nixup-config.sh" || status=$?
   adb -s "$PHONE_SERIAL" shell "rm -f /data/local/tmp/nixup-config.sh" < /dev/null || true
   case $status in
@@ -2663,7 +2841,7 @@ EOF
 }
 
 flow_generations() {
-  local out n when label from mark current="" prev="" mode=""
+  local out n when label from mark on room words tail current="" prev="" mode=""
   local -a gens=() rows=()
   FLOW="Generations"
   step 1 3 "The phone"
@@ -2675,13 +2853,14 @@ for n in $(ls $g 2> /dev/null | grep -x "[0-9][0-9]*" | sort -n); do
   w=$(stat -c %y $g/$n/profile.json 2> /dev/null | cut -c1-16)
   l=$(sed -n "s/^label=//p" $g/$n/version 2> /dev/null | head -n 1)
   f=$(head -n 1 $g/$n/source 2> /dev/null)
+  o=$(head -n 1 $g/$n/built-on 2> /dev/null)
   m=-; [ "$n" = "$c" ] && m=current
-  printf "%s\t%s\t%s\t%s\t%s\n" "$n" "${w:--}" "${l:--}" "${f:--}" "$m"
+  printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$n" "${w:--}" "${l:--}" "${f:--}" "$m" "${o:--}"
 done' | tr -d '\r' || true)"
-  while IFS=$'\t' read -r n when label from mark; do
+  while IFS=$'\t' read -r n when label from mark on; do
     [[ $n =~ ^[0-9]+$ ]] || continue
     gens+=("$n")
-    rows+=("$n"$'\t'"$when"$'\t'"$label"$'\t'"$from"$'\t'"$mark")
+    rows+=("$n"$'\t'"$when"$'\t'"$label"$'\t'"$from"$'\t'"$mark"$'\t'"$on")
     [[ $mark != current ]] || current=$n
   done <<< "$out"
   ((${#gens[@]})) || die "${PHONE_MODEL:-the phone} has no generation yet: no build has been applied"
@@ -2690,13 +2869,25 @@ done' | tr -d '\r' || true)"
     if [[ -n $current ]] && ((n < current)); then prev=$n; fi
   done
   say ""
-  printf '    %s%5s  %-16s  %-28s  %s%s\n' "$c_d" "#" "built" "label" "built from" "$c_r" >&2
+  # Each one's config (a PC's build: and the PC), and its version when there is room for it.
+  printf '    %s%5s  %-16s  %s%s\n' "$c_d" "#" "built" "built from" "$c_r" >&2
   for n in "${rows[@]}"; do
-    IFS=$'\t' read -r n when label from mark <<< "$n"
+    IFS=$'\t' read -r n when label from mark on <<< "$n"
+    room=$((COLS - 30))
+    [[ $mark != current ]] || room=$((room - 6))
+    [[ $from != - ]] || from=""
+    [[ $on != - ]] || on=""
+    words="$(gen_words "$from" "$on")"
+    # (Too long: without the PC, before the source itself is cut.)
+    ((${#words} <= room)) || words="$(source_words "$from")"
+    words=${words:--}
+    tail=""
+    if [[ $label != - ]] && ((${#words} + 3 + ${#label} <= room)); then tail=" · $label"; fi
+    words="$(fit "$words" "$room")"
     if [[ $mark == current ]]; then
-      printf '  %s%s %5s  %-16s  %-28s  %s%s %s(now)%s\n' "$c_acc" "$s_arrow" "$n" "$when" "${label:0:28}" "${from:0:$((COLS - 62))}" "$c_r" "$c_ok" "$c_r" >&2
+      printf '  %s%s %5s  %-16s  %s%s%s%s %s(now)%s\n' "$c_acc" "$s_arrow" "$n" "$when" "$words" "$c_d" "$tail" "$c_r" "$c_ok" "$c_r" >&2
     else
-      printf '    %5s  %-16s  %-28s  %s\n' "$n" "$when" "${label:0:28}" "${from:0:$((COLS - 56))}" >&2
+      printf '    %5s  %-16s  %s%s%s%s\n' "$n" "$when" "$words" "$c_d" "$tail" "$c_r" >&2
     fi
   done
   step 3 3 "Go back"
