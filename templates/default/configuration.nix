@@ -8,6 +8,8 @@
 #
 # A config of a phone's own, from what it has now (its settings and apps):
 #   nix run github:by-architect/Nixup#nixup-config -- create
+# or step by step in a menu, which asks about the rest too (updates, access, services, backups):
+#   nix run github:by-architect/Nixup#nixup
 #
 # As a start for another phone it builds there too: what that phone does not have (an app given
 # settings here, a LineageOS setting, a sensor) is told while building and left out. Put in your

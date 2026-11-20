@@ -1,9 +1,9 @@
 # nixup-rebuild as a package, built with the nixpkgs it is added to (Nixup's flake has no nixpkgs of
 # its own): with its overlay, environment.systemPackages = [ pkgs.nixup-rebuild ];
 # The scripts find Nixup's nix/ next to their own folder, so both go in share/nixup. nixup-config (a phone's
-# config, made from what the phone has) and nixup-play-login (a Google Play account's token, for the config)
-# come with it.
-{ lib, stdenvNoCC, makeWrapper, android-tools, openssh, gnutar, gzip, curl }:
+# config, made from what the phone has), nixup-play-login (a Google Play account's token, for the config) and
+# nixup (all of them step by step, in a menu) come with it.
+{ lib, stdenvNoCC, makeWrapper, android-tools, openssh, gnutar, gzip, curl, diffutils }:
 stdenvNoCC.mkDerivation {
   pname = "nixup-rebuild";
   version = "0.1.0";
@@ -11,7 +11,8 @@ stdenvNoCC.mkDerivation {
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
-      ./nixup-rebuild ./nixup-config ./nixup-config.nix ./lib-phone.sh ./nixup-play-login ./play-login-window.py ../nix
+      ./nixup-rebuild ./nixup-config ./nixup-config.nix ./lib-phone.sh ./nixup-play-login ./play-login-window.py
+      ./nixup ./nixup.nix ../nix
     ];
   };
 
@@ -30,6 +31,10 @@ stdenvNoCC.mkDerivation {
     # The browser it opens is the system's own (xdg-open, open).
     makeWrapper $out/share/nixup/scripts/nixup-play-login $out/bin/nixup-play-login \
       --prefix PATH : ${lib.makeBinPath [ curl ]}
+    # The menu runs the three above from share/nixup (theirs, not their wrappers), so it has what they need, and
+    # diff, which shows a change to the config before it is written.
+    makeWrapper $out/share/nixup/scripts/nixup $out/bin/nixup \
+      --prefix PATH : ${lib.makeBinPath [ android-tools openssh gnutar gzip curl diffutils ]}
     runHook postInstall
   '';
 

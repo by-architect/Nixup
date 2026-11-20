@@ -25,7 +25,8 @@
     # nixup-rebuild, which builds a phone's config on a PC and applies it on the phone, as
     # nixos-rebuild --target-host does: nix run github:by-architect/Nixup -- switch --flake .#phone
     # (it lists the phones adb sees and asks which); and nixup-config, which makes a phone's config from
-    # what the phone has: nix run github:by-architect/Nixup#nixup-config -- create
+    # what the phone has: nix run github:by-architect/Nixup#nixup-config -- create. nixup asks its way
+    # through all of it: nix run github:by-architect/Nixup#nixup
     # They run from the flake's own files, with the adb (or ssh) and nix of the machine.
     apps = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ] (system: rec {
       nixup-rebuild = {
@@ -44,6 +45,14 @@
         type = "app";
         program = "${self}/scripts/nixup-play-login";
         meta.description = "Sign in to Google Play here and get the account's token for a phone's Nixup config";
+      };
+      # nixup, all of them step by step in a menu: a config made from the phone and then asked about (updates,
+      # access, services, backups), a config changed by answering again, a build on the phone (made here or there),
+      # the phone's generations: nix run github:by-architect/Nixup#nixup
+      nixup = {
+        type = "app";
+        program = "${self}/scripts/nixup";
+        meta.description = "Make, change and build a phone's Nixup config, step by step";
       };
       default = nixup-rebuild;
     });

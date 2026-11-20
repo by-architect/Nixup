@@ -6,6 +6,21 @@ section after the version, and its text is what the Magisk app shows as the upda
 
 ## Unreleased
 
+- `nixup`, Nixup from a computer step by step: `nix run github:by-architect/Nixup#nixup` opens a menu (arrow keys
+  and Enter) that makes a phone's config from the phone (its apps and settings, read as `nixup-config create` reads
+  them) and then asks about what a phone cannot tell, each question saying what its option does and what the config
+  has now, and Enter skipping it: app updates (enable, disable or skip, for each source too), updates on mobile data,
+  a daily rebuild, strict mode, adb over the network, this computer's adb and SSH keys, SSH, Tailscale with its auth
+  key, ntfy topics, a CalDAV account, Syncthing, backups, Nix packages and a flake.nix. The apps nixup-config found
+  from Google Play can be listed in `android.packages.playstore` there and then. Change a config asks the same about
+  a config you have: an answer changes that option where the file writes it (inside its set, its comment kept in its
+  column), or adds it next to the options it goes with, and nothing else in the file changes; the change is shown,
+  and checked against Nixup's options, before it is written, and secrets go into files of their own next to it,
+  readable by you alone. Build a config on a phone looks the folder over first (configuration.nix, flake.nix and its
+  configurations, flake.lock, the files it names and whether git tracks them), then builds it on the computer
+  (nixup-rebuild) or copies it to the phone and builds it there, or builds the config the phone has; a dry run shows
+  what would change, from a copy the phone keeps for that run only. The phone's generations can be gone back to, and
+  a Google Play sign-in puts its token in the config.
 - The terminal is an app of its own: it has its own icon on the home screen and its own place in the recent apps,
   apart from Nixup's. The terminal button in Nixup's menu opens it, with the sessions it keeps running.
 - The phone's own update check (every 6 hours) can run on mobile data too: `android.updates.onlyOnUnmetered = false`.

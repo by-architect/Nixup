@@ -197,6 +197,31 @@ More, with every option: [the documentation](https://by-architect.github.io/Nixu
 
 Then follow [Your first build](https://by-architect.github.io/Nixup/docs.html#first-build).
 
+## From A Computer: nixup
+
+`nixup` takes you through it all from a computer, step by step, in a menu (arrow keys and Enter; each question says
+what its option does, and Enter skips it):
+
+```sh
+nix run github:by-architect/Nixup#nixup
+```
+
+- **Make a config from a phone**: pick a phone adb sees (over USB, or the network); nixup reads its apps and
+  settings, then asks about what a phone cannot tell: app updates (enable, disable or skip, for each source too),
+  updates on mobile data, a daily rebuild, adb over the network, this computer's adb and SSH keys, SSH, Tailscale,
+  ntfy, CalDAV, Syncthing, backups, Nix packages, and a flake.nix too.
+- **Change a config**: the same questions about a config you have, each showing what it has now. An answer changes
+  that option where the file writes it, and nothing else; you see the change, checked against Nixup's options,
+  before it is written.
+- **Build a config on a phone**: the folder is looked over first (configuration.nix, flake.nix and its
+  configurations, flake.lock, the files it names, git), then built on the computer and applied on the phone, or
+  copied to the phone and built there; or the phone builds the config it has. A dry run shows what would change.
+- **Generations**: the phone's builds so far, and going back to one.
+- **Google Play sign-in**: a token for the config, so the phone needs no sign-in.
+
+The same steps without questions, for scripts: `nixup-config create`, `nixup-rebuild switch` and `nixup-play-login`
+(`nix run github:by-architect/Nixup#<name> -- --help`).
+
 ## Roadmap
 
 What is done and what comes next is on the [Nixup Roadmap](https://github.com/users/by-architect/projects/2)
