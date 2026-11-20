@@ -4,7 +4,7 @@ What changed in each release of Nixup. The newest comes first. While a release i
 changes are under "Unreleased": the release build (scripts/build-magisk-release.sh) names that
 section after the version, and its text is what the Magisk app shows as the update's changelog.
 
-## Unreleased
+## 0.1.14 (2026-11-20)
 
 - Apps whose APK is a Nix package: `android.packages.nix = [ { id = "com.example.app"; apk = pkgs.fetchurl { … }; } ]`.
   The APK can be a fetchurl of a release's APK, a build of the app, a folder with one APK, or a file of the config's
