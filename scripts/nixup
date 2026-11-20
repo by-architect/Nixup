@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # nixup: Nixup on a PC, step by step: a menu that makes a phone's config from the phone (its apps and settings, then
-# questions about what a phone cannot tell: updates, access, services, backups), changes a config by asking again,
-# builds a config on a phone (on this computer, or on the phone itself) and takes the phone back to an earlier
-# generation. Each step says what it does, and what it would change is shown before anything changes.
+# questions about what a phone cannot tell: updates, access, services, backups, Nix packages, each looked up first as
+# the phone gets it, and a Google Play sign-in for the account's token), changes a config by asking again, builds a
+# config on a phone (on this computer, or on the phone itself) and takes the phone back to an earlier generation. Each
+# step says what it does, and what it would change is shown before anything changes.
 #
 #   nixup                the menu
 #   nixup create         make a config from a phone
@@ -640,6 +641,8 @@ plan_file() {
   printf '%s\n' "$2" > "$from"
   PLAN_FILES+=("$1") PLAN_FILE_FROM+=("$from")
 }
+# plan_file_copy <name> <file>: a file made already (the Google Play token of a sign-in), written next to the config.
+plan_file_copy() { PLAN_FILES+=("$1") PLAN_FILE_FROM+=("$2"); }
 plan_reset
 
 declare -A PLACE=() SRC_COUNT=() SRC_IDS=() QIDX=() SIBLING=()
@@ -691,8 +694,11 @@ check_config() {
     [[ $p != "environment systemPackages" ]] || pkgs=true
   done
   printf '%s' "${json%,}]" > "$WORK/check.json"
+  # (nixpkgs as a folder, read without the store's daemon or writing to it, where it can be found so)
   find_nixpkgs
-  NIXUP_HELPER="$here/nixup.nix" NIXUP_FILE="$file" NIXUP_PATHS="$WORK/check.json" NIXUP_DIR="$nixup_dir" nixx eval "${NIXPKGS[@]}" \
+  local -a look=(nixx eval "${NIXPKGS[@]}")
+  if nixpkgs_path; then look=(nix_lookup -I nixpkgs="$NIXPKGS_PATH"); fi
+  NIXUP_HELPER="$here/nixup.nix" NIXUP_FILE="$file" NIXUP_PATHS="$WORK/check.json" NIXUP_DIR="$nixup_dir" "${look[@]}" \
     --raw --impure --expr "import (builtins.getEnv \"NIXUP_HELPER\") { file = builtins.getEnv \"NIXUP_FILE\"; pathsFile = builtins.getEnv \"NIXUP_PATHS\"; check = true; nixupDir = builtins.getEnv \"NIXUP_DIR\"; withPkgs = $pkgs; missingOk = $missing; }" \
     > /dev/null 2> "$WORK/check.err"
 }
@@ -1072,6 +1078,7 @@ QPATHS=(
   "users users root openssh authorizedKeys keys" "services tailscale enable" "services tailscale authKeyFile"
   "services ntfy enable" "services ntfy topics" "services caldav enable" "services syncthing enable"
   "android backup repository" "environment systemPackages" "nix gc automatic" "android playstore account"
+  "android playstore tokenFile" "nix distributedBuilds" "nix settings substituters" "nixpkgs config allowUnfree"
 )
 # look_options <file>: places for the questions (the paths above, and each source's updates).
 look_options() {
@@ -1102,6 +1109,7 @@ now_value() {
     null) printf 'none%s' "$(at_line "$1")" ;;
     bool | int | string | path) printf '%s%s' "${VTEXT[i]}" "$(at_line "$1")" ;;
     list) printf '%s item(s)%s' "$(list_count "${VTEXT[i]}")" "$(at_line "$1")" ;;
+    items) printf '%s item(s)%s' "${VTEXT[i]}" "$(at_line "$1")" ;;
     *) printf 'written as an expression%s' "$(at_line "$1")" ;;
   esac
 }
@@ -1138,6 +1146,243 @@ source_name() {
   esac
 }
 
+# --- Nix packages, looked up as the phone gets them: nixpkgs' build for 64-bit ARM (aarch64-linux), from cache.nixos.org
+# (or the config's other caches, nix.settings.substituters), since it builds no package itself; only build machines do
+# (nix.buildMachines, with nix.distributedBuilds).
+
+# This computer's nixpkgs as a folder (fetched first, when NIX_PATH names a flake), in NIXPKGS_PATH.
+NIXPKGS_PATH=""
+nixpkgs_path() {
+  [[ -z $NIXPKGS_PATH ]] || return 0
+  find_nixpkgs
+  NIXPKGS_PATH="$(nix-instantiate "${NIXPKGS[@]}" --find-file nixpkgs 2> /dev/null || true)"
+  [[ -n $NIXPKGS_PATH ]]
+}
+# nix eval, which reads nixpkgs but writes nothing to the store and needs no daemon (a store of its own, dummy://),
+# where this nix can.
+nix_lookup() {
+  if nix --extra-experimental-features nix-command eval --help 2> /dev/null | grep -q -- '--read-only'; then
+    nixx --store dummy:// eval --read-only "$@"
+  else
+    nixx eval "$@"
+  fi
+}
+
+# Each package looked up once (PKG_SAID: "ok", "warn:<why it goes all the same>", or why it cannot go on the phone).
+declare -A PKG_SAID=()
+# check_packages <name>...: each one in nixpkgs for 64-bit ARM, and in the caches, with a line for each: ✔, or ✘ and
+# why. PKGS_OK: those that can go on the phone. Status 1: one cannot; 2: they could not be looked up (Nix says why).
+check_packages() {
+  local name what kind rest out version="" builders=0 unfree_ok=0 failed=0 offline=0 i
+  local -a todo=() caches=(https://cache.nixos.org)
+  local -A seen=()
+  PKGS_OK=()
+  for name; do
+    [[ -z ${seen[$name]:-} ]] || continue
+    seen[$name]=1
+    [[ -z ${PKG_SAID[$name]:-} ]] || continue
+    if [[ $name =~ ^[A-Za-z0-9_][A-Za-z0-9_\'+-]*(\.[A-Za-z0-9_][A-Za-z0-9_\'+-]*)*$ ]]; then todo+=("$name")
+    else PKG_SAID[$name]="that is not a package's name: letters, digits, - and _ (and a dot between a set and a package in it)"; fi
+  done
+  # The config's own ways: other caches, build machines, unfree packages allowed.
+  i=${QIDX["nix settings substituters"]:-}
+  if [[ -n $i && ${VKIND[i]} == list && -n ${VTEXT[i]} ]]; then
+    mapfile -t -O 1 caches < <(printf '%s\n' "${VTEXT[i]}" | tr '\037' '\n' | sed 's|/*$||')
+  fi
+  i=${QIDX["nix distributedBuilds"]:-}
+  [[ -z $i || ${VTEXT[i]} != true ]] || builders=1
+  i=${QIDX["nixpkgs config allowUnfree"]:-}
+  [[ -z $i || ${VTEXT[i]} != true ]] || unfree_ok=1
+  if ((${#todo[@]})); then
+    say "    ${c_d}Looking them up in nixpkgs, built for 64-bit ARM (the phone's), and in cache.nixos.org…${c_r}"
+    nixpkgs_path || { bad "There is no nixpkgs here to look them up in (NIX_PATH, or the flake registry's nixpkgs)."; return 2; }
+    out="["
+    for name in "${todo[@]}"; do out+="$(nix_str "$name"),"; done
+    printf '%s' "${out%,}]" > "$WORK/packages.json"
+    out="$(NIXUP_HELPER="$here/nixup.nix" NIXUP_PACKAGES="$WORK/packages.json" NIXUP_NIXPKGS="$NIXPKGS_PATH" \
+      nix_lookup --raw --impure -I nixpkgs="$NIXPKGS_PATH" --expr \
+      'import (builtins.getEnv "NIXUP_HELPER") { packagesFile = builtins.getEnv "NIXUP_PACKAGES"; nixpkgsPath = builtins.getEnv "NIXUP_NIXPKGS"; }' \
+      2> "$WORK/packages.err")" || {
+      bad "Nix could not look them up:"
+      sed -n '/error:/,$p' "$WORK/packages.err" | grep -v '^ *… while' | head -n 8 | indent
+      return 2
+    }
+    while IFS=$'\t' read -r what name kind rest; do
+      case $what in
+        nixpkgs) version=$name ;;
+        package) package_said "$name" "$kind" "${rest:-}"; PKG_SAID[$name]=$SAID ;;
+      esac
+    done <<< "$out"
+  fi
+  for name; do
+    [[ -n ${seen[$name]:-} ]] || continue
+    unset 'seen[$name]'
+    case ${PKG_SAID[$name]} in
+      ok)
+        say "    ${c_ok}${s_ok}${c_r} ${c_b}${name}${c_r}  ${c_d}built for 64-bit ARM, in cache.nixos.org${c_r}"
+        PKGS_OK+=("$name") ;;
+      warn:*)
+        say "    ${c_warn}${s_warn}${c_r} ${c_b}${name}${c_r}"
+        note "${PKG_SAID[$name]#warn:}" 6
+        PKGS_OK+=("$name") ;;
+      *)
+        say "    ${c_err}${s_no} ${c_b}${name}${c_r}"
+        note "${PKG_SAID[$name]}" 6
+        failed=1 ;;
+    esac
+  done
+  return "$failed"
+}
+# package_said <name> <kind> <rest>: what nixup.nix found of a package, said in SAID: "ok", "warn:<why>" (it goes all
+# the same), or why it cannot go on the phone. (check_packages' version, caches, builders, unfree_ok and offline: run in
+# check_packages' shell, not a subshell, so that a cache that did not answer is not asked again.)
+package_said() {
+  local name=$1 rest=$3 hash url code found="" at
+  at="this computer's nixpkgs${version:+, $version}"
+  case $2 in
+    ok)
+      hash=${rest#/nix/store/}
+      hash=${hash%%-*}
+      # (One cache that did not answer, and the others are not asked again: each would wait as long.)
+      ((offline == 0)) || found=unknown
+      for url in "${caches[@]}"; do
+        [[ -z $found ]] || break
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$url/$hash.narinfo" 2> /dev/null || true)"
+        case $code in
+          200) found=yes ;;
+          404 | 403 | 410) ;;
+          *) found=unknown offline=1 ;;
+        esac
+      done
+      if [[ $found == yes ]]; then SAID=ok
+      elif [[ $found == unknown ]]; then SAID="warn:built for 64-bit ARM; whether cache.nixos.org has it was not found out (it did not answer): a dry run tells"
+      elif ((builders)); then SAID="warn:no cache has it for 64-bit ARM (at $at): your build machines build it (nix.buildMachines)"
+      else SAID="no cache has it built for 64-bit ARM (at $at), and the phone builds no package itself: nix.buildMachines can (with nix.distributedBuilds)"
+      fi ;;
+    missing)
+      if [[ -n $rest ]]; then
+        rest=${rest// /, }
+        [[ $rest != *,* ]] || rest="${rest%, *} or ${rest##*, }"
+        SAID="nixpkgs has no package called $name: did you mean $rest?"
+      else
+        SAID="nixpkgs has no package called $name (search.nixos.org finds them by name and description)"
+      fi ;;
+    notPackage)
+      case $rest in
+        set) SAID="$name is a set of packages in nixpkgs, not one: name one in it, like $name.<package> (search.nixos.org lists them)" ;;
+        lambda) SAID="$name is a function in nixpkgs, not a package" ;;
+        *) SAID="$name is not a package in nixpkgs (it is a ${rest:-value})" ;;
+      esac ;;
+    platform)
+      rest=${rest// /, }
+      [[ $rest != *,* ]] || rest="${rest%, *} and ${rest##*, }"
+      SAID="not for 64-bit ARM phones: nixpkgs has it for ${rest:-other systems} only" ;;
+    broken) SAID="marked broken in nixpkgs for 64-bit ARM: it does not build there" ;;
+    unfree)
+      if ((builders && unfree_ok)); then SAID="warn:unfree, so no cache has it: your build machines build it (nix.buildMachines)"
+      elif ((builders)); then SAID="unfree: cache.nixos.org has no unfree package, and building it on your build machines needs nixpkgs.config.allowUnfree = true"
+      else SAID="unfree: cache.nixos.org has no unfree package, and the phone builds no package itself (build machines can: nix.buildMachines, with nix.distributedBuilds and nixpkgs.config.allowUnfree)"
+      fi ;;
+    insecure) SAID="nixpkgs marks it insecure: $rest" ;;
+    hydra)
+      if ((builders)); then SAID="warn:nixpkgs' cache does not build it for 64-bit ARM: your build machines build it (nix.buildMachines)"
+      else SAID="nixpkgs' cache does not build it for 64-bit ARM (meta.hydraPlatforms), and the phone builds no package itself"
+      fi ;;
+    *)
+      rest="$(package_error "$name")"
+      SAID="nixpkgs stops on it for 64-bit ARM${rest:+: $rest}" ;;
+  esac
+}
+# What Nix says when it evaluates package $1 for aarch64-linux (removed, renamed, only for x86, ...): its last error line.
+package_error() {
+  local -a parts
+  IFS=. read -ra parts <<< "$1"
+  NIXUP_NIXPKGS="$NIXPKGS_PATH" nix_lookup --raw --impure --expr \
+    "(import (builtins.getEnv \"NIXUP_NIXPKGS\") { system = \"aarch64-linux\"; config = { }; overlays = [ ]; }).$(nix_attrpath "${parts[@]}").outPath" \
+    2>&1 > /dev/null | sed -n 's/^ *error: //p' | tail -n 1 || true
+}
+# A package's name as an item of `with pkgs; [ … ]`: as it is, or pkgs."<name>" when it is no plain name (7zz).
+pkg_item() {
+  local text
+  local -a parts
+  IFS=. read -ra parts <<< "$1"
+  text="$(nix_attrpath "${parts[@]}")"
+  if [[ $text == "$1" ]]; then printf '%s' "$1"; else printf 'pkgs.%s' "$text"; fi
+}
+
+# --- Google Play's token, signed in for here (nixup-play-login).
+# play_sign_in <file>: signs in (a window with Google's page, or the browser), the token into <file> and the account's
+# address in PLAY_ACCOUNT. What it says is shown up to the token itself, which stays off the screen (it is in the file).
+play_sign_in() {
+  local line out=$WORK/play-$BASHPID.out status=0
+  PLAY_ACCOUNT=""
+  rm -f "$1" "$out"
+  say ""
+  "$here/nixup-play-login" --out "$1" | {
+    while IFS= read -r line; do
+      if [[ $line == "Signed in to Google Play as "* ]]; then printf '%s\n' "$line" > "$out"; break; fi
+      printf '    %s\n' "$line" >&2
+    done
+    cat > /dev/null
+  } || status=$?
+  ((status == 0)) && [[ -s $1 ]] || return 1
+  PLAY_ACCOUNT="$(sed -n 's/^Signed in to Google Play as \(.*\)\. Its token.*/\1/p' "$out" 2> /dev/null | head -n 1)"
+}
+# What the config has for Google Play's account, in words (never the token itself).
+now_token() {
+  local i=${QIDX["android playstore tokenFile"]} a=${QIDX["android playstore account"]} words
+  case ${VKIND[i]} in
+    path) words="a token from $(pretty "${VTEXT[i]}")$(at_line "android playstore tokenFile")" ;;
+    string)
+      if [[ ${VTEXT[i]} == aas_et/* ]]; then words="a token, given as text$(at_line "android playstore tokenFile")"
+      else words="a token from ${VTEXT[i]} on the phone$(at_line "android playstore tokenFile")"; fi ;;
+    unset | null) words="no token: the phone signs in itself (Nixup app: ⋮ → Google Play account)" ;;
+    *) words="written as an expression$(at_line "android playstore tokenFile")" ;;
+  esac
+  [[ ${VKIND[a]} != string ]] || words+="; account ${VTEXT[a]}"
+  printf '%s' "$words"
+}
+
+# The answer to "Sign in to Google Play here?": a sign-in now (its token kept for the config), a token of this run's
+# kept (after Answer again), or none; and with none, the account's address for the apps from Google Play (optional).
+play_question() {
+  local token=$WORK/google-play-$BASHPID.token
+  if ! command -v curl > /dev/null; then
+    note "(The sign-in needs curl, which is not here.)"
+    KEY=s
+  elif [[ -s $token ]]; then
+    key yks k "${c_acc}k${c_r} keep the token you signed in for ${c_d}(Enter)${c_r}  ${c_acc}y${c_r} sign in again  ${c_acc}s${c_r} skip"
+  else
+    key ys s "${c_acc}y${c_r} sign in now  ${c_acc}s${c_r} skip ${c_d}(Enter)${c_r}"
+  fi
+  case $KEY in
+    y)
+      answered "sign in"
+      if play_sign_in "$token"; then
+        printf '%s\n' "$PLAY_ACCOUNT" > "$token.account"
+        ok "Signed in to Google Play${PLAY_ACCOUNT:+ as $PLAY_ACCOUNT}: its token goes next to the config when the config is written."
+      else
+        rm -f "$token"
+        warn "The sign-in did not finish (why is above): skipped. The menu's Google Play sign-in can do it later."
+      fi ;;
+    k) answered "keep it" ;;
+    *) answered "${c_d}skip" ;;
+  esac
+  if [[ $KEY != s && -s $token ]]; then
+    PLAY_ACCOUNT="$(cat "$token.account" 2> /dev/null || true)"
+    plan_file_copy google-play.token "$token"
+    plan_set "android playstore tokenFile" ./google-play.token "secret: the phone needs no sign-in" "Google Play's token: ./google-play.token, from your sign-in"
+    if [[ -n $PLAY_ACCOUNT ]]; then
+      plan_set "android playstore account" "$(nix_str "$PLAY_ACCOUNT")" "builds stop if another account is signed in" "Google Play's account: $PLAY_ACCOUNT"
+    fi
+  elif ((PLAY_LIST)) && [[ ${VKIND[${QIDX["android playstore account"]}]} == unset ]]; then
+    ask "The account's email address (optional: a build stops when another one is signed in)" "" ""
+    if [[ $ANSWER == *@*.* ]]; then
+      plan_set "android playstore account" "$(nix_str "$ANSWER")" "builds stop if another account is signed in" "Google Play's account: $ANSWER"
+    fi
+  fi
+}
+
 # The apps nixup-config found installed from Google Play, which it writes as comments under "From Google Play".
 play_ids() {
   awk '/^  # From Google Play:/ { on = 1; next } on && /^  #   "/ { match($0, /"[^"]+"/); print substr($0, RSTART + 1, RLENGTH - 2); next } on && !/^  # / { on = 0 }' "$1"
@@ -1164,27 +1409,25 @@ play_list() {
 # leaves its option as the file has it. MAKE_FLAKE and PLAY_LIST (create): a flake.nix too, and the apps from Google
 # Play listed.
 questions() {
-  local mode=$1 file=$2 s n all key_file key t ids=() srcs=() play=() words
+  local mode=$1 file=$2 s n all key_file key t ids=() srcs=() play=() words passed status names=()
   plan_reset
   MAKE_FLAKE=0 PLAY_LIST=0
   look_options "$file" || return 1
 
-  # Apps from Google Play, which nixup-config leaves as comments.
-  if [[ $mode == create ]]; then
-    mapfile -t play < <(play_ids "$file")
-    if ((${#play[@]})); then
-      page "Apps from Google Play" "${#play[@]} of the phone's apps came from Google Play: ${play[*]:0:4}$( ((${#play[@]} <= 4)) || printf ', …')."
-      question "Have Nixup install them, and keep them up to date, from Google Play?" \
-        "Nixup downloads them itself, as Aurora Store does, with a Google account signed in on the phone (Nixup app: ⋮ → Google Play account) or a token made on this computer (the menu's Google Play sign-in); no Play Store needed. Disable: they stay in the config as comments, and on the phone as they are."
-      eds
-      if [[ $KEY == e ]]; then
-        PLAY_LIST=1
-        ask "The account's email address (optional: a build stops when another one is signed in)" "" ""
-        if [[ $ANSWER == *@*.* ]]; then
-          plan_set "android playstore account" "$(nix_str "$ANSWER")" "builds stop if another account is signed in" "Google Play's account: $ANSWER"
-        fi
-      fi
-    fi
+  # Google Play: the apps nixup-config found from it (it leaves them as comments), and the account's token.
+  [[ $mode != create ]] || mapfile -t play < <(play_ids "$file")
+  page "Google Play" "Apps from Google Play are downloaded by the phone itself, as Aurora Store does (no Play Store needed), with a Google account: signed in on the phone (Nixup app: ⋮ → Google Play account), or its token, from a sign-in on this computer."
+  if ((${#play[@]})); then
+    question "Have Nixup install the phone's apps from Google Play, and keep them up to date?" \
+      "${#play[@]} of its apps came from Google Play: ${play[*]:0:4}$( ((${#play[@]} <= 4)) || printf ', …'). Disable: they stay in the config as comments, and on the phone as they are."
+    eds
+    [[ $KEY != e ]] || PLAY_LIST=1
+  fi
+  if writable "android playstore tokenFile"; then
+    question "Sign in to Google Play here, for the account's token?" \
+      "Then the phone needs no sign-in: the token is kept next to the config (./google-play.token, readable by you alone) and each build puts it on the phone. A window with Google's own sign-in page opens (or your browser, with the steps to follow). Better an account of its own: Google may block one that downloads with an unofficial client." \
+      "$(now_token)"
+    play_question
   fi
 
   page "App updates" "How the phone keeps the config's apps up to date: every 6 hours it looks for new versions."
@@ -1465,13 +1708,30 @@ questions() {
 
   page "Terminal and Nix" "The Linux programs of the app's terminal (and ssh, and su -c nixup-shell), from nixpkgs."
   question "Nix packages for the terminal?" \
-    "Programs from nixpkgs for root's shell, by their names in nixpkgs (search.nixos.org): htop git vim rsync python3 ffmpeg …" \
+    "Programs from nixpkgs for root's shell, by their names in nixpkgs (search.nixos.org): htop git vim rsync python3 ffmpeg … Each is looked up before it goes in, as the phone gets it: built for 64-bit ARM, and in cache.nixos.org, since the phone builds no package itself." \
     "$(now_value "environment systemPackages" "none")"
   if writable "environment systemPackages"; then
-    ask "Packages to add, split by spaces (Enter: none)" "" ""
-    for s in $ANSWER; do
-      [[ $s =~ ^[A-Za-z_][A-Za-z0-9_\'-]*(\.[A-Za-z_][A-Za-z0-9_\'-]*)*$ ]] || { warn "$s is not a package's name: left out"; continue; }
-      plan_add "environment systemPackages" "$s" "with pkgs; " "Nix packages of root's shell" "Nix package: $s"
+    passed=""
+    while :; do
+      if [[ -n $passed ]]; then ask "Packages to add, split by spaces (Enter: the ones that passed)" "$passed"
+      else ask "Packages to add, split by spaces (Enter: none)" "" ""; fi
+      read -ra names <<< "${ANSWER//,/ }"
+      ((${#names[@]})) || break
+      status=0
+      check_packages "${names[@]}" || status=$?
+      if ((status == 2)); then
+        confirm "Add them without looking them up? (a dry run on the phone looks them up)" n || break
+        PKGS_OK=("${names[@]}") status=0
+      fi
+      if ((status == 0)); then
+        for s in "${PKGS_OK[@]}"; do
+          plan_add "environment systemPackages" "$(pkg_item "$s")" "with pkgs; " "Nix packages of root's shell" "Nix package: $s"
+        done
+        break
+      fi
+      # One cannot go on the phone (why is under it): the names again, or Enter for the ones that passed.
+      passed="${PKGS_OK[*]}"
+      note "Type them again, with the ones above changed or left out (search.nixos.org has nixpkgs' packages, and the systems each one is for). Enter: ${passed:-none of them}." 4
     done
   fi
   question "Free up space by itself?" \
@@ -2051,7 +2311,7 @@ done' | tr -d '\r' || true)"
 }
 
 flow_play() {
-  local dir token out account=""
+  local dir token account=""
   FLOW="Google Play sign-in"
   need curl "curl, which asks Google for the account's token"
   step 1 3 "Where the token goes"
@@ -2063,10 +2323,9 @@ flow_play() {
   step 2 3 "Sign in"
   note "A window with Google's own sign-in page opens (or your browser, with steps to follow). Better an account of its own: Google may block one that downloads with an unofficial client." 4
   say ""
-  out=$WORK/play.out
-  in_step=1
-  "$here/nixup-play-login" --out "$token" | tee "$out" || die "the sign-in did not finish (why is above)"
-  account="$(sed -n 's/^Signed in to Google Play as \(.*\)\. Its token.*/\1/p' "$out" | head -n 1)"
+  play_sign_in "$token" || die "the sign-in did not finish (why is above)"
+  account=$PLAY_ACCOUNT
+  ok "Signed in to Google Play${account:+ as $account}: the token is in $(pretty "$token"), readable by you alone."
   if git -C "$dir" rev-parse --show-toplevel > /dev/null 2>&1; then
     warn "The folder is in git: keep google-play.token out of a repository others can read."
   fi

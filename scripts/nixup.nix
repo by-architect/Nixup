@@ -11,7 +11,8 @@
 #   at <i> <depth> <line> <column> where the binding that defines the first <depth> names of path i starts (all of
 #                                  them: the option itself; fewer: the set it is in, when that is written)
 #   value <i> <kind> <text>        path i's value as written: bool, int, string, null, path, list (of strings, joined by
-#                                  the unit separator), unset, or other (an expression: lib.mkForce …, a variable, …)
+#                                  the unit separator), items (a list of other things, like pkgs' packages: how many),
+#                                  unset, or other (an expression: lib.mkForce …, a variable, …)
 #   sibling <i> <line> <column>    path i is not written, but its set has other names: where the last of them (in the
 #                                  file) starts, which a new line for it can follow
 #   source <name> <count> <ids>    a list of android.packages: how many apps, and their package names (none when they
@@ -20,7 +21,24 @@
 # of it included, so a second one shows); Nix's error otherwise. withPkgs: with nixpkgs' packages (the PC's), for an
 # option that names them (environment.systemPackages). missingOk: a path the config has no value at is no error (a
 # user or an account it does not have yet), as for the file before nixup changed it.
-{ file, pathsFile, check ? false, nixupDir ? "", withPkgs ? false, missingOk ? false, lib ? import <nixpkgs/lib> }:
+#
+# With packagesFile (a JSON list of package names, like "htop" or "python3Packages.requests"), each package as the
+# phone would get it: from nixpkgsPath for aarch64-linux, with no nixpkgs config of this computer's. A line each:
+#   nixpkgs <version>              which nixpkgs this was
+#   package <name> ok <path>       there, for aarch64-linux: its store path (its first output), for nixup to look up
+#                                  in cache.nixos.org, since the phone builds no package itself
+#   package <name> missing <names> nixpkgs has none by that name; up to three names like it
+#   package <name> notPackage <type>
+#                                  it is something else: a set of packages (python3Packages), a function, ...
+#   package <name> platform <systems>
+#                                  not for aarch64-linux: the systems it is for (Linux ones first, four at most)
+#   package <name> broken          marked broken, for aarch64-linux
+#   package <name> unfree          an unfree licence: cache.nixos.org never has those
+#   package <name> insecure <why>  known to be insecure: its first known vulnerability
+#   package <name> hydra           nixpkgs' cache does not build it for aarch64-linux (meta.hydraPlatforms)
+#   package <name> error           nixpkgs stops on it (removed, renamed, only for x86, ...): Nix's error says why
+{ file ? "", pathsFile ? "", check ? false, nixupDir ? "", withPkgs ? false, missingOk ? false
+, packagesFile ? "", nixpkgsPath ? "", lib ? import <nixpkgs/lib> }:
 let
   inherit (lib) concatMapStringsSep concatStringsSep imap0 length take last range;
   wanted = lib.importJSON pathsFile;
@@ -58,7 +76,7 @@ let
       type = try (builtins.typeOf v);
       kind =
         if !(plain parent && parent ? ${name}) then "unset"
-        else if type == "list" then (if lib.all (x: try (builtins.isString x) == true) v then "list" else "other")
+        else if type == "list" then (if lib.all (x: try (builtins.isString x) == true) v then "list" else "items")
         else if lib.elem type [ "bool" "int" "string" "null" "path" ] then type
         else "other";
     in
@@ -70,6 +88,7 @@ let
         string = oneLine v;
         path = toString v;
         list = concatMapStringsSep unitSeparator oneLine v;
+        items = toString (length v);
       }.${kind} or "";
     };
 
@@ -127,5 +146,49 @@ let
       ) wanted;
     in
     builtins.deepSeq values "ok\n";
+  # Each package as the phone gets it: built for aarch64-linux, and by nixpkgs' cache (it builds none itself). Every
+  # look at a package is tried, since nixpkgs throws on some for this system (an x86 one's dependencies).
+  packageChecks =
+    let
+      pkgs = import nixpkgsPath { system = "aarch64-linux"; config = { }; overlays = [ ]; };
+      platform = pkgs.stdenv.hostPlatform;
+      yes = x: try x == true;
+      # Names like a missing one: its first letter, one letter apart first, then two.
+      like = parent: name:
+        let
+          names = lib.filter (n: n != name && builtins.substring 0 1 n == builtins.substring 0 1 name) (try (builtins.attrNames parent));
+          near = lib.filter (lib.strings.levenshteinAtMost 1 name) names;
+          nearish = lib.filter (n: !(lib.elem n near) && lib.strings.levenshteinAtMost 2 name n) names;
+        in
+        if builtins.isAttrs parent then lib.take 3 (near ++ nearish) else [ ];
+      systems = ps:
+        let strings = lib.filter builtins.isString ps; in
+        concatStringsSep " " (lib.take 4 (lib.filter (lib.hasSuffix "-linux") strings ++ lib.filter (s: !(lib.hasSuffix "-linux" s)) strings));
+      line = name:
+        let
+          path = lib.splitString "." name;
+          parent = if length path == 1 then pkgs else try (lib.attrByPath (lib.init path) null pkgs);
+          leaf = last path;
+          got = builtins.tryEval parent.${leaf};
+          v = got.value;
+          meta = let m = try (v.meta or { }); in if builtins.isAttrs m then m else { };
+          vulnerabilities = try (meta.knownVulnerabilities or [ ]);
+          hydra = try (meta.hydraPlatforms or null);
+          out = builtins.tryEval v.outPath;
+          says = what: rest: tab ([ "package" name what ] ++ rest);
+        in
+        if !(builtins.isAttrs parent && yes (parent ? ${leaf})) then says "missing" [ (concatStringsSep " " (like parent leaf)) ]
+        else if !got.success then says "error" [ ]
+        else if !(yes (lib.isDerivation v)) then says "notPackage" [ (toString (try (builtins.typeOf v))) ]
+        else if (try (lib.meta.availableOn platform v)) == null then says "error" [ ]
+        else if !(yes (lib.meta.availableOn platform v)) then says "platform" [ (systems (let ps = try (meta.platforms or [ ]); in if builtins.isList ps then ps else [ ])) ]
+        else if yes (meta.broken or false) then says "broken" [ ]
+        else if yes (lib.any (l: !(l.free or true)) (lib.toList (meta.license or [ ]))) then says "unfree" [ ]
+        else if builtins.isList vulnerabilities && vulnerabilities != [ ] then says "insecure" [ (oneLine (toString (builtins.head vulnerabilities))) ]
+        else if builtins.isList hydra && lib.all builtins.isString hydra && !(lib.elem "aarch64-linux" hydra) then says "hydra" [ ]
+        else if out.success then says "ok" [ out.value ]
+        else says "error" [ ];
+    in
+    concatStringsSep "\n" ([ (tab [ "nixpkgs" (try (import (nixpkgsPath + "/lib")).version) ]) ] ++ map line (lib.importJSON packagesFile)) + "\n";
 in
-if check then checked else places
+if packagesFile != "" then packageChecks else if check then checked else places

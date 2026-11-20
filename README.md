@@ -209,7 +209,8 @@ nix run github:by-architect/Nixup#nixup
 - **Make a config from a phone**: pick a phone adb sees (over USB, or the network); nixup reads its apps and
   settings, then asks about what a phone cannot tell: app updates (enable, disable or skip, for each source too),
   updates on mobile data, a daily rebuild, adb over the network, this computer's adb and SSH keys, SSH, Tailscale,
-  ntfy, CalDAV, Syncthing, backups, Nix packages, and a flake.nix too.
+  ntfy, CalDAV, Syncthing, backups, Nix packages (each looked up first: built for 64-bit ARM, and in cache.nixos.org),
+  a Google Play sign-in for the account's token, and a flake.nix too.
 - **Change a config**: the same questions about a config you have, each showing what it has now. An answer changes
   that option where the file writes it, and nothing else; you see the change, checked against Nixup's options,
   before it is written.

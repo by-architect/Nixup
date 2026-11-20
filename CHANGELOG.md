@@ -11,8 +11,13 @@ section after the version, and its text is what the Magisk app shows as the upda
   them) and then asks about what a phone cannot tell, each question saying what its option does and what the config
   has now, and Enter skipping it: app updates (enable, disable or skip, for each source too), updates on mobile data,
   a daily rebuild, strict mode, adb over the network, this computer's adb and SSH keys, SSH, Tailscale with its auth
-  key, ntfy topics, a CalDAV account, Syncthing, backups, Nix packages and a flake.nix. The apps nixup-config found
-  from Google Play can be listed in `android.packages.playstore` there and then. Change a config asks the same about
+  key, ntfy topics, a CalDAV account, Syncthing, backups, Nix packages and a flake.nix. Each Nix package is looked up
+  before the next question, as the phone gets it: nixpkgs' build for 64-bit ARM, in cache.nixos.org (the phone builds
+  no package itself). One that cannot go on the phone is told with why, and the names are asked again: no such package
+  (with names like it), not for 64-bit ARM (the systems it is for), broken, unfree, insecure, or not in the cache for
+  ARM. The apps nixup-config found from Google Play can be listed in `android.packages.playstore` there and then, and a
+  sign-in to Google Play (as nixup-play-login, its token kept off the screen) puts the account's token next to the
+  config, so the phone needs no sign-in. Change a config asks the same about
   a config you have: an answer changes that option where the file writes it (inside its set, its comment kept in its
   column), or adds it next to the options it goes with, and nothing else in the file changes; the change is shown,
   and checked against Nixup's options, before it is written, and secrets go into files of their own next to it,
